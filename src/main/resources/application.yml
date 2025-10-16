@@ -1,0 +1,67 @@
+server:
+  port: 8080
+  # servlet:
+  #   context-path: /api  # ❌ Désactivé - les endpoints sont maintenant à la racine
+
+spring:
+  application:
+    name: training-platform-api
+  
+  data:
+    mongodb:
+      uri: mongodb://harx:gcZ62rl8hoME@38.242.208.242:27018/V25_CompanySearchWizard
+      database: V25_CompanySearchWizard
+  
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+  
+  security:
+    user:
+      name: admin
+      password: admin
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:mySecretKey}
+    expiration: ${JWT_EXPIRATION:86400000}
+  
+  cors:
+    allowed-origins: ${CORS_ORIGIN:http://localhost:3000}
+  
+  upload:
+    directory: ${UPLOAD_DIR:uploads}
+    max-size: ${MAX_FILE_SIZE:52428800}
+  
+  # AI Services Configuration
+  ai:
+    openai:
+      api-key: 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
+      model: gpt-4
+      temperature: 0.7
+      max-tokens: 2000
+    
+    elevenlabs:
+      api-key: sk_ff1e58c1dae1951e36851d8a441ffaf0134a09775183c270
+      voice-id: 21m00Tcm4TlvDq8ikWAM
+      model: eleven_monolingual_v1
+
+logging:
+  level:
+    com.trainingplatform: ${LOG_LEVEL:DEBUG}
+    org.springframework.security: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/training-platform.log
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
