@@ -24,8 +24,16 @@ public class CorsFilter implements Filter {
         HttpServletResponse response = (HttpServletResponse) res;
         HttpServletRequest request = (HttpServletRequest) req;
 
-        // ✅ Headers CORS permissifs pour le développement
-        response.setHeader("Access-Control-Allow-Origin", "http://localhost:3000");
+        // ✅ Headers CORS permissifs pour le développement et production
+        String origin = request.getHeader("Origin");
+        // Accepter localhost:5190 et 38.242.208.242:5190
+        if (origin != null && (origin.equals("http://localhost:5190") || 
+                               origin.equals("http://38.242.208.242:5190") ||
+                               origin.startsWith("http://localhost:"))) {
+            response.setHeader("Access-Control-Allow-Origin", origin);
+        } else {
+            response.setHeader("Access-Control-Allow-Origin", "*");
+        }
         response.setHeader("Access-Control-Allow-Credentials", "true");
         response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
         response.setHeader("Access-Control-Max-Age", "3600");

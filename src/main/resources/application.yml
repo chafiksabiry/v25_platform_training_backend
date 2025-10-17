@@ -28,7 +28,7 @@ app:
     expiration: ${JWT_EXPIRATION:86400000}
   
   cors:
-    allowed-origins: ${CORS_ORIGIN:http://localhost:3000}
+    allowed-origins: ${CORS_ORIGIN:http://localhost:5190}
   
   upload:
     directory: ${UPLOAD_DIR:uploads}

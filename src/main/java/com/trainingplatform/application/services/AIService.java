@@ -134,7 +134,7 @@ public class AIService {
                 "explanation": "Why this is correct"
               }
             ]
-            """, count, content.substring(0, Math.min(content.length(), 3000)));
+            """, count, content.substring(0, Math.min(content.length(), 5190)));
         
         List<ChatMessage> messages = Arrays.asList(
             new ChatMessage(ChatMessageRole.SYSTEM.value(), 
