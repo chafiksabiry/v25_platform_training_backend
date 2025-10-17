@@ -25,7 +25,7 @@ COPY --from=build /app/target/training-platform-api-1.0.0.jar app.jar
 RUN mkdir -p uploads
 
 # Expose port
-EXPOSE 8080
+EXPOSE 5010
 
 # Run application
 CMD ["java", "-jar", "app.jar"]

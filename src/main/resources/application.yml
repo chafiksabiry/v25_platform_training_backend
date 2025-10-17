@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: 5010
   # servlet:
   #   context-path: /api  # ❌ Désactivé - les endpoints sont maintenant à la racine
 

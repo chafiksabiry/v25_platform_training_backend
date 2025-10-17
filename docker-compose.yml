@@ -6,11 +6,11 @@ services:
     container_name: training-platform-api
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "5010:5010"
     environment:
       MONGODB_URI: mongodb://harx:gcZ62rl8hoME@38.242.208.242:27018/V25_CompanySearchWizard
       JWT_SECRET: your_jwt_secret_here_make_it_long_and_secure_change_this_in_production
-      CORS_ORIGIN: http://localhost:3000
+      CORS_ORIGIN: http://38.242.208.242:3000
       LOG_LEVEL: INFO
     networks:
       - training-platform-network
@@ -24,7 +24,8 @@ services:
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8080
+      VITE_API_URL: http://38.242.208.242:5010
+      NEXT_PUBLIC_API_URL: http://38.242.208.242:5010
     depends_on:
       - api
     networks:
