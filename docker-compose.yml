@@ -1,22 +1,6 @@
 version: '3.8'
 
 services:
-  mongodb:
-    image: mongo:7
-    container_name: training-platform-mongodb
-    restart: unless-stopped
-    ports:
-      - "27017:27017"
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: password
-      MONGO_INITDB_DATABASE: training_platform
-    volumes:
-      - mongodb_data:/data/db
-      - ./init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
-    networks:
-      - training-platform-network
-
   api:
     build: .
     container_name: training-platform-api
@@ -24,18 +8,27 @@ services:
     ports:
       - "8080:8080"
     environment:
-      MONGODB_URI: mongodb://admin:password@mongodb:27017/training_platform?authSource=admin
-      JWT_SECRET: your_jwt_secret_here_make_it_long_and_secure
+      MONGODB_URI: mongodb://harx:gcZ62rl8hoME@38.242.208.242:27018/V25_CompanySearchWizard
+      JWT_SECRET: your_jwt_secret_here_make_it_long_and_secure_change_this_in_production
       CORS_ORIGIN: http://localhost:3000
-    depends_on:
-      - mongodb
+      LOG_LEVEL: INFO
     networks:
       - training-platform-network
     volumes:
       - ./uploads:/app/uploads
 
-volumes:
-  mongodb_data:
+  frontend:
+    build: ../platform_training_frontend
+    container_name: training-platform-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8080
+    depends_on:
+      - api
+    networks:
+      - training-platform-network
 
 networks:
   training-platform-network:

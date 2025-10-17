@@ -1,0 +1,29 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+*.md
+
+# Logs
+logs/
+*.log
+
+# Maven
+target/
+
+# IDEs
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+
+# Uploads (will be mounted as volume)
+uploads/
+
