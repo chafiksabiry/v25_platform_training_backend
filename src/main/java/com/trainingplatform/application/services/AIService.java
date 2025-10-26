@@ -85,6 +85,232 @@ public class AIService {
     }
     
     /**
+     * Analyse PLUSIEURS documents consolidés et génère UNE formation cohérente
+     * avec 5-8 modules maximum (au lieu de 4-6 par fichier)
+     */
+    public Map<String, Object> analyzeConsolidatedDocuments(String consolidatedContent, List<String> fileNames, String industry) {
+        String prompt = String.format("""
+            You have received MULTIPLE training documents from these files:
+            %s
+            
+            ⚠️ CRITICAL CONSTRAINT: Generate EXACTLY 6 modules. NO MORE, NO LESS. ⚠️
+            
+            Your task is to analyze ALL documents together and create ONE UNIFIED, WELL-ORGANIZED training program.
+            
+            MANDATORY RULES (YOU MUST FOLLOW THESE):
+            1. Create EXACTLY 6 modules - NOT 7, NOT 8, NOT 10, NOT 46 - EXACTLY 6!
+            2. Each module must be SUBSTANTIAL and cover multiple topics
+            3. Merge related concepts into single modules instead of creating many small modules
+            4. Remove ALL redundancies and duplications
+            5. Create a LOGICAL progression: Introduction → Fundamentals → Advanced → Practice → Mastery → Conclusion
+            
+            STRUCTURE (EXACTLY 6 MODULES):
+            - Module 1: Introduction and Foundations
+            - Module 2: Core Concepts and Theory  
+            - Module 3: Advanced Techniques
+            - Module 4: Practical Applications
+            - Module 5: Mastery and Integration
+            - Module 6: Assessment and Conclusion
+            
+            Industry Context: %s
+            
+            Consolidated Content:
+            %s
+            
+            Respond in JSON format with EXACTLY 6 modules in the "modules" array:
+            {
+              "keyTopics": ["3-5 main topics across ALL documents"],
+              "difficulty": 5,
+              "estimatedReadTime": 45,
+              "learningObjectives": ["5-7 comprehensive objectives for the ENTIRE training"],
+              "prerequisites": ["2-3 prerequisites"],
+              "suggestedModules": ["Module 1", "Module 2", "Module 3", "Module 4", "Module 5", "Module 6"],
+              "curriculum": {
+                "title": "Comprehensive Training Title",
+                "description": "2-3 sentences describing the unified training",
+                "totalDuration": 480,
+                "methodology": "360° Methodology",
+                "modules": [
+                  {
+                    "title": "Module 1: Introduction and Foundations",
+                    "description": "Comprehensive introduction covering foundational concepts",
+                    "duration": 80,
+                    "difficulty": "beginner",
+                    "contentItems": 8,
+                    "assessments": 1,
+                    "enhancedElements": ["Video Introduction", "Interactive Diagrams", "Knowledge Check"],
+                    "learningObjectives": ["Understand basic concepts", "Master fundamentals"]
+                  }
+                ]
+              }
+            }
+            
+            ⚠️ REMINDER: The "modules" array MUST contain EXACTLY 6 module objects. Count them before responding!
+            """, String.join(", ", fileNames), industry, 
+            consolidatedContent.substring(0, Math.min(consolidatedContent.length(), 8000)));
+        
+        List<ChatMessage> messages = Arrays.asList(
+            new ChatMessage(ChatMessageRole.SYSTEM.value(), 
+                "You are an expert instructional designer who excels at creating unified, coherent training programs from multiple sources. " +
+                "You eliminate redundancy and create logical learning progressions. Always respond with valid JSON."),
+            new ChatMessage(ChatMessageRole.USER.value(), prompt)
+        );
+        
+        ChatCompletionRequest request = ChatCompletionRequest.builder()
+            .model(openAiModel)
+            .messages(messages)
+            .temperature(0.7)
+            .maxTokens(3000)
+            .build();
+        
+        try {
+            ChatCompletionResult result = openAiService.createChatCompletion(request);
+            String responseContent = result.getChoices().get(0).getMessage().getContent();
+            
+            Map<String, Object> analysis = parseJsonResponse(responseContent);
+            
+            // Si le curriculum n'est pas dans l'analyse, le générer
+            if (!analysis.containsKey("curriculum")) {
+                analysis.put("curriculum", generateCurriculum(analysis, industry));
+            }
+            
+            // ⚠️ VALIDATION STRICTE : Limiter à MAXIMUM 6 modules
+            Map<String, Object> curriculum = (Map<String, Object>) analysis.get("curriculum");
+            if (curriculum != null && curriculum.containsKey("modules")) {
+                List<Map<String, Object>> modules = (List<Map<String, Object>>) curriculum.get("modules");
+                
+                // Si plus de 6 modules, ne garder que les 6 premiers
+                if (modules != null && modules.size() > 6) {
+                    System.out.println("⚠️ WARNING: AI generated " + modules.size() + " modules. Limiting to 6.");
+                    modules = modules.subList(0, 6);
+                    curriculum.put("modules", modules);
+                }
+                
+                // Si moins de 4 modules, utiliser le fallback
+                if (modules == null || modules.size() < 4) {
+                    System.out.println("⚠️ WARNING: Too few modules generated. Using fallback.");
+                    return createFallbackAnalysis(industry);
+                }
+            }
+            
+            return analysis;
+        } catch (Exception e) {
+            System.out.println("⚠️ ERROR in AI analysis: " + e.getMessage());
+            return createFallbackAnalysis(industry);
+        }
+    }
+    
+    /**
+     * Crée une analyse fallback avec EXACTEMENT 6 modules
+     */
+    private Map<String, Object> createFallbackAnalysis(String industry) {
+        Map<String, Object> fallback = new HashMap<>();
+        fallback.put("keyTopics", Arrays.asList("Core Training Content", "Practical Applications", "Advanced Techniques"));
+        fallback.put("difficulty", 5);
+        fallback.put("estimatedReadTime", 45);
+        fallback.put("learningObjectives", Arrays.asList(
+            "Master fundamental concepts", 
+            "Apply knowledge practically",
+            "Demonstrate competency"
+        ));
+        fallback.put("prerequisites", Arrays.asList("Basic industry knowledge"));
+        fallback.put("suggestedModules", Arrays.asList(
+            "Module 1: Introduction and Foundations",
+            "Module 2: Core Concepts and Theory",
+            "Module 3: Advanced Techniques",
+            "Module 4: Practical Applications",
+            "Module 5: Mastery and Integration",
+            "Module 6: Assessment and Conclusion"
+        ));
+        
+        // Créer un curriculum avec EXACTEMENT 6 modules
+        Map<String, Object> curriculum = new HashMap<>();
+        curriculum.put("title", "Comprehensive " + industry + " Training");
+        curriculum.put("description", "Complete training program covering all essential topics");
+        curriculum.put("totalDuration", 480);
+        curriculum.put("methodology", "360° Methodology");
+        
+        List<Map<String, Object>> modules = new ArrayList<>();
+        
+        // Module 1
+        Map<String, Object> module1 = new HashMap<>();
+        module1.put("title", "Module 1: Introduction and Foundations");
+        module1.put("description", "Comprehensive introduction covering foundational concepts and basic principles");
+        module1.put("duration", 80);
+        module1.put("difficulty", "beginner");
+        module1.put("contentItems", 6);
+        module1.put("assessments", 1);
+        module1.put("enhancedElements", Arrays.asList("Video Introduction", "Interactive Diagrams", "Knowledge Check"));
+        module1.put("learningObjectives", Arrays.asList("Understand basic concepts", "Master fundamentals", "Identify key principles"));
+        modules.add(module1);
+        
+        // Module 2
+        Map<String, Object> module2 = new HashMap<>();
+        module2.put("title", "Module 2: Core Concepts and Theory");
+        module2.put("description", "Deep dive into core concepts, theories, and frameworks");
+        module2.put("duration", 90);
+        module2.put("difficulty", "intermediate");
+        module2.put("contentItems", 7);
+        module2.put("assessments", 1);
+        module2.put("enhancedElements", Arrays.asList("Video Lectures", "Case Studies", "Interactive Exercises"));
+        module2.put("learningObjectives", Arrays.asList("Apply core theories", "Analyze frameworks", "Synthesize concepts"));
+        modules.add(module2);
+        
+        // Module 3
+        Map<String, Object> module3 = new HashMap<>();
+        module3.put("title", "Module 3: Advanced Techniques");
+        module3.put("description", "Advanced techniques, tools, and methodologies for expert-level practice");
+        module3.put("duration", 90);
+        module3.put("difficulty", "advanced");
+        module3.put("contentItems", 6);
+        module3.put("assessments", 1);
+        module3.put("enhancedElements", Arrays.asList("Advanced Videos", "Complex Scenarios", "Tool Demonstrations"));
+        module3.put("learningObjectives", Arrays.asList("Master advanced techniques", "Optimize workflows", "Troubleshoot issues"));
+        modules.add(module3);
+        
+        // Module 4
+        Map<String, Object> module4 = new HashMap<>();
+        module4.put("title", "Module 4: Practical Applications");
+        module4.put("description", "Hands-on practice with real-world scenarios and use cases");
+        module4.put("duration", 80);
+        module4.put("difficulty", "intermediate");
+        module4.put("contentItems", 8);
+        module4.put("assessments", 2);
+        module4.put("enhancedElements", Arrays.asList("Practical Exercises", "Real-world Projects", "Peer Review"));
+        module4.put("learningObjectives", Arrays.asList("Apply knowledge practically", "Solve real problems", "Build confidence"));
+        modules.add(module4);
+        
+        // Module 5
+        Map<String, Object> module5 = new HashMap<>();
+        module5.put("title", "Module 5: Mastery and Integration");
+        module5.put("description", "Integrate all concepts and achieve mastery through comprehensive practice");
+        module5.put("duration", 70);
+        module5.put("difficulty", "advanced");
+        module5.put("contentItems", 5);
+        module5.put("assessments", 1);
+        module5.put("enhancedElements", Arrays.asList("Integration Projects", "Capstone Exercise", "Peer Collaboration"));
+        module5.put("learningObjectives", Arrays.asList("Integrate all concepts", "Demonstrate mastery", "Think strategically"));
+        modules.add(module5);
+        
+        // Module 6
+        Map<String, Object> module6 = new HashMap<>();
+        module6.put("title", "Module 6: Assessment and Conclusion");
+        module6.put("description", "Final assessment, review of key concepts, and next steps for continued learning");
+        module6.put("duration", 70);
+        module6.put("difficulty", "intermediate");
+        module6.put("contentItems", 4);
+        module6.put("assessments", 2);
+        module6.put("enhancedElements", Arrays.asList("Final Assessment", "Review Session", "Certification"));
+        module6.put("learningObjectives", Arrays.asList("Validate competency", "Review key concepts", "Plan next steps"));
+        modules.add(module6);
+        
+        curriculum.put("modules", modules);
+        fallback.put("curriculum", curriculum);
+        
+        return fallback;
+    }
+    
+    /**
      * Génère du contenu texte amélioré
      */
     public String enhanceContent(String originalContent) {
@@ -216,11 +442,13 @@ public class AIService {
             Difficulty Level: %.1f/10
             Industry: %s
             
+            ⚠️ CRITICAL: Generate EXACTLY 6 modules. NO MORE, NO LESS. ⚠️
+            
             Generate a detailed curriculum with:
             1. A curriculum title
             2. A description (2-3 sentences)
             3. Total training duration estimate in hours
-            4. 4-6 detailed training modules, each with:
+            4. EXACTLY 6 detailed training modules, each with:
                - Module title
                - Module description (2 sentences)
                - Duration in minutes
@@ -230,7 +458,7 @@ public class AIService {
                - Enhanced content elements (list 3-5 multimedia elements like videos, infographics, scenarios)
                - 3-7 specific learning objectives for that module
             
-            Return ONLY valid JSON in this exact format:
+            Return ONLY valid JSON in this exact format with EXACTLY 6 modules:
             {
                 "title": "Curriculum Title",
                 "description": "Curriculum description",
@@ -238,7 +466,7 @@ public class AIService {
                 "methodology": "360° Methodology",
                 "modules": [
                     {
-                        "title": "Module Title",
+                        "title": "Module 1 Title",
                         "description": "Module description",
                         "duration": 90,
                         "difficulty": "beginner",
@@ -249,6 +477,8 @@ public class AIService {
                     }
                 ]
             }
+            
+            ⚠️ REMINDER: Count your modules - there must be EXACTLY 6 in the array!
             """, keyTopics, learningObjectives, suggestedModules, difficulty, industry);
         
         try {
@@ -267,6 +497,17 @@ public class AIService {
             String response = result.getChoices().get(0).getMessage().getContent();
             
             Map<String, Object> curriculum = parseJsonResponse(response);
+            
+            // ⚠️ VALIDATION STRICTE : Limiter à MAXIMUM 6 modules
+            if (curriculum.containsKey("modules")) {
+                List<Map<String, Object>> modules = (List<Map<String, Object>>) curriculum.get("modules");
+                if (modules != null && modules.size() > 6) {
+                    System.out.println("⚠️ WARNING: generateCurriculum generated " + modules.size() + " modules. Limiting to 6.");
+                    modules = modules.subList(0, 6);
+                    curriculum.put("modules", modules);
+                }
+            }
+            
             curriculum.put("success", true);
             
             return curriculum;
@@ -281,17 +522,28 @@ public class AIService {
             fallbackCurriculum.put("methodology", "360° Methodology");
             
             List<Map<String, Object>> modules = new ArrayList<>();
-            List<String> modulesList = (List<String>) documentAnalysis.getOrDefault("suggestedModules", 
-                Arrays.asList("Introduction", "Core Content", "Advanced Topics", "Practice & Assessment"));
             
-            for (int i = 0; i < modulesList.size(); i++) {
+            // Créer EXACTEMENT 6 modules
+            String[] moduleNames = {
+                "Module 1: Introduction and Foundations",
+                "Module 2: Core Concepts and Theory",
+                "Module 3: Advanced Techniques",
+                "Module 4: Practical Applications",
+                "Module 5: Mastery and Integration",
+                "Module 6: Assessment and Conclusion"
+            };
+            
+            String[] difficulties = {"beginner", "intermediate", "intermediate", "intermediate", "advanced", "intermediate"};
+            int[] durations = {80, 90, 90, 80, 70, 70};
+            
+            for (int i = 0; i < 6; i++) {
                 Map<String, Object> module = new HashMap<>();
-                module.put("title", modulesList.get(i));
+                module.put("title", moduleNames[i]);
                 module.put("description", "Comprehensive training module covering key concepts and practical applications");
-                module.put("duration", 60);
-                module.put("difficulty", i == 0 ? "beginner" : (i < 2 ? "intermediate" : "advanced"));
-                module.put("contentItems", 4);
-                module.put("assessments", 1);
+                module.put("duration", durations[i]);
+                module.put("difficulty", difficulties[i]);
+                module.put("contentItems", 4 + i);
+                module.put("assessments", i == 5 ? 2 : 1);
                 module.put("enhancedElements", Arrays.asList("Video Introduction", "Core Learning Content", "Interactive Scenario", "Knowledge Assessment"));
                 module.put("learningObjectives", Arrays.asList("Master core concepts", "Apply knowledge in practice", "Demonstrate competency"));
                 modules.add(module);

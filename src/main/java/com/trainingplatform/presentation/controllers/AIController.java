@@ -2,6 +2,7 @@ package com.trainingplatform.presentation.controllers;
 
 import com.trainingplatform.application.services.AIService;
 import com.trainingplatform.application.services.DocumentParserService;
+import com.trainingplatform.application.services.PPTExportService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -25,6 +26,9 @@ public class AIController {
     @Autowired
     private DocumentParserService documentParserService;
     
+    @Autowired
+    private PPTExportService pptExportService;
+    
     /**
      * POST /api/ai/analyze-document
      * Analyse un document uploadé
@@ -42,6 +46,53 @@ public class AIController {
             response.put("fileName", file.getOriginalFilename());
             response.put("fileSize", file.getSize());
             response.put("analysis", analysis);
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+    
+    /**
+     * POST /ai/analyze-multiple-documents
+     * Analyse PLUSIEURS documents et génère UNE SEULE formation consolidée
+     */
+    @PostMapping("/analyze-multiple-documents")
+    public ResponseEntity<Map<String, Object>> analyzeMultipleDocuments(
+        @RequestParam("files") List<MultipartFile> files,
+        @RequestParam(value = "industry", defaultValue = "General") String industry
+    ) {
+        try {
+            // Extraire le texte de TOUS les fichiers
+            List<String> allContents = new ArrayList<>();
+            List<String> fileNames = new ArrayList<>();
+            long totalSize = 0;
+            
+            for (MultipartFile file : files) {
+                String content = documentParserService.extractText(file);
+                allContents.add(content);
+                fileNames.add(file.getOriginalFilename());
+                totalSize += file.getSize();
+            }
+            
+            // Consolider tous les contenus
+            String consolidatedContent = String.join("\n\n--- NEW DOCUMENT ---\n\n", allContents);
+            
+            // Analyser le contenu consolidé
+            Map<String, Object> consolidatedAnalysis = aiService.analyzeConsolidatedDocuments(
+                consolidatedContent, fileNames, industry
+            );
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("filesCount", files.size());
+            response.put("fileNames", fileNames);
+            response.put("totalSize", totalSize);
+            response.put("analysis", consolidatedAnalysis);
             
             return ResponseEntity.ok(response);
             
@@ -204,6 +255,48 @@ public class AIController {
             errorResponse.put("success", false);
             errorResponse.put("error", e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+    
+    /**
+     * POST /ai/export-powerpoint
+     * Exporte un curriculum de formation en PowerPoint (PPT/PPTX)
+     * Génère des slides animées avec design moderne et images
+     */
+    @PostMapping("/export-powerpoint")
+    public ResponseEntity<byte[]> exportPowerPoint(@RequestBody Map<String, Object> request) {
+        try {
+            Map<String, Object> curriculum = (Map<String, Object>) request.get("curriculum");
+            
+            if (curriculum == null) {
+                throw new IllegalArgumentException("Le curriculum est requis");
+            }
+            
+            // Générer le PowerPoint
+            byte[] pptData = pptExportService.generatePowerPoint(curriculum);
+            
+            // Préparer les headers HTTP
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.presentationml.presentation"));
+            headers.setContentLength(pptData.length);
+            
+            String filename = "Formation_" + System.currentTimeMillis() + ".pptx";
+            headers.set("Content-Disposition", "attachment; filename=\"" + filename + "\"");
+            
+            return new ResponseEntity<>(pptData, headers, HttpStatus.OK);
+            
+        } catch (Exception e) {
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("error", "Erreur lors de la génération du PowerPoint: " + e.getMessage());
+            
+            // En cas d'erreur, retourner un JSON d'erreur
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .headers(headers)
+                .body(null);
         }
     }
 }
