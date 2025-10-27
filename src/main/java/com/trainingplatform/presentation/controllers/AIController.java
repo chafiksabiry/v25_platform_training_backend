@@ -38,8 +38,13 @@ public class AIController {
         @RequestParam("file") MultipartFile file
     ) {
         try {
+            System.out.println("📄 Analyzing document: " + file.getOriginalFilename() + " (" + file.getSize() + " bytes)");
+            
             String content = documentParserService.extractText(file);
+            System.out.println("✅ Text extracted: " + content.substring(0, Math.min(100, content.length())) + "...");
+            
             Map<String, Object> analysis = aiService.analyzeDocument(content, file.getOriginalFilename());
+            System.out.println("✅ AI Analysis complete");
             
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
@@ -50,9 +55,13 @@ public class AIController {
             return ResponseEntity.ok(response);
             
         } catch (Exception e) {
+            System.err.println("❌ ERROR analyzing document: " + e.getClass().getName() + ": " + e.getMessage());
+            e.printStackTrace();
+            
             Map<String, Object> errorResponse = new HashMap<>();
             errorResponse.put("success", false);
-            errorResponse.put("error", e.getMessage());
+            errorResponse.put("error", e.getMessage() != null ? e.getMessage() : "Unknown error occurred");
+            errorResponse.put("errorType", e.getClass().getSimpleName());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
         }
     }
@@ -218,17 +227,33 @@ public class AIController {
         @RequestBody Map<String, Object> request
     ) {
         try {
+            System.out.println("📚 Generating curriculum...");
+            
             Map<String, Object> documentAnalysis = (Map<String, Object>) request.get("analysis");
             String industry = (String) request.getOrDefault("industry", "General");
             
+            if (documentAnalysis == null) {
+                throw new IllegalArgumentException("Document analysis is required");
+            }
+            
+            System.out.println("📊 Industry: " + industry);
+            System.out.println("📊 Analysis topics: " + documentAnalysis.get("keyTopics"));
+            
             Map<String, Object> curriculum = aiService.generateCurriculum(documentAnalysis, industry);
+            
+            System.out.println("✅ Curriculum generated successfully with " + 
+                ((List<?>) curriculum.getOrDefault("modules", new ArrayList<>())).size() + " modules");
             
             return ResponseEntity.ok(curriculum);
             
         } catch (Exception e) {
+            System.err.println("❌ ERROR generating curriculum: " + e.getClass().getName() + ": " + e.getMessage());
+            e.printStackTrace();
+            
             Map<String, Object> errorResponse = new HashMap<>();
             errorResponse.put("success", false);
-            errorResponse.put("error", e.getMessage());
+            errorResponse.put("error", e.getMessage() != null ? e.getMessage() : "Unknown error occurred");
+            errorResponse.put("errorType", e.getClass().getSimpleName());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
         }
     }
