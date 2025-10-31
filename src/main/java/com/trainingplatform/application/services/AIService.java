@@ -5,10 +5,12 @@ import com.theokanning.openai.completion.chat.ChatCompletionResult;
 import com.theokanning.openai.completion.chat.ChatMessage;
 import com.theokanning.openai.completion.chat.ChatMessageRole;
 import com.theokanning.openai.service.OpenAiService;
+import okhttp3.*;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.util.*;
 
@@ -29,6 +31,7 @@ public class AIService {
     
     private OpenAiService openAiService;
     private WebClient elevenLabsClient;
+    private OkHttpClient httpClient;
     
     @jakarta.annotation.PostConstruct
     public void init() {
@@ -37,6 +40,11 @@ public class AIService {
             .baseUrl("https://api.elevenlabs.io/v1")
             .defaultHeader("xi-api-key", elevenLabsApiKey)
             .build();
+        this.httpClient = new OkHttpClient.Builder()
+            .connectTimeout(Duration.ofSeconds(30))
+            .readTimeout(Duration.ofSeconds(120))
+            .writeTimeout(Duration.ofSeconds(120))
+            .build();
     }
     
     /**
@@ -44,47 +52,51 @@ public class AIService {
      */
     public Map<String, Object> analyzeDocument(String content, String fileName) {
         try {
-            String prompt = String.format("""
-                Analyze this training document and provide:
-                1. Key topics (list of 3-5 main topics)
-                2. Difficulty level (scale 1-10)
-                3. Estimated reading time in minutes
-                4. Learning objectives (3-5 specific objectives)
-                5. Prerequisites (2-3 prerequisites)
-                6. Suggested module structure (4-6 module names)
-                
-                Document: %s
-                
-                Respond in JSON format:
-                {
-                  "keyTopics": ["topic1", "topic2", ...],
-                  "difficulty": 5,
-                  "estimatedReadTime": 25,
-                  "learningObjectives": ["objective1", ...],
-                  "prerequisites": ["prereq1", ...],
-                  "suggestedModules": ["module1", ...]
-                }
-                """, content.substring(0, Math.min(content.length(), 4000)));
+        String prompt = String.format("""
+            Analyze this training document and provide:
+            1. Key topics (list of 3-5 main topics)
+            2. Difficulty level (scale 1-10)
+            3. Estimated reading time in minutes
+            4. Learning objectives (3-5 specific objectives)
+            5. Prerequisites (2-3 prerequisites)
+            6. Suggested module structure (4-6 module names)
             
-            List<ChatMessage> messages = Arrays.asList(
-                new ChatMessage(ChatMessageRole.SYSTEM.value(), 
-                    "You are an expert training content analyzer. Always respond with valid JSON."),
-                new ChatMessage(ChatMessageRole.USER.value(), prompt)
-            );
+            Document: %s
             
-            ChatCompletionRequest request = ChatCompletionRequest.builder()
-                .model(openAiModel)
-                .messages(messages)
-                .temperature(0.7)
-                .maxTokens(2000)
-                .build();
-            
+            Respond in JSON format:
+            {
+              "keyTopics": ["topic1", "topic2", ...],
+              "difficulty": 5,
+              "estimatedReadTime": 25,
+              "learningObjectives": ["objective1", ...],
+              "prerequisites": ["prereq1", ...],
+              "suggestedModules": ["module1", ...]
+            }
+            """, content.substring(0, Math.min(content.length(), 4000)));
+        
+        List<ChatMessage> messages = Arrays.asList(
+            new ChatMessage(ChatMessageRole.SYSTEM.value(), 
+                "You are an expert training content analyzer. Always respond with valid JSON."),
+            new ChatMessage(ChatMessageRole.USER.value(), prompt)
+        );
+        
+        ChatCompletionRequest request = ChatCompletionRequest.builder()
+            .model(openAiModel)
+            .messages(messages)
+            .temperature(0.7)
+            .maxTokens(2000)
+            .build();
+        
             System.out.println("🤖 Calling OpenAI API for document analysis...");
-            ChatCompletionResult result = openAiService.createChatCompletion(request);
-            String responseContent = result.getChoices().get(0).getMessage().getContent();
+        ChatCompletionResult result = openAiService.createChatCompletion(request);
+        String responseContent = result.getChoices().get(0).getMessage().getContent();
             System.out.println("✅ OpenAI response received");
             
-            return parseJsonResponse(responseContent);
+            Map<String, Object> analysis = parseJsonResponse(responseContent);
+            // Store the full content for later use in module content generation
+            analysis.put("fullContent", content);
+            
+            return analysis;
             
         } catch (Exception e) {
             System.err.println("⚠️ OpenAI API failed: " + e.getMessage());
@@ -134,6 +146,9 @@ public class AIService {
             "Advanced Topics",
             "Assessment and Review"
         ));
+        
+        // Store the full content for later use in module content generation
+        analysis.put("fullContent", content);
         
         System.out.println("✅ Fallback analysis created for: " + fileName);
         return analysis;
@@ -407,30 +422,167 @@ public class AIService {
     }
     
     /**
-     * Génère des questions de quiz avec fallback
+     * Génère des questions de QCM professionnelles et variées pour un module
      */
     public List<Map<String, Object>> generateQuizQuestions(String content, int count) {
         try {
+        String prompt = String.format("""
+            Generate %d professional multiple-choice quiz questions (QCM) based on this training content.
+            
+            Content: %s
+            
+            REQUIREMENTS:
+            1. Create VARIED question types:
+               - Conceptual understanding (30%%)
+               - Practical application (40%%)
+               - Problem-solving scenarios (20%%)
+               - Best practices (10%%)
+            
+            2. Difficulty levels mix:
+               - Easy: %d questions
+               - Medium: %d questions  
+               - Hard: %d questions
+            
+            3. Each question MUST have:
+               - Clear, specific question text
+               - 4 plausible options (not obvious wrong answers)
+               - Only ONE correct answer
+               - Detailed explanation (2-3 sentences)
+               - Points value based on difficulty
+            
+            4. Question quality:
+               - No ambiguous wording
+               - Test real understanding, not memory
+               - Include practical scenarios
+               - Avoid trick questions
+            
+            Respond in JSON format:
+            [
+              {
+                "text": "Clear specific question?",
+                "options": ["Plausible option A", "Correct option B", "Plausible option C", "Plausible option D"],
+                "correctAnswer": 1,
+                "explanation": "Detailed explanation why B is correct and why others are not.",
+                "difficulty": "medium",
+                "points": 10
+              }
+            ]
+            """, 
+            count, 
+            content.substring(0, Math.min(content.length(), 6000)),
+            (int)(count * 0.3),
+            (int)(count * 0.5),
+            (int)(count * 0.2)
+        );
+        
+        List<ChatMessage> messages = Arrays.asList(
+            new ChatMessage(ChatMessageRole.SYSTEM.value(), 
+                "You are an expert educational assessment designer. Create high-quality QCM questions that test real understanding, not just memory. " +
+                "Each question should have 4 plausible options. Avoid obvious wrong answers. " +
+                "Always respond with valid JSON array."),
+            new ChatMessage(ChatMessageRole.USER.value(), prompt)
+        );
+        
+        ChatCompletionRequest request = ChatCompletionRequest.builder()
+            .model(openAiModel)
+            .messages(messages)
+            .temperature(0.8) // Slightly higher for more variety
+            .maxTokens(3500) // More tokens for detailed questions
+            .build();
+        
+        ChatCompletionResult result = openAiService.createChatCompletion(request);
+        String responseContent = result.getChoices().get(0).getMessage().getContent();
+        
+        return parseJsonArrayResponse(responseContent);
+            
+        } catch (Exception e) {
+            System.err.println("⚠️ OpenAI API failed for quiz generation: " + e.getMessage());
+            System.err.println("⚠️ Using fallback quiz questions");
+            return createFallbackQuizQuestions(content, count);
+        }
+    }
+    
+    /**
+     * Génère un EXAMEN FINAL GLOBAL pour toute la formation
+     * Basé sur tous les modules du curriculum
+     */
+    public List<Map<String, Object>> generateFinalExam(List<Map<String, Object>> modules, String formationTitle) {
+        try {
+            // Compiler le contenu de tous les modules
+            StringBuilder allContent = new StringBuilder();
+            allContent.append("Formation: ").append(formationTitle).append("\n\n");
+            allContent.append("Modules covered:\n");
+            
+            for (Map<String, Object> module : modules) {
+                String title = (String) module.get("title");
+                String description = (String) module.get("description");
+                allContent.append("- ").append(title).append(": ").append(description).append("\n");
+            }
+            
+            int questionCount = Math.min(30, modules.size() * 4); // 4 questions par module, max 30
+            
             String prompt = String.format("""
-                Generate %d multiple-choice quiz questions based on this content.
-                Each question should have 4 options with one correct answer.
+                Generate %d professional FINAL EXAM questions for this complete training program.
                 
-                Content: %s
+                Training Overview:
+                %s
+                
+                EXAM REQUIREMENTS:
+                
+                1. Coverage:
+                   - Questions must cover ALL modules proportionally
+                   - Test comprehensive understanding across the entire training
+                   - Include cross-module questions that test integration of concepts
+                
+                2. Question Distribution by Type:
+                   - Conceptual understanding: 25%%
+                   - Practical application: 35%%
+                   - Problem-solving scenarios: 25%%
+                   - Best practices & integration: 15%%
+                
+                3. Difficulty levels:
+                   - Easy: 20%% (%d questions)
+                   - Medium: 50%% (%d questions)
+                   - Hard: 30%% (%d questions)
+                
+                4. Question Quality:
+                   - Each question tests mastery, not just memory
+                   - Include real-world scenarios
+                   - Options should be plausible and challenging
+                   - Explanations must reference specific module content
+                
+                5. Points Distribution:
+                   - Easy questions: 5 points
+                   - Medium questions: 10 points
+                   - Hard questions: 15 points
+                
+                This is a FINAL CERTIFICATION EXAM - make it comprehensive and rigorous!
                 
                 Respond in JSON format:
                 [
                   {
-                    "text": "Question text?",
+                    "text": "Comprehensive question testing understanding across modules?",
                     "options": ["Option A", "Option B", "Option C", "Option D"],
-                    "correctAnswer": 0,
-                    "explanation": "Why this is correct"
+                    "correctAnswer": 2,
+                    "explanation": "Detailed explanation with references to module concepts.",
+                    "difficulty": "medium",
+                    "points": 10,
+                    "moduleReference": "Module 2: Core Concepts"
                   }
                 ]
-                """, count, content.substring(0, Math.min(content.length(), 5190)));
+                """, 
+                questionCount,
+                allContent.toString().substring(0, Math.min(allContent.length(), 5000)),
+                (int)(questionCount * 0.2),
+                (int)(questionCount * 0.5),
+                (int)(questionCount * 0.3)
+            );
             
             List<ChatMessage> messages = Arrays.asList(
                 new ChatMessage(ChatMessageRole.SYSTEM.value(), 
-                    "You are an expert at creating educational assessments. Always respond with valid JSON array."),
+                    "You are an expert certification exam designer. Create a comprehensive FINAL EXAM that tests mastery " +
+                    "of the entire training program. Questions should be rigorous, practical, and cover all modules. " +
+                    "Each question must have 4 challenging options. Always respond with valid JSON array."),
                 new ChatMessage(ChatMessageRole.USER.value(), prompt)
             );
             
@@ -438,7 +590,7 @@ public class AIService {
                 .model(openAiModel)
                 .messages(messages)
                 .temperature(0.7)
-                .maxTokens(2000)
+                .maxTokens(4500) // Large exam needs more tokens
                 .build();
             
             ChatCompletionResult result = openAiService.createChatCompletion(request);
@@ -447,10 +599,52 @@ public class AIService {
             return parseJsonArrayResponse(responseContent);
             
         } catch (Exception e) {
-            System.err.println("⚠️ OpenAI API failed for quiz generation: " + e.getMessage());
-            System.err.println("⚠️ Using fallback quiz questions");
-            return createFallbackQuizQuestions(content, count);
+            System.err.println("⚠️ OpenAI API failed for final exam generation: " + e.getMessage());
+            System.err.println("⚠️ Using fallback final exam questions");
+            return createFallbackFinalExam(modules, formationTitle);
         }
+    }
+    
+    /**
+     * Crée un examen final de secours
+     */
+    private List<Map<String, Object>> createFallbackFinalExam(List<Map<String, Object>> modules, String formationTitle) {
+        List<Map<String, Object>> questions = new ArrayList<>();
+        int questionCount = Math.min(25, modules.size() * 4);
+        String[] difficulties = {"easy", "medium", "hard"};
+        int[] points = {5, 10, 15};
+        
+        for (int i = 0; i < questionCount; i++) {
+            Map<String, Object> module = modules.get(i % modules.size());
+            String moduleTitle = (String) module.get("title");
+            String difficulty = difficulties[i % 3];
+            
+            Map<String, Object> question = new HashMap<>();
+            question.put("text", String.format(
+                "Based on the training in %s, which approach would be most effective in a professional scenario?",
+                moduleTitle
+            ));
+            question.put("options", Arrays.asList(
+                "Apply theoretical principles without adaptation",
+                "Combine multiple strategies based on context",
+                "Follow a single predefined approach",
+                "Wait for additional guidance before proceeding"
+            ));
+            question.put("correctAnswer", 1);
+            question.put("explanation", String.format(
+                "The most effective approach combines multiple strategies from %s, " +
+                "adapted to the specific context. This demonstrates mastery and practical application.",
+                moduleTitle
+            ));
+            question.put("difficulty", difficulty);
+            question.put("points", points[i % 3]);
+            question.put("moduleReference", moduleTitle);
+            
+            questions.add(question);
+        }
+        
+        System.out.println("✅ Generated " + questions.size() + " fallback final exam questions");
+        return questions;
     }
     
     /**
@@ -591,6 +785,7 @@ public class AIService {
         String learningObjectives = documentAnalysis.getOrDefault("learningObjectives", new ArrayList<>()).toString();
         String suggestedModules = documentAnalysis.getOrDefault("suggestedModules", new ArrayList<>()).toString();
         Double difficulty = ((Number) documentAnalysis.getOrDefault("difficulty", 5)).doubleValue();
+        String fullContent = (String) documentAnalysis.getOrDefault("fullContent", "");
         
         String prompt = String.format("""
             Create a comprehensive training curriculum based on this document analysis:
@@ -665,6 +860,37 @@ public class AIService {
                     modules = modules.subList(0, 6);
                     curriculum.put("modules", modules);
                 }
+                
+                   // 🔥 Generate detailed content for each module based on the transcription
+                   System.out.println("🔍 DEBUG: fullContent length = " + (fullContent != null ? fullContent.length() : "NULL"));
+                   System.out.println("🔍 DEBUG: modules count = " + modules.size());
+                   
+                   if (fullContent != null && !fullContent.isEmpty()) {
+                       System.out.println("📝 Generating detailed content for " + modules.size() + " modules based on transcription...");
+                       for (Map<String, Object> module : modules) {
+                        String moduleTitle = (String) module.getOrDefault("title", "Module");
+                        String moduleDescription = (String) module.getOrDefault("description", "");
+                        List<String> objectives = (List<String>) module.getOrDefault("learningObjectives", new ArrayList<>());
+                        
+                        try {
+                            System.out.println("🔄 Calling generateModuleContent for: " + moduleTitle);
+                            List<Map<String, Object>> moduleContent = generateModuleContent(
+                                moduleTitle, 
+                                moduleDescription, 
+                                fullContent,
+                                objectives
+                            );
+                            System.out.println("✅ Content generated for module: " + moduleTitle + " (" + moduleContent.size() + " sections)");
+                            module.put("content", moduleContent);
+                        } catch (Exception e) {
+                            System.err.println("❌ ERROR generating content for module: " + moduleTitle);
+                            System.err.println("❌ Error details: " + e.getMessage());
+                            e.printStackTrace();
+                            module.put("content", createFallbackModuleContent(moduleTitle, moduleDescription));
+                        }
+                    }
+                    System.out.println("✅ All module content generated!");
+                }
             }
             
             curriculum.put("success", true);
@@ -702,19 +928,41 @@ public class AIService {
             String[] difficulties = {"beginner", "intermediate", "intermediate", "intermediate", "advanced", "intermediate"};
             int[] durations = {80, 90, 90, 80, 70, 70};
             
+            String fullContentFallback = (String) documentAnalysis.getOrDefault("fullContent", "");
+            
             for (int i = 0; i < 6; i++) {
                 Map<String, Object> module = new HashMap<>();
                 module.put("title", moduleNames[i]);
-                module.put("description", "Comprehensive training module covering " + moduleNames[i].toLowerCase() + " with practical exercises and assessments");
+                String description = "Comprehensive training module covering " + moduleNames[i].toLowerCase() + " with practical exercises and assessments";
+                module.put("description", description);
                 module.put("duration", durations[i]);
                 module.put("difficulty", difficulties[i]);
                 module.put("contentItems", 4 + i);
                 module.put("assessments", i == 5 ? 2 : 1);
                 module.put("enhancedElements", Arrays.asList("Video Introduction", "Core Learning Content", "Interactive Scenario", "Knowledge Assessment"));
-                module.put("learningObjectives", 
-                    objectives.isEmpty() 
-                        ? Arrays.asList("Master core concepts", "Apply knowledge in practice", "Demonstrate competency")
-                        : objectives.subList(0, Math.min(3, objectives.size())));
+                
+                List<String> moduleObjectives = objectives.isEmpty() 
+                    ? Arrays.asList("Master core concepts", "Apply knowledge in practice", "Demonstrate competency")
+                    : objectives.subList(0, Math.min(3, objectives.size()));
+                module.put("learningObjectives", moduleObjectives);
+                
+                // Generate content based on transcription if available
+                if (fullContentFallback != null && !fullContentFallback.isEmpty()) {
+                    try {
+                        List<Map<String, Object>> moduleContent = generateModuleContent(
+                            moduleNames[i], 
+                            description, 
+                            fullContentFallback,
+                            moduleObjectives
+                        );
+                        module.put("content", moduleContent);
+                    } catch (Exception ex) {
+                        module.put("content", createFallbackModuleContent(moduleNames[i], description));
+                    }
+                } else {
+                    module.put("content", createFallbackModuleContent(moduleNames[i], description));
+                }
+                
                 modules.add(module);
             }
             
@@ -863,6 +1111,492 @@ public class AIService {
         } catch (Exception e) {
             return new ArrayList<>();
         }
+    }
+    
+    /**
+     * Transcrit un fichier audio/vidéo en texte avec OpenAI Whisper
+     * 
+     * Note: Cette méthode nécessite l'API OpenAI Audio (Whisper)
+     * Pour l'instant, on retourne une description par défaut
+     */
+    public String transcribeAudio(org.springframework.web.multipart.MultipartFile file) {
+        try {
+            System.out.println("🎵 Transcribing audio/video file with OpenAI Whisper: " + file.getOriginalFilename());
+            
+            // Determine media type
+            String contentType = determineMediaType(file.getOriginalFilename());
+            
+            // Build multipart request for Whisper API
+            RequestBody requestBody = new MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("file", file.getOriginalFilename(),
+                    RequestBody.create(file.getBytes(), MediaType.parse(contentType)))
+                .addFormDataPart("model", "whisper-1")
+                .addFormDataPart("language", "en")  // Can be removed for auto-detection
+                .addFormDataPart("response_format", "text")
+                .build();
+            
+            // Create HTTP request
+            Request request = new Request.Builder()
+                .url("https://api.openai.com/v1/audio/transcriptions")
+                .header("Authorization", "Bearer " + openAiApiKey)
+                .post(requestBody)
+                .build();
+            
+            // Execute request
+            try (Response response = httpClient.newCall(request).execute()) {
+                if (!response.isSuccessful()) {
+                    System.err.println("⚠️ Whisper API failed with status: " + response.code());
+                    throw new IOException("Whisper API request failed: " + response.message());
+                }
+                
+                String transcription = response.body().string();
+                System.out.println("✅ Whisper transcription completed: " + transcription.substring(0, Math.min(100, transcription.length())) + "...");
+                
+                return transcription;
+            }
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error in Whisper transcription: " + e.getMessage());
+            e.printStackTrace();
+            
+            // Fallback: return basic file info
+            System.out.println("⚠️ Using fallback for media file: " + file.getOriginalFilename());
+            return generateFallbackMediaDescription(file);
+        }
+    }
+    
+    /**
+     * Détermine le type MIME du fichier audio/vidéo
+     */
+    private String determineMediaType(String filename) {
+        if (filename == null) return "application/octet-stream";
+        String lower = filename.toLowerCase();
+        
+        // Audio formats
+        if (lower.endsWith(".mp3")) return "audio/mpeg";
+        if (lower.endsWith(".wav")) return "audio/wav";
+        if (lower.endsWith(".m4a")) return "audio/m4a";
+        if (lower.endsWith(".aac")) return "audio/aac";
+        if (lower.endsWith(".ogg")) return "audio/ogg";
+        if (lower.endsWith(".flac")) return "audio/flac";
+        
+        // Video formats (audio will be extracted by Whisper)
+        if (lower.endsWith(".mp4")) return "video/mp4";
+        if (lower.endsWith(".mpeg")) return "video/mpeg";
+        if (lower.endsWith(".mpga")) return "audio/mpeg";
+        if (lower.endsWith(".webm")) return "video/webm";
+        if (lower.endsWith(".avi")) return "video/x-msvideo";
+        if (lower.endsWith(".mov")) return "video/quicktime";
+        
+        return "application/octet-stream";
+    }
+    
+    /**
+     * Génère une description de fallback pour les fichiers média
+     */
+    private String generateFallbackMediaDescription(org.springframework.web.multipart.MultipartFile file) {
+        return String.format("""
+            Media File: %s
+            Size: %.2f MB
+            Format: %s
+            
+            This audio/video file has been uploaded but could not be automatically transcribed.
+            The file can still be used as training content.
+            
+            Suggested Training Topics:
+            - Multimedia learning content
+            - Video demonstrations and tutorials
+            - Audio explanations and lectures
+            - Practical examples and case studies
+            
+            Note: Transcription failed. Please check file format and size, or try again later.
+            """,
+            file.getOriginalFilename(),
+            file.getSize() / (1024.0 * 1024.0),
+            getMediaType(file.getOriginalFilename())
+        );
+    }
+    
+    private String getMediaType(String filename) {
+        if (filename == null) return "Unknown";
+        String lower = filename.toLowerCase();
+        if (lower.endsWith(".mp3")) return "MP3 Audio";
+        if (lower.endsWith(".mp4")) return "MP4 Video";
+        if (lower.endsWith(".wav")) return "WAV Audio";
+        if (lower.endsWith(".m4a")) return "M4A Audio";
+        if (lower.endsWith(".webm")) return "WebM Video";
+        return "Media File";
+    }
+    
+    /**
+     * Génère le contenu détaillé d'un module basé sur la transcription complète
+     */
+    public List<Map<String, Object>> generateModuleContent(
+        String moduleTitle, 
+        String moduleDescription, 
+        String fullTranscription,
+        List<String> learningObjectives
+    ) {
+        try {
+            String objectives = learningObjectives != null && !learningObjectives.isEmpty() 
+                ? String.join("\n• ", learningObjectives) 
+                : "Master the key concepts and apply them in practice";
+            
+            String prompt = String.format("""
+                Generate detailed training content for this module: "%s"
+                
+                Description: %s
+                Learning Objectives:
+                • %s
+                
+                Source Content (Transcription):
+                %s
+                
+                CRITICAL REQUIREMENTS:
+                1. Read the transcription and extract SPECIFIC topics covered (between 4-8 topics depending on content complexity)
+                2. Create section titles that are CONCRETE and DESCRIPTIVE (NO generic words like "Introduction", "Core Concepts", "Summary")
+                3. Each title MUST describe the ACTUAL TOPIC covered (e.g., for subnet mask module: "Binary Representation of Subnet Masks" NOT "Introduction")
+                4. Titles must be DIFFERENT for each module based on ITS specific content
+                5. ⚠️ MOST IMPORTANT: Each section MUST contain 300-800 words of REAL EDUCATIONAL CONTENT extracted from the transcription
+                   - DO NOT write "Detailed educational content..." - WRITE THE ACTUAL CONTENT
+                   - Explain concepts, give examples, provide step-by-step instructions
+                   - Include code snippets, diagrams descriptions, practical examples
+                   - Write as if teaching a student who knows nothing about the topic
+                6. VARY the number of sections based on content: Simple topics = 4-5 sections, Complex topics = 6-8 sections
+                7. Each section title must be UNIQUE - NO two sections should have similar names
+                
+                FOR THIS MODULE "%s", create sections with VARIED, DESCRIPTIVE titles like:
+                
+                Example for "Calculating Subnet Mask" (6 sections):
+                ✓ "Understanding Binary and Decimal Subnet Notation"
+                ✓ "Subnet Mask Classes and Default Values"  
+                ✓ "Converting Between Decimal and Binary Masks"
+                ✓ "Calculating Network and Host Portions"
+                ✓ "CIDR Notation and Prefix Length"
+                ✓ "Subnet Mask Calculation Practice"
+                
+                Example for "HTTP Protocol" (5 sections):
+                ✓ "HTTP Request Methods and Headers"
+                ✓ "Status Codes and Response Structure"
+                ✓ "HTTP/1.1 vs HTTP/2 Differences"
+                ✓ "Cookies and Session Management"
+                ✓ "HTTPS and TLS Encryption"
+                
+                Example for "Network Security" (7 sections):
+                ✓ "Firewall Types and Configurations"
+                ✓ "Intrusion Detection Systems (IDS)"
+                ✓ "VPN Protocols and Tunneling"
+                ✓ "Port Scanning and Security Audits"
+                ✓ "Access Control Lists (ACLs)"
+                ✓ "Network Segmentation Strategies"
+                ✓ "Incident Response Procedures"
+                
+                ❌ NEVER use these generic titles:
+                - "Introduction" / "Overview"
+                - "Core Concepts" / "Basic Concepts"
+                - "Detailed Analysis" / "In-Depth Study"
+                - "Practical Applications" / "Real-World Use"
+                - "Advanced Topics" / "Advanced Techniques"
+                - "Summary" / "Conclusion" / "Recap"
+                - "Fundamentals" / "Basics"
+                
+                ✅ USE concrete, specific titles that describe WHAT the learner will learn
+                
+                Return ONLY valid JSON array with 4-8 sections (decide count based on content).
+                
+                EXAMPLE OF PROPER CONTENT (300+ words of REAL educational content):
+                [
+                  {
+                    "id": "section-1",
+                    "type": "text",
+                    "title": "HTTP Request Methods and Headers",
+                    "content": "HTTP (Hypertext Transfer Protocol) uses several request methods to communicate between clients and servers. The most common methods are GET, POST, PUT, DELETE, and PATCH. Each method serves a specific purpose in web communication.\\n\\nGET requests are used to retrieve data from a server. When you visit a website, your browser sends a GET request to fetch the HTML, CSS, and JavaScript files. GET requests are idempotent, meaning multiple identical requests produce the same result. They should never modify server data.\\n\\nPOST requests send data to the server to create new resources. For example, when you submit a form or upload a file, a POST request carries that data to the server. Unlike GET, POST requests can modify server state and are not idempotent.\\n\\nHTTP headers provide additional information about the request or response. Common request headers include:\\n\\n- Accept: Specifies the content types the client can process\\n- Content-Type: Indicates the media type of the request body\\n- Authorization: Contains credentials for authentication\\n- User-Agent: Identifies the client software\\n\\nHeaders are essential for proper communication between clients and servers, enabling features like authentication, content negotiation, and caching.",
+                    "duration": 12
+                  },
+                  {
+                    "id": "section-2",
+                    "type": "text",
+                    "title": "Another Specific Topic Title",
+                    "content": "Write 300+ words of REAL educational content here explaining this topic in detail with examples, explanations, and practical information from the transcription...",
+                    "duration": 15
+                  }
+                ]
+                
+                ⚠️ REMEMBER: Write FULL educational paragraphs (300+ words), NOT placeholder text!
+                """, 
+                moduleTitle,
+                moduleDescription, 
+                objectives,
+                fullTranscription.substring(0, Math.min(fullTranscription.length(), 6000)),
+                moduleTitle
+            );
+            
+            List<ChatMessage> messages = Arrays.asList(
+                new ChatMessage(ChatMessageRole.SYSTEM.value(), 
+                    "You are an expert instructional designer and educational content writer. Your job is to:\n" +
+                    "1. Create SPECIFIC, CONCRETE section titles (NO generic words like 'Introduction', 'Core Concepts')\n" +
+                    "2. Write FULL educational content (300-800 words per section) with real explanations, examples, and details\n" +
+                    "3. Extract information from the provided transcription/source material\n" +
+                    "4. Write as if teaching someone who knows nothing about the topic\n" +
+                    "5. Include practical examples, code snippets, step-by-step instructions\n" +
+                    "NEVER write placeholder text like 'Detailed educational content...' - ALWAYS write the actual educational content.\n" +
+                    "Always respond with valid JSON."),
+                new ChatMessage(ChatMessageRole.USER.value(), prompt)
+            );
+            
+            ChatCompletionRequest request = ChatCompletionRequest.builder()
+                .model(openAiModel)
+                .messages(messages)
+                .temperature(0.7)
+                .maxTokens(4500) // ✅ Augmenté pour permettre 4-8 sections avec 300-800 mots chacune
+                .build();
+            
+            ChatCompletionResult result = openAiService.createChatCompletion(request);
+            String responseContent = result.getChoices().get(0).getMessage().getContent();
+            
+            return parseJsonArrayResponse(responseContent);
+            
+        } catch (Exception e) {
+            System.err.println("⚠️ OpenAI API failed for module content generation: " + e.getMessage());
+            return createFallbackModuleContent(moduleTitle, moduleDescription);
+        }
+    }
+    
+    /**
+     * Crée un contenu de module fallback avec des titres VARIÉS et nombre VARIABLE de sections
+     */
+    private List<Map<String, Object>> createFallbackModuleContent(String moduleTitle, String moduleDescription) {
+        List<Map<String, Object>> content = new ArrayList<>();
+        
+        // Extract key term from module title
+        String keyTerm = moduleTitle.replaceAll("Module \\d+:\\s*", "").trim();
+        String[] titleWords = keyTerm.split(" ");
+        String lastWord = titleWords.length > 1 ? titleWords[titleWords.length - 1] : keyTerm;
+        
+        // ✅ NOMBRE VARIABLE de sections (3 à 8 sections selon le titre)
+        java.util.Random random = new java.util.Random(moduleTitle.hashCode()); // Reproductible
+        int sectionCount = 3 + random.nextInt(6); // 3 à 8 sections
+        
+        // ✅ Pool de 30+ TITRES VARIÉS avec structures différentes
+        java.util.List<String> titlePool = java.util.Arrays.asList(
+            // Style question
+            "What is " + keyTerm + "?",
+            "Why " + keyTerm + " Matters?",
+            "How Does " + keyTerm + " Work?",
+            
+            // Style introduction
+            "Understanding " + keyTerm,
+            "Introduction to " + lastWord,
+            keyTerm + " Overview",
+            "Getting Started with " + keyTerm,
+            
+            // Concepts fondamentaux
+            keyTerm + " Core Principles",
+            "Key Concepts in " + lastWord,
+            "Essential " + lastWord + " Components",
+            keyTerm + " Architecture",
+            "The Fundamentals of " + keyTerm,
+            
+            // Pratique
+            "Implementing " + keyTerm,
+            keyTerm + " in Practice",
+            "Step-by-Step " + keyTerm + " Guide",
+            "Hands-On with " + keyTerm,
+            "Building with " + keyTerm,
+            
+            // Configuration
+            keyTerm + " Configuration",
+            "Setting Up " + lastWord,
+            "Deploying " + keyTerm + " Solutions",
+            
+            // Avancé
+            "Advanced " + lastWord + " Techniques",
+            "Optimizing " + keyTerm,
+            keyTerm + " Best Practices",
+            "Mastering " + keyTerm,
+            
+            // Résolution
+            "Troubleshooting " + keyTerm,
+            "Common " + lastWord + " Challenges",
+            keyTerm + " Problem Solving",
+            
+            // Cas d'usage
+            "Real-World " + keyTerm + " Examples",
+            keyTerm + " Use Cases",
+            "When to Use " + keyTerm,
+            
+            // Sécurité/Performance
+            keyTerm + " Security",
+            keyTerm + " Performance Tuning",
+            "Scaling " + keyTerm
+        );
+        
+        // ✅ Mélanger et sélectionner des titres DIFFÉRENTS
+        java.util.List<String> shuffledTitles = new java.util.ArrayList<>(titlePool);
+        java.util.Collections.shuffle(shuffledTitles, random);
+        java.util.List<String> selectedTitles = shuffledTitles.subList(0, Math.min(sectionCount, shuffledTitles.size()));
+        
+        // ✅ Durées VARIÉES (8-22 minutes)
+        int[] possibleDurations = {8, 10, 12, 14, 15, 18, 20, 22};
+        
+        for (int i = 0; i < selectedTitles.size(); i++) {
+            String sectionTitle = selectedTitles.get(i);
+            Map<String, Object> section = new HashMap<>();
+            section.put("id", "section-" + (i + 1));
+            section.put("type", "text");
+            section.put("title", sectionTitle);
+            
+            // ✅ Générer du VRAI contenu éducatif varié (pas juste une phrase générique)
+            String educationalContent;
+            if (sectionTitle.contains("What is") || sectionTitle.contains("Introduction") || sectionTitle.contains("Understanding")) {
+                educationalContent = String.format("""
+                    %s
+                    
+                    This section introduces the fundamental concepts of %s. We'll explore what it is, why it matters, and how it fits into the broader context of modern technology.
+                    
+                    Key Concepts:
+                    
+                    At its core, %s represents a critical component in today's digital landscape. Understanding this topic is essential for anyone working in the field, as it forms the foundation upon which more advanced concepts are built.
+                    
+                    The main principles include:
+                    • Clear understanding of terminology and definitions
+                    • Recognition of core components and their relationships
+                    • Appreciation for historical context and evolution
+                    • Awareness of common use cases and applications
+                    
+                    Practical Context:
+                    
+                    %s is widely used across various industries and scenarios. Whether you're working on web applications, mobile development, or enterprise systems, these concepts apply universally. The skills you develop here will serve as building blocks for more advanced topics.
+                    
+                    By the end of this section, you'll have a solid grasp of the fundamentals and be ready to dive deeper into practical applications.
+                    """, sectionTitle, keyTerm, keyTerm, keyTerm);
+            } else if (sectionTitle.contains("Implementing") || sectionTitle.contains("Step-by-Step") || sectionTitle.contains("Hands-On") || sectionTitle.contains("Building")) {
+                educationalContent = String.format("""
+                    %s
+                    
+                    This section provides hands-on guidance for implementing %s in real-world scenarios. We'll walk through practical examples and step-by-step procedures.
+                    
+                    Implementation Steps:
+                    
+                    1. Planning Phase
+                    Before implementation, assess your requirements and constraints. Consider factors like scalability, performance, and maintainability. Document your approach and identify potential challenges.
+                    
+                    2. Setup and Configuration
+                    Proper setup is crucial for success. Install necessary dependencies, configure your environment, and verify that all prerequisites are met. Follow best practices for security and performance from the start.
+                    
+                    3. Core Implementation
+                    Build the foundational components first. Start with the simplest functionality and gradually add complexity. Test each component thoroughly before moving forward.
+                    
+                    4. Integration and Testing
+                    Once individual components work, integrate them into your larger system. Perform comprehensive testing including unit tests, integration tests, and end-to-end scenarios.
+                    
+                    Best Practices:
+                    • Write clean, maintainable code with proper documentation
+                    • Follow industry standards and conventions
+                    • Implement error handling and logging
+                    • Consider scalability from the beginning
+                    
+                    Common pitfalls to avoid include rushing through planning, neglecting security considerations, and skipping thorough testing. By following this systematic approach, you'll build robust, reliable solutions.
+                    """, sectionTitle, keyTerm);
+            } else if (sectionTitle.contains("Advanced") || sectionTitle.contains("Optimizing") || sectionTitle.contains("Mastering")) {
+                educationalContent = String.format("""
+                    %s
+                    
+                    This section explores advanced techniques and optimization strategies for %s. These concepts build upon foundational knowledge and enable you to achieve expert-level proficiency.
+                    
+                    Advanced Concepts:
+                    
+                    Once you've mastered the basics, it's time to dive into more sophisticated approaches. Advanced techniques often involve understanding edge cases, performance optimization, and scalability considerations.
+                    
+                    Optimization Strategies:
+                    
+                    • Performance Tuning: Identify bottlenecks and optimize critical paths
+                    • Resource Management: Efficient use of memory, CPU, and network resources
+                    • Caching Strategies: Implement intelligent caching to reduce redundant operations
+                    • Load Balancing: Distribute workload effectively across resources
+                    
+                    Expert Techniques:
+                    
+                    Professionals in this field employ various advanced patterns and practices. These include architectural patterns for complex systems, automation strategies for repetitive tasks, and monitoring solutions for proactive issue detection.
+                    
+                    Real-World Applications:
+                    
+                    In production environments, advanced techniques become essential. High-traffic systems require careful optimization, while mission-critical applications demand robust error handling and failover mechanisms.
+                    
+                    Continuous improvement is key. Stay current with emerging best practices, participate in professional communities, and continuously refine your approaches based on real-world results.
+                    """, sectionTitle, keyTerm);
+            } else if (sectionTitle.contains("Troubleshooting") || sectionTitle.contains("Challenges") || sectionTitle.contains("Problem")) {
+                educationalContent = String.format("""
+                    %s
+                    
+                    This section covers common issues, diagnostic approaches, and effective solutions for %s challenges.
+                    
+                    Common Issues:
+                    
+                    Even with careful implementation, problems inevitably arise. Understanding common failure patterns helps you diagnose and resolve issues quickly. The most frequent challenges include configuration errors, integration problems, performance bottlenecks, and unexpected edge cases.
+                    
+                    Diagnostic Approaches:
+                    
+                    Effective troubleshooting follows a systematic process:
+                    
+                    1. Identify Symptoms: Gather information about what's not working
+                    2. Reproduce the Issue: Create reliable test cases that demonstrate the problem
+                    3. Isolate the Cause: Eliminate variables to pinpoint the root cause
+                    4. Implement Solutions: Apply fixes and verify they resolve the issue
+                    5. Prevent Recurrence: Update documentation and add preventive measures
+                    
+                    Solution Strategies:
+                    
+                    • Check logs and error messages carefully
+                    • Verify configuration settings and environment variables
+                    • Test components in isolation to identify failures
+                    • Use debugging tools and monitoring systems
+                    • Consult documentation and community resources
+                    
+                    Prevention Tips:
+                    
+                    Many problems can be prevented through proactive measures. Implement comprehensive logging, establish monitoring alerts, maintain up-to-date documentation, and conduct regular code reviews. Learn from past issues to improve future implementations.
+                    """, sectionTitle, keyTerm);
+            } else {
+                educationalContent = String.format("""
+                    %s
+                    
+                    This section examines important aspects of %s, providing practical knowledge and insights for professional application.
+                    
+                    Overview:
+                    
+                    %s plays a significant role in modern technology implementations. Understanding this topic enables you to make informed decisions and build effective solutions.
+                    
+                    Key Learning Points:
+                    
+                    • Fundamental principles and their applications
+                    • Real-world use cases and scenarios
+                    • Industry standards and best practices
+                    • Common patterns and anti-patterns
+                    
+                    Practical Applications:
+                    
+                    In professional settings, this knowledge applies to various scenarios. Whether you're designing new systems, maintaining existing ones, or optimizing performance, these concepts provide valuable guidance.
+                    
+                    Consider factors such as scalability, maintainability, and security when applying these principles. Balance theoretical understanding with practical experience to develop comprehensive expertise.
+                    
+                    Professional Development:
+                    
+                    Continuous learning is essential in this field. Stay updated with industry trends, participate in professional communities, and regularly practice what you learn. Hands-on experience combined with theoretical knowledge creates well-rounded professionals.
+                    
+                    By mastering this content, you'll be equipped to handle real-world challenges effectively and contribute meaningfully to your organization's technical objectives.
+                    """, sectionTitle, keyTerm, keyTerm);
+            }
+            
+            section.put("content", educationalContent);
+            
+            section.put("duration", possibleDurations[random.nextInt(possibleDurations.length)]);
+            content.add(section);
+        }
+        
+        System.out.println("✅ Generated " + content.size() + " varied sections for fallback: " + moduleTitle);
+        return content;
     }
 }
 

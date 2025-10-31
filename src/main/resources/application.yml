@@ -1,5 +1,8 @@
 server:
   port: 5010
+  tomcat:
+    max-swallow-size: 500MB
+    max-http-post-size: 500MB
   # servlet:
   #   context-path: /api  # ❌ Désactivé - les endpoints sont maintenant à la racine
 
@@ -14,8 +17,10 @@ spring:
   
   servlet:
     multipart:
-      max-file-size: 50MB
-      max-request-size: 50MB
+      max-file-size: 500MB
+      max-request-size: 500MB
+      enabled: true
+      file-size-threshold: 0
   
   security:
     user:
@@ -32,7 +37,7 @@ app:
   
   upload:
     directory: ${UPLOAD_DIR:uploads}
-    max-size: ${MAX_FILE_SIZE:52428800}
+    max-size: ${MAX_FILE_SIZE:524288000}  # 500MB in bytes
   
   # AI Services Configuration
   ai:

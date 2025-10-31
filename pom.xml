@@ -83,6 +83,13 @@
             <version>0.18.2</version>
         </dependency>
 
+        <!-- OkHttp for Whisper API multipart uploads -->
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>okhttp</artifactId>
+            <version>4.12.0</version>
+        </dependency>
+
         <!-- HTTP Client pour ElevenLabs -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -120,6 +127,19 @@
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
             <version>2.10.1</version>
+        </dependency>
+
+        <!-- JSoup for HTML parsing -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.17.2</version>
+        </dependency>
+
+        <!-- Spring Mock for MockMultipartFile -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-test</artifactId>
         </dependency>
 
         <!-- Testing -->

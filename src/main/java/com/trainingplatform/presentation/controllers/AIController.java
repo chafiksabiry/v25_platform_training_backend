@@ -3,6 +3,7 @@ package com.trainingplatform.presentation.controllers;
 import com.trainingplatform.application.services.AIService;
 import com.trainingplatform.application.services.DocumentParserService;
 import com.trainingplatform.application.services.PPTExportService;
+import com.trainingplatform.application.services.UrlContentExtractor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -28,6 +29,9 @@ public class AIController {
     
     @Autowired
     private PPTExportService pptExportService;
+    
+    @Autowired
+    private UrlContentExtractor urlContentExtractor;
     
     /**
      * POST /api/ai/analyze-document
@@ -56,6 +60,50 @@ public class AIController {
             
         } catch (Exception e) {
             System.err.println("❌ ERROR analyzing document: " + e.getClass().getName() + ": " + e.getMessage());
+            e.printStackTrace();
+            
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("error", e.getMessage() != null ? e.getMessage() : "Unknown error occurred");
+            errorResponse.put("errorType", e.getClass().getSimpleName());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+    
+    /**
+     * POST /ai/analyze-url
+     * Analyse content from a URL (YouTube video or HTML page)
+     */
+    @PostMapping("/analyze-url")
+    public ResponseEntity<Map<String, Object>> analyzeUrl(
+        @RequestBody Map<String, String> request
+    ) {
+        try {
+            String url = request.get("url");
+            if (url == null || url.trim().isEmpty()) {
+                throw new IllegalArgumentException("URL is required");
+            }
+            
+            System.out.println("🔗 Analyzing URL: " + url);
+            
+            // Extract content from URL
+            String content = urlContentExtractor.extractContentFromUrl(url);
+            System.out.println("✅ Content extracted: " + content.substring(0, Math.min(150, content.length())) + "...");
+            
+            // Analyze the extracted content
+            Map<String, Object> analysis = aiService.analyzeDocument(content, url);
+            System.out.println("✅ AI Analysis complete");
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("url", url);
+            response.put("contentLength", content.length());
+            response.put("analysis", analysis);
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            System.err.println("❌ ERROR analyzing URL: " + e.getClass().getName() + ": " + e.getMessage());
             e.printStackTrace();
             
             Map<String, Object> errorResponse = new HashMap<>();
@@ -279,6 +327,103 @@ public class AIController {
             Map<String, Object> errorResponse = new HashMap<>();
             errorResponse.put("success", false);
             errorResponse.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+    
+    /**
+     * POST /ai/generate-final-exam
+     * Génère un examen final global pour toute la formation
+     */
+    @PostMapping("/generate-final-exam")
+    public ResponseEntity<Map<String, Object>> generateFinalExam(
+        @RequestBody Map<String, Object> request
+    ) {
+        try {
+            List<Map<String, Object>> modules = (List<Map<String, Object>>) request.get("modules");
+            String formationTitle = (String) request.getOrDefault("formationTitle", "Training Program");
+            
+            if (modules == null || modules.isEmpty()) {
+                throw new IllegalArgumentException("Modules are required for final exam generation");
+            }
+            
+            System.out.println("📝 Generating final exam for formation: " + formationTitle);
+            System.out.println("📊 Covering " + modules.size() + " modules");
+            
+            List<Map<String, Object>> examQuestions = aiService.generateFinalExam(modules, formationTitle);
+            
+            // Calculate total points
+            int totalPoints = examQuestions.stream()
+                .mapToInt(q -> (int) q.getOrDefault("points", 10))
+                .sum();
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("formationTitle", formationTitle);
+            response.put("questions", examQuestions);
+            response.put("questionCount", examQuestions.size());
+            response.put("totalPoints", totalPoints);
+            response.put("passingScore", (int)(totalPoints * 0.7)); // 70% to pass
+            response.put("duration", examQuestions.size() * 2); // 2 minutes per question
+            
+            System.out.println("✅ Final exam generated: " + examQuestions.size() + " questions, " + totalPoints + " points");
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            System.err.println("❌ ERROR generating final exam: " + e.getMessage());
+            e.printStackTrace();
+            
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+    
+    /**
+     * POST /ai/generate-module-content
+     * Génère le contenu détaillé d'un module avec des sections personnalisées
+     * Utilise l'IA pour créer des titres spécifiques basés sur le contenu réel
+     */
+    @PostMapping("/generate-module-content")
+    public ResponseEntity<Map<String, Object>> generateModuleContent(
+        @RequestBody Map<String, Object> request
+    ) {
+        try {
+            String moduleTitle = (String) request.get("moduleTitle");
+            String moduleDescription = (String) request.getOrDefault("moduleDescription", "");
+            String fullTranscription = (String) request.getOrDefault("fullTranscription", "");
+            List<String> learningObjectives = (List<String>) request.getOrDefault("learningObjectives", new ArrayList<>());
+            
+            System.out.println("📚 Generating personalized content for module: " + moduleTitle);
+            
+            // Appeler le service AI pour générer du contenu personnalisé
+            List<Map<String, Object>> sections = aiService.generateModuleContent(
+                moduleTitle,
+                moduleDescription,
+                fullTranscription,
+                learningObjectives
+            );
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("moduleTitle", moduleTitle);
+            response.put("sections", sections);
+            response.put("sectionsCount", sections.size());
+            
+            System.out.println("✅ Generated " + sections.size() + " personalized sections for: " + moduleTitle);
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            System.err.println("❌ ERROR generating module content: " + e.getClass().getName() + ": " + e.getMessage());
+            e.printStackTrace();
+            
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("error", e.getMessage() != null ? e.getMessage() : "Unknown error occurred");
+            errorResponse.put("errorType", e.getClass().getSimpleName());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
         }
     }
