@@ -1,473 +1,145 @@
 package com.trainingplatform.presentation.controllers;
 
 import com.trainingplatform.application.services.AIService;
-import com.trainingplatform.application.services.DocumentParserService;
-import com.trainingplatform.application.services.PPTExportService;
-import com.trainingplatform.application.services.UrlContentExtractor;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/ai")
+@RequestMapping("/api/ai")
+@CrossOrigin(origins = "*")
+@RequiredArgsConstructor
+@Slf4j
 public class AIController {
     
-    @Autowired
-    private AIService aiService;
+    private final AIService aiService;
     
-    @Autowired
-    private DocumentParserService documentParserService;
-    
-    @Autowired
-    private PPTExportService pptExportService;
-    
-    @Autowired
-    private UrlContentExtractor urlContentExtractor;
-    
-    /**
-     * POST /api/ai/analyze-document
-     * Analyse un document uploadé
-     */
-    @PostMapping("/analyze-document")
-    public ResponseEntity<Map<String, Object>> analyzeDocument(
-        @RequestParam("file") MultipartFile file
-    ) {
+    @GetMapping("/check-availability")
+    public ResponseEntity<Map<String, Object>> checkAIAvailability() {
+        Map<String, Object> response = new HashMap<>();
+        
         try {
-            System.out.println("📄 Analyzing document: " + file.getOriginalFilename() + " (" + file.getSize() + " bytes)");
-            
-            String content = documentParserService.extractText(file);
-            System.out.println("✅ Text extracted: " + content.substring(0, Math.min(100, content.length())) + "...");
-            
-            Map<String, Object> analysis = aiService.analyzeDocument(content, file.getOriginalFilename());
-            System.out.println("✅ AI Analysis complete");
-            
-            Map<String, Object> response = new HashMap<>();
-            response.put("success", true);
-            response.put("fileName", file.getOriginalFilename());
-            response.put("fileSize", file.getSize());
-            response.put("analysis", analysis);
-            
+            boolean available = aiService.checkAIAvailability();
+            response.put("available", available);
+            response.put("message", available ? 
+                "AI service is available" : 
+                "AI service is not available. Please configure OpenAI API key.");
             return ResponseEntity.ok(response);
-            
         } catch (Exception e) {
-            System.err.println("❌ ERROR analyzing document: " + e.getClass().getName() + ": " + e.getMessage());
-            e.printStackTrace();
-            
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("success", false);
-            errorResponse.put("error", e.getMessage() != null ? e.getMessage() : "Unknown error occurred");
-            errorResponse.put("errorType", e.getClass().getSimpleName());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+            log.error("Error checking AI availability: {}", e.getMessage());
+            response.put("available", false);
+            response.put("message", "Error checking AI availability: " + e.getMessage());
+            return ResponseEntity.ok(response);
         }
     }
-    
-    /**
-     * POST /ai/analyze-url
-     * Analyse content from a URL (YouTube video or HTML page)
-     */
-    @PostMapping("/analyze-url")
-    public ResponseEntity<Map<String, Object>> analyzeUrl(
-        @RequestBody Map<String, String> request
-    ) {
+
+    @PostMapping("/generate-training-metadata")
+    public ResponseEntity<Map<String, Object>> generateTrainingMetadata(@RequestBody GenerateMetadataRequest request) {
+        Map<String, Object> response = new HashMap<>();
+        
         try {
-            String url = request.get("url");
-            if (url == null || url.trim().isEmpty()) {
-                throw new IllegalArgumentException("URL is required");
-            }
+            log.info("Generating training metadata from {} files", request.getFiles().size());
             
-            System.out.println("🔗 Analyzing URL: " + url);
+            // Convert request files to AIService.FileInfo
+            List<AIService.FileInfo> files = request.getFiles().stream()
+                    .map(f -> new AIService.FileInfo(f.getName(), f.getType(), f.getUrl(), f.getPublicId()))
+                    .toList();
             
-            // Extract content from URL
-            String content = urlContentExtractor.extractContentFromUrl(url);
-            System.out.println("✅ Content extracted: " + content.substring(0, Math.min(150, content.length())) + "...");
-            
-            // Analyze the extracted content
-            Map<String, Object> analysis = aiService.analyzeDocument(content, url);
-            System.out.println("✅ AI Analysis complete");
-            
-            Map<String, Object> response = new HashMap<>();
-            response.put("success", true);
-            response.put("url", url);
-            response.put("contentLength", content.length());
-            response.put("analysis", analysis);
-            
-            return ResponseEntity.ok(response);
-            
-        } catch (Exception e) {
-            System.err.println("❌ ERROR analyzing URL: " + e.getClass().getName() + ": " + e.getMessage());
-            e.printStackTrace();
-            
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("success", false);
-            errorResponse.put("error", e.getMessage() != null ? e.getMessage() : "Unknown error occurred");
-            errorResponse.put("errorType", e.getClass().getSimpleName());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
-    }
-    
-    /**
-     * POST /ai/analyze-multiple-documents
-     * Analyse PLUSIEURS documents et génère UNE SEULE formation consolidée
-     */
-    @PostMapping("/analyze-multiple-documents")
-    public ResponseEntity<Map<String, Object>> analyzeMultipleDocuments(
-        @RequestParam("files") List<MultipartFile> files,
-        @RequestParam(value = "industry", defaultValue = "General") String industry
-    ) {
-        try {
-            // Extraire le texte de TOUS les fichiers
-            List<String> allContents = new ArrayList<>();
-            List<String> fileNames = new ArrayList<>();
-            long totalSize = 0;
-            
-            for (MultipartFile file : files) {
-                String content = documentParserService.extractText(file);
-                allContents.add(content);
-                fileNames.add(file.getOriginalFilename());
-                totalSize += file.getSize();
-            }
-            
-            // Consolider tous les contenus
-            String consolidatedContent = String.join("\n\n--- NEW DOCUMENT ---\n\n", allContents);
-            
-            // Analyser le contenu consolidé
-            Map<String, Object> consolidatedAnalysis = aiService.analyzeConsolidatedDocuments(
-                consolidatedContent, fileNames, industry
+            Map<String, String> metadata = aiService.generateTrainingMetadata(
+                    request.getCompanyName(),
+                    request.getIndustry(),
+                    request.getGig(),
+                    files
             );
             
-            Map<String, Object> response = new HashMap<>();
             response.put("success", true);
-            response.put("filesCount", files.size());
-            response.put("fileNames", fileNames);
-            response.put("totalSize", totalSize);
-            response.put("analysis", consolidatedAnalysis);
-            
+            response.put("title", metadata.get("title"));
+            response.put("description", metadata.get("description"));
             return ResponseEntity.ok(response);
-            
         } catch (Exception e) {
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("success", false);
-            errorResponse.put("error", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+            log.error("Error generating training metadata: {}", e.getMessage(), e);
+            response.put("success", false);
+            response.put("message", "Error generating training metadata: " + e.getMessage());
+            return ResponseEntity.badRequest().body(response);
         }
     }
     
-    /**
-     * POST /api/ai/enhance-content
-     */
-    @PostMapping("/enhance-content")
-    public ResponseEntity<Map<String, Object>> enhanceContent(
-        @RequestBody Map<String, String> request
-    ) {
-        try {
-            String originalContent = request.get("content");
-            String enhancedContent = aiService.enhanceContent(originalContent);
-            
+    @PostMapping("/organize-training")
+    public ResponseEntity<Map<String, Object>> organizeTraining(@RequestBody OrganizeTrainingRequest request) {
             Map<String, Object> response = new HashMap<>();
+        
+        try {
+            log.info("Organizing training {} with {} files", request.getTrainingId(), request.getFiles().size());
+            
+            // Convert request files to AIService.FileInfo
+            List<AIService.FileInfo> files = request.getFiles().stream()
+                    .map(f -> new AIService.FileInfo(f.getName(), f.getType(), f.getUrl(), f.getPublicId()))
+                    .toList();
+            
+            aiService.organizeTrainingContent(request.getTrainingId(), files);
+            
             response.put("success", true);
-            response.put("enhancedContent", enhancedContent);
-            
+            response.put("message", "Training content organized successfully");
             return ResponseEntity.ok(response);
-            
         } catch (Exception e) {
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("success", false);
-            errorResponse.put("error", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+            log.error("Error organizing training content: {}", e.getMessage(), e);
+            response.put("success", false);
+            response.put("message", "Error organizing training content: " + e.getMessage());
+            return ResponseEntity.badRequest().body(response);
         }
     }
     
-    /**
-     * POST /api/ai/generate-quiz
-     */
-    @PostMapping("/generate-quiz")
-    public ResponseEntity<Map<String, Object>> generateQuiz(
-        @RequestBody Map<String, Object> request
-    ) {
-        try {
-            String content = (String) request.get("content");
-            int count = request.containsKey("count") ? 
-                ((Number) request.get("count")).intValue() : 5;
-            
-            List<Map<String, Object>> questions = aiService.generateQuizQuestions(content, count);
-            
-            Map<String, Object> response = new HashMap<>();
-            response.put("success", true);
-            response.put("questions", questions);
-            response.put("count", questions.size());
-            
-            return ResponseEntity.ok(response);
-            
-        } catch (Exception e) {
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("success", false);
-            errorResponse.put("error", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
+    public static class GenerateMetadataRequest {
+        private String companyName;
+        private String industry;
+        private String gig;
+        private List<FileInfoRequest> files;
+
+        public String getCompanyName() { return companyName; }
+        public void setCompanyName(String companyName) { this.companyName = companyName; }
+
+        public String getIndustry() { return industry; }
+        public void setIndustry(String industry) { this.industry = industry; }
+
+        public String getGig() { return gig; }
+        public void setGig(String gig) { this.gig = gig; }
+
+        public List<FileInfoRequest> getFiles() { return files; }
+        public void setFiles(List<FileInfoRequest> files) { this.files = files; }
     }
-    
-    /**
-     * POST /api/ai/generate-audio
-     */
-    @PostMapping("/generate-audio")
-    public ResponseEntity<byte[]> generateAudio(
-        @RequestBody Map<String, String> request
-    ) {
-        try {
-            String text = request.get("text");
-            byte[] audioData = aiService.generateAudio(text);
-            
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.parseMediaType("audio/mpeg"));
-            headers.setContentLength(audioData.length);
-            headers.set("Content-Disposition", "attachment; filename=\"audio.mp3\"");
-            
-            return new ResponseEntity<>(audioData, headers, HttpStatus.OK);
-            
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
-        }
+
+    public static class OrganizeTrainingRequest {
+        private String trainingId;
+        private List<FileInfoRequest> files;
+
+        public String getTrainingId() { return trainingId; }
+        public void setTrainingId(String trainingId) { this.trainingId = trainingId; }
+
+        public List<FileInfoRequest> getFiles() { return files; }
+        public void setFiles(List<FileInfoRequest> files) { this.files = files; }
     }
-    
-    /**
-     * POST /api/ai/chat
-     */
-    @PostMapping("/chat")
-    public ResponseEntity<Map<String, Object>> chat(
-        @RequestBody Map<String, String> request
-    ) {
-        try {
-            String message = request.get("message");
-            String context = request.getOrDefault("context", "");
-            
-            String response = aiService.chatWithTutor(message, context);
-            
-            Map<String, Object> responseMap = new HashMap<>();
-            responseMap.put("success", true);
-            responseMap.put("response", response);
-            responseMap.put("timestamp", System.currentTimeMillis());
-            
-            return ResponseEntity.ok(responseMap);
-            
-        } catch (Exception e) {
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("success", false);
-            errorResponse.put("error", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
-    }
-    
-    /**
-     * POST /ai/generate-curriculum
-     * Génère un curriculum complet basé sur l'analyse du document
-     */
-    @PostMapping("/generate-curriculum")
-    public ResponseEntity<Map<String, Object>> generateCurriculum(
-        @RequestBody Map<String, Object> request
-    ) {
-        try {
-            System.out.println("📚 Generating curriculum...");
-            
-            Map<String, Object> documentAnalysis = (Map<String, Object>) request.get("analysis");
-            String industry = (String) request.getOrDefault("industry", "General");
-            
-            if (documentAnalysis == null) {
-                throw new IllegalArgumentException("Document analysis is required");
-            }
-            
-            System.out.println("📊 Industry: " + industry);
-            System.out.println("📊 Analysis topics: " + documentAnalysis.get("keyTopics"));
-            
-            Map<String, Object> curriculum = aiService.generateCurriculum(documentAnalysis, industry);
-            
-            System.out.println("✅ Curriculum generated successfully with " + 
-                ((List<?>) curriculum.getOrDefault("modules", new ArrayList<>())).size() + " modules");
-            
-            return ResponseEntity.ok(curriculum);
-            
-        } catch (Exception e) {
-            System.err.println("❌ ERROR generating curriculum: " + e.getClass().getName() + ": " + e.getMessage());
-            e.printStackTrace();
-            
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("success", false);
-            errorResponse.put("error", e.getMessage() != null ? e.getMessage() : "Unknown error occurred");
-            errorResponse.put("errorType", e.getClass().getSimpleName());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
-    }
-    
-    /**
-     * POST /ai/generate-video-script
-     * Génère un script vidéo détaillé pour un module
-     */
-    @PostMapping("/generate-video-script")
-    public ResponseEntity<Map<String, Object>> generateVideoScript(
-        @RequestBody Map<String, Object> request
-    ) {
-        try {
-            String moduleTitle = (String) request.get("title");
-            String moduleDescription = (String) request.getOrDefault("description", "Training module");
-            List<String> learningObjectives = (List<String>) request.getOrDefault("learningObjectives", new ArrayList<>());
-            
-            Map<String, Object> script = aiService.generateVideoScript(moduleTitle, moduleDescription, learningObjectives);
-            
-            return ResponseEntity.ok(script);
-            
-        } catch (Exception e) {
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("success", false);
-            errorResponse.put("error", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
-    }
-    
-    /**
-     * POST /ai/generate-final-exam
-     * Génère un examen final global pour toute la formation
-     */
-    @PostMapping("/generate-final-exam")
-    public ResponseEntity<Map<String, Object>> generateFinalExam(
-        @RequestBody Map<String, Object> request
-    ) {
-        try {
-            List<Map<String, Object>> modules = (List<Map<String, Object>>) request.get("modules");
-            String formationTitle = (String) request.getOrDefault("formationTitle", "Training Program");
-            
-            if (modules == null || modules.isEmpty()) {
-                throw new IllegalArgumentException("Modules are required for final exam generation");
-            }
-            
-            System.out.println("📝 Generating final exam for formation: " + formationTitle);
-            System.out.println("📊 Covering " + modules.size() + " modules");
-            
-            List<Map<String, Object>> examQuestions = aiService.generateFinalExam(modules, formationTitle);
-            
-            // Calculate total points
-            int totalPoints = examQuestions.stream()
-                .mapToInt(q -> (int) q.getOrDefault("points", 10))
-                .sum();
-            
-            Map<String, Object> response = new HashMap<>();
-            response.put("success", true);
-            response.put("formationTitle", formationTitle);
-            response.put("questions", examQuestions);
-            response.put("questionCount", examQuestions.size());
-            response.put("totalPoints", totalPoints);
-            response.put("passingScore", (int)(totalPoints * 0.7)); // 70% to pass
-            response.put("duration", examQuestions.size() * 2); // 2 minutes per question
-            
-            System.out.println("✅ Final exam generated: " + examQuestions.size() + " questions, " + totalPoints + " points");
-            
-            return ResponseEntity.ok(response);
-            
-        } catch (Exception e) {
-            System.err.println("❌ ERROR generating final exam: " + e.getMessage());
-            e.printStackTrace();
-            
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("success", false);
-            errorResponse.put("error", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
-    }
-    
-    /**
-     * POST /ai/generate-module-content
-     * Génère le contenu détaillé d'un module avec des sections personnalisées
-     * Utilise l'IA pour créer des titres spécifiques basés sur le contenu réel
-     */
-    @PostMapping("/generate-module-content")
-    public ResponseEntity<Map<String, Object>> generateModuleContent(
-        @RequestBody Map<String, Object> request
-    ) {
-        try {
-            String moduleTitle = (String) request.get("moduleTitle");
-            String moduleDescription = (String) request.getOrDefault("moduleDescription", "");
-            String fullTranscription = (String) request.getOrDefault("fullTranscription", "");
-            List<String> learningObjectives = (List<String>) request.getOrDefault("learningObjectives", new ArrayList<>());
-            
-            System.out.println("📚 Generating personalized content for module: " + moduleTitle);
-            
-            // Appeler le service AI pour générer du contenu personnalisé
-            List<Map<String, Object>> sections = aiService.generateModuleContent(
-                moduleTitle,
-                moduleDescription,
-                fullTranscription,
-                learningObjectives
-            );
-            
-            Map<String, Object> response = new HashMap<>();
-            response.put("success", true);
-            response.put("moduleTitle", moduleTitle);
-            response.put("sections", sections);
-            response.put("sectionsCount", sections.size());
-            
-            System.out.println("✅ Generated " + sections.size() + " personalized sections for: " + moduleTitle);
-            
-            return ResponseEntity.ok(response);
-            
-        } catch (Exception e) {
-            System.err.println("❌ ERROR generating module content: " + e.getClass().getName() + ": " + e.getMessage());
-            e.printStackTrace();
-            
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("success", false);
-            errorResponse.put("error", e.getMessage() != null ? e.getMessage() : "Unknown error occurred");
-            errorResponse.put("errorType", e.getClass().getSimpleName());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
-    }
-    
-    /**
-     * POST /ai/export-powerpoint
-     * Exporte un curriculum de formation en PowerPoint (PPT/PPTX)
-     * Génère des slides animées avec design moderne et images
-     */
-    @PostMapping("/export-powerpoint")
-    public ResponseEntity<byte[]> exportPowerPoint(@RequestBody Map<String, Object> request) {
-        try {
-            Map<String, Object> curriculum = (Map<String, Object>) request.get("curriculum");
-            
-            if (curriculum == null) {
-                throw new IllegalArgumentException("Le curriculum est requis");
-            }
-            
-            // Générer le PowerPoint
-            byte[] pptData = pptExportService.generatePowerPoint(curriculum);
-            
-            // Préparer les headers HTTP
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.presentationml.presentation"));
-            headers.setContentLength(pptData.length);
-            
-            String filename = "Formation_" + System.currentTimeMillis() + ".pptx";
-            headers.set("Content-Disposition", "attachment; filename=\"" + filename + "\"");
-            
-            return new ResponseEntity<>(pptData, headers, HttpStatus.OK);
-            
-        } catch (Exception e) {
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("success", false);
-            errorResponse.put("error", "Erreur lors de la génération du PowerPoint: " + e.getMessage());
-            
-            // En cas d'erreur, retourner un JSON d'erreur
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .headers(headers)
-                .body(null);
-        }
+
+    public static class FileInfoRequest {
+        private String name;
+        private String type;
+        private String url;
+        private String publicId;
+
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+
+        public String getType() { return type; }
+        public void setType(String type) { this.type = type; }
+
+        public String getUrl() { return url; }
+        public void setUrl(String url) { this.url = url; }
+
+        public String getPublicId() { return publicId; }
+        public void setPublicId(String publicId) { this.publicId = publicId; }
     }
 }
-

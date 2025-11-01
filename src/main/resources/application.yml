@@ -52,6 +52,20 @@ app:
       voice-id: 21m00Tcm4TlvDq8ikWAM
       model: eleven_monolingual_v1
 
+  # Cloudinary Configuration
+  cloudinary:
+    cloud-name: ${CLOUDINARY_CLOUD_NAME:dyqg8x26j}
+    api-key: ${CLOUDINARY_API_KEY:981166483223979}
+    api-secret: ${CLOUDINARY_API_SECRET:i3nxRvfOF1jjfLzMHKE8mP4aXVM}
+    presets:
+      training-images: ${CLOUDINARY_PRESET_FOR_TRAININGS_IMAGES:bf1katla}
+      training-content: ${CLOUDINARY_PRESET_FOR_TRAININGS_CONTENT:hio38iac}
+      mockcalls: ${CLOUDINARY_PRESET_FOR_MOCKCALLS:kuecaxbp}
+    limits:
+      image-size-mb: ${CLOUDINARY_IMAGE_LIMIT_SIZE_MB:10}
+      document-size-mb: ${CLOUDINARY_DOCUMENT_LIMIT_SIZE_MB:50}
+      video-size-mb: ${CLOUDINARY_VIDEO_LIMIT_SIZE_MB:100}
+
 logging:
   level:
     com.trainingplatform: ${LOG_LEVEL:DEBUG}

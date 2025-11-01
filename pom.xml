@@ -76,6 +76,20 @@
             <version>1.5</version>
         </dependency>
 
+        <!-- Cloudinary SDK -->
+        <dependency>
+            <groupId>com.cloudinary</groupId>
+            <artifactId>cloudinary-http44</artifactId>
+            <version>1.38.0</version>
+        </dependency>
+        
+        <!-- Lombok -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- AI Integration -->
         <dependency>
             <groupId>com.theokanning.openai-gpt3-java</groupId>
