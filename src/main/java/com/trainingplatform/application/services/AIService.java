@@ -34,6 +34,7 @@ public class AIService {
     
     private final ManualTrainingRepository manualTrainingRepository;
     private final ManualTrainingModuleRepository manualTrainingModuleRepository;
+    private final com.trainingplatform.infrastructure.repositories.ManualQuizRepository manualQuizRepository;
     private final RestTemplate restTemplate = new RestTemplate();
 
     @Value("${app.ai.openai.api-key:}")
@@ -147,6 +148,171 @@ public class AIService {
 
         // Parse response and create modules/sections
         createModulesFromAIResponse(training, aiResponse, files);
+        
+        // ✨ NEW: Automatically generate quizzes for each module
+        log.info("Auto-generating quizzes for training: {}", trainingId);
+        generateQuizzesForTraining(trainingId);
+    }
+    
+    /**
+     * Automatically generate quizzes for all modules and final exam
+     */
+    private void generateQuizzesForTraining(String trainingId) {
+        try {
+            // Get all modules for this training
+            List<ManualTrainingModule> modules = manualTrainingModuleRepository.findByTrainingId(trainingId);
+            
+            if (modules == null || modules.isEmpty()) {
+                log.warn("No modules found for training {}, skipping quiz generation", trainingId);
+                return;
+            }
+            
+            log.info("Generating quizzes for {} modules", modules.size());
+            
+            // Generate quiz for each module (5-7 questions)
+            for (ManualTrainingModule module : modules) {
+                try {
+                    log.info("Generating quiz for module: {}", module.getTitle());
+                    
+                    Map<String, Object> moduleContent = convertModuleToContent(module);
+                    
+                    Map<String, Boolean> questionTypes = new HashMap<>();
+                    questionTypes.put("multipleChoice", true);
+                    questionTypes.put("trueFalse", true);
+                    questionTypes.put("shortAnswer", false);
+                    
+                    Map<String, Object> quizData = generateQuiz(moduleContent, 6, "medium", questionTypes);
+                    
+                    // Create the quiz
+                    @SuppressWarnings("unchecked")
+                    List<Map<String, Object>> questions = (List<Map<String, Object>>) quizData.get("questions");
+                    
+                    com.trainingplatform.core.entities.ManualQuiz quiz = new com.trainingplatform.core.entities.ManualQuiz();
+                    quiz.setModuleId(module.getId());
+                    quiz.setTrainingId(trainingId);
+                    quiz.setTitle(module.getTitle() + " - Quiz");
+                    quiz.setDescription("Quiz auto-généré pour le module: " + module.getTitle());
+                    quiz.setPassingScore(70);
+                    quiz.setTimeLimit(15);
+                    quiz.setMaxAttempts(3);
+                    
+                    // Convert questions
+                    List<com.trainingplatform.core.entities.ManualQuiz.QuizQuestion> quizQuestions = new ArrayList<>();
+                    for (Map<String, Object> q : questions) {
+                        com.trainingplatform.core.entities.ManualQuiz.QuizQuestion question = 
+                            new com.trainingplatform.core.entities.ManualQuiz.QuizQuestion();
+                        question.setId((String) q.get("id"));
+                        question.setQuestion((String) q.get("question"));
+                        question.setType((String) q.get("type"));
+                        
+                        @SuppressWarnings("unchecked")
+                        List<String> options = (List<String>) q.get("options");
+                        question.setOptions(options);
+                        question.setCorrectAnswer(q.get("correctAnswer"));
+                        question.setExplanation((String) q.get("explanation"));
+                        question.setPoints(((Number) q.get("points")).intValue());
+                        
+                        quizQuestions.add(question);
+                    }
+                    
+                    quiz.setQuestions(quizQuestions);
+                    quiz.setSettings(com.trainingplatform.core.entities.ManualQuiz.QuizSettings.builder()
+                        .shuffleQuestions(true)
+                        .shuffleOptions(true)
+                        .showCorrectAnswers(true)
+                        .allowReview(true)
+                        .showExplanations(true)
+                        .build());
+                    
+                    // Save quiz
+                    quiz.setCreatedAt(java.time.LocalDateTime.now());
+                    quiz.setUpdatedAt(java.time.LocalDateTime.now());
+                    quiz.setId(java.util.UUID.randomUUID().toString());
+                    
+                    manualQuizRepository.save(quiz);
+                    
+                    log.info("Quiz created successfully for module: {}", module.getTitle());
+                    
+                } catch (Exception e) {
+                    log.error("Failed to generate quiz for module {}: {}", module.getTitle(), e.getMessage());
+                    // Continue with other modules even if one fails
+                }
+            }
+            
+            // Generate final exam (8-10 questions)
+            if (modules.size() > 1) {
+                try {
+                    log.info("Generating final exam for training");
+                    Map<String, Object> examData = generateFinalExam(trainingId, 9);
+                    
+                    // Handle nested exam structure
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> exam = (Map<String, Object>) examData.get("exam");
+                    
+                    @SuppressWarnings("unchecked")
+                    List<Map<String, Object>> questions = exam != null 
+                        ? (List<Map<String, Object>>) exam.get("questions")
+                        : (List<Map<String, Object>>) examData.get("questions");
+                    
+                    ManualTraining training = manualTrainingRepository.findById(trainingId).orElse(null);
+                    if (training != null) {
+                        com.trainingplatform.core.entities.ManualQuiz finalExam = 
+                            new com.trainingplatform.core.entities.ManualQuiz();
+                        finalExam.setModuleId(null); // Final exam doesn't belong to a module
+                        finalExam.setTrainingId(trainingId);
+                        finalExam.setTitle("Examen Final - " + training.getTitle());
+                        finalExam.setDescription("Examen final couvrant tous les modules");
+                        finalExam.setPassingScore(80);
+                        finalExam.setTimeLimit(45);
+                        finalExam.setMaxAttempts(2);
+                        
+                        // Convert questions
+                        List<com.trainingplatform.core.entities.ManualQuiz.QuizQuestion> examQuestions = new ArrayList<>();
+                        for (Map<String, Object> q : questions) {
+                            com.trainingplatform.core.entities.ManualQuiz.QuizQuestion question = 
+                                new com.trainingplatform.core.entities.ManualQuiz.QuizQuestion();
+                            question.setId((String) q.get("id"));
+                            question.setQuestion((String) q.get("question"));
+                            question.setType((String) q.get("type"));
+                            
+                            @SuppressWarnings("unchecked")
+                            List<String> options = (List<String>) q.get("options");
+                            question.setOptions(options);
+                            question.setCorrectAnswer(q.get("correctAnswer"));
+                            question.setExplanation((String) q.get("explanation"));
+                            question.setPoints(((Number) q.get("points")).intValue());
+                            
+                            examQuestions.add(question);
+                        }
+                        
+                        finalExam.setQuestions(examQuestions);
+                        finalExam.setSettings(com.trainingplatform.core.entities.ManualQuiz.QuizSettings.builder()
+                            .shuffleQuestions(true)
+                            .shuffleOptions(true)
+                            .showCorrectAnswers(false)
+                            .allowReview(true)
+                            .showExplanations(false)
+                            .build());
+                        
+                        finalExam.setCreatedAt(java.time.LocalDateTime.now());
+                        finalExam.setUpdatedAt(java.time.LocalDateTime.now());
+                        finalExam.setId(java.util.UUID.randomUUID().toString());
+                        
+                        manualQuizRepository.save(finalExam);
+                        
+                        log.info("Final exam created successfully");
+                    }
+                } catch (Exception e) {
+                    log.error("Failed to generate final exam: {}", e.getMessage());
+                }
+            }
+            
+            log.info("Quiz generation completed for training: {}", trainingId);
+            
+        } catch (Exception e) {
+            log.error("Error generating quizzes for training: {}", e.getMessage());
+            // Don't throw exception - allow training creation to succeed even if quiz generation fails
+        }
     }
 
     private String buildOrganizationPrompt(ManualTraining training, List<FileInfo> files) {
@@ -186,6 +352,10 @@ public class AIService {
     }
 
     private Map<String, Object> callOpenAI(String prompt) throws Exception {
+        return callOpenAI(prompt, 2000);
+    }
+    
+    private Map<String, Object> callOpenAI(String prompt, int maxTokens) throws Exception {
         if (openaiApiKey == null || openaiApiKey.isEmpty()) {
             throw new RuntimeException("OpenAI API key is not configured");
         }
@@ -197,7 +367,7 @@ public class AIService {
         Map<String, Object> requestBody = new HashMap<>();
         requestBody.put("model", openaiModel);
         requestBody.put("temperature", 0.3); // Lower temperature for better instruction following
-        requestBody.put("max_tokens", 2000); // Reduced to fit within context limits
+        requestBody.put("max_tokens", maxTokens);
 
         List<Map<String, String>> messages = new ArrayList<>();
         
@@ -238,6 +408,14 @@ public class AIService {
             }
 
             Map<String, Object> choice = choices.get(0);
+            
+            // Check if response was truncated
+            String finishReason = (String) choice.get("finish_reason");
+            if ("length".equals(finishReason)) {
+                log.warn("OpenAI response was truncated due to max_tokens limit. Current limit: {}", maxTokens);
+                throw new RuntimeException("Response was truncated. The content is too long. Please reduce the number of questions or module content.");
+            }
+            
             Map<String, Object> messageObj = (Map<String, Object>) choice.get("message");
             String content = (String) messageObj.get("content");
 
@@ -248,6 +426,13 @@ public class AIService {
             return parseAIResponse(content);
         } catch (Exception e) {
             log.error("Failed to call OpenAI API: {}", e.getMessage());
+            
+            // Check if it's a context length error
+            if (e.getMessage() != null && e.getMessage().contains("context_length_exceeded")) {
+                throw new RuntimeException("Context length exceeded. The model's limit is 8192 tokens total. " +
+                    "Please reduce the number of questions (try 8-10 for final exam) or simplify module content.");
+            }
+            
             throw new RuntimeException("Failed to call OpenAI API: " + e.getMessage());
         }
     }
@@ -522,5 +707,179 @@ public class AIService {
             
             return text.toString();
         }
+    }
+    
+    /**
+     * Generate quiz questions using AI based on module content
+     */
+    public Map<String, Object> generateQuiz(Map<String, Object> moduleContent, 
+                                             int numberOfQuestions,
+                                             String difficulty,
+                                             Map<String, Boolean> questionTypes) throws Exception {
+        if (!checkAIAvailability()) {
+            throw new RuntimeException("AI service is not available");
+        }
+
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("You are an expert quiz creator. Generate quiz questions from module content.\n\n");
+        
+        prompt.append("=== MODULE INFORMATION ===\n");
+        prompt.append("Title: ").append(moduleContent.get("title")).append("\n");
+        prompt.append("Description: ").append(moduleContent.get("description")).append("\n\n");
+        
+        // Add section content
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> sections = (List<Map<String, Object>>) moduleContent.get("sections");
+        if (sections != null && !sections.isEmpty()) {
+            prompt.append("=== SECTIONS ===\n");
+            for (int i = 0; i < sections.size(); i++) {
+                Map<String, Object> section = sections.get(i);
+                prompt.append(String.format("\nSection %d: %s\n", (i + 1), section.get("title")));
+                
+                @SuppressWarnings("unchecked")
+                Map<String, Object> content = (Map<String, Object>) section.get("content");
+                if (content != null && content.get("text") != null) {
+                    prompt.append("Content: ").append(content.get("text")).append("\n");
+                }
+            }
+        }
+        
+        prompt.append("\n=== QUIZ REQUIREMENTS ===\n");
+        prompt.append("Number of Questions: ").append(numberOfQuestions).append("\n");
+        prompt.append("Difficulty Level: ").append(difficulty).append("\n");
+        prompt.append("Allowed Question Types:\n");
+        if (questionTypes.get("multipleChoice")) {
+            prompt.append("- multiple-choice (4 options)\n");
+        }
+        if (questionTypes.get("trueFalse")) {
+            prompt.append("- true-false\n");
+        }
+        if (questionTypes.get("shortAnswer")) {
+            prompt.append("- short-answer\n");
+        }
+        
+        prompt.append("\n=== YOUR TASK ===\n");
+        prompt.append("Create ").append(numberOfQuestions).append(" high-quality quiz questions.\n\n");
+        
+        prompt.append("REQUIREMENTS:\n");
+        prompt.append("1. Questions must be DIRECTLY related to module content\n");
+        prompt.append("2. Cover different aspects of the material\n");
+        prompt.append("3. Difficulty: ").append(difficulty).append("\n");
+        prompt.append("4. Each question must have:\n");
+        prompt.append("   - Clear, specific question text\n");
+        prompt.append("   - For multiple-choice: 4 options with one correct answer\n");
+        prompt.append("   - For true-false: correct answer (0=True, 1=False)\n");
+        prompt.append("   - For short-answer: expected answer\n");
+        prompt.append("   - Helpful explanation\n");
+        prompt.append("   - Points (1-5 based on difficulty)\n\n");
+        
+        prompt.append("CRITICAL: Return ONLY raw JSON. NO markdown, NO code blocks, NO extra text.\n");
+        prompt.append("Start with { and end with }. Nothing else.\n\n");
+        
+        prompt.append("Required JSON format:\n");
+        prompt.append("{\n");
+        prompt.append("  \"questions\": [\n");
+        prompt.append("    {\n");
+        prompt.append("      \"id\": \"q1\",\n");
+        prompt.append("      \"question\": \"Question text here?\",\n");
+        prompt.append("      \"type\": \"multiple-choice\",\n");
+        prompt.append("      \"options\": [\"Option A\", \"Option B\", \"Option C\", \"Option D\"],\n");
+        prompt.append("      \"correctAnswer\": 0,\n");
+        prompt.append("      \"explanation\": \"Why this answer is correct...\",\n");
+        prompt.append("      \"points\": 1\n");
+        prompt.append("    }\n");
+        prompt.append("  ]\n");
+        prompt.append("}\n\n");
+        prompt.append("REMEMBER: Return ONLY the JSON object. No text before or after.\n");
+        
+        // Call OpenAI with higher token limit for quiz generation
+        return callOpenAI(prompt.toString(), 4000);
+    }
+    
+    /**
+     * Generate a final exam for the entire training
+     */
+    public Map<String, Object> generateFinalExam(String trainingId, int numberOfQuestions) throws Exception {
+        ManualTraining training = manualTrainingRepository.findById(trainingId)
+                .orElseThrow(() -> new RuntimeException("Training not found"));
+        
+        // Get all modules for this training
+        List<ManualTrainingModule> modules = manualTrainingModuleRepository.findByTrainingId(trainingId);
+        
+        if (modules == null || modules.isEmpty()) {
+            throw new RuntimeException("No modules found for this training");
+        }
+        
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("Create a comprehensive final exam. Be CONCISE in JSON.\n\n");
+        
+        prompt.append("TRAINING: ").append(training.getTitle()).append("\n\n");
+        
+        prompt.append("MODULES:\n");
+        for (int i = 0; i < modules.size(); i++) {
+            ManualTrainingModule module = modules.get(i);
+            prompt.append(String.format("%d. %s\n", (i + 1), module.getTitle()));
+            
+            // Only include section count, not all sections to save tokens
+            if (module.getSections() != null && !module.getSections().isEmpty()) {
+                prompt.append("   (").append(module.getSections().size()).append(" sections)\n");
+            }
+        }
+        
+        prompt.append("\nEXAM: ").append(numberOfQuestions).append(" questions\n");
+        prompt.append("- Mix types (multiple-choice, true-false)\n");
+        prompt.append("- Mix difficulty (30% easy, 50% medium, 20% hard)\n");
+        prompt.append("- Cover all modules equally\n");
+        prompt.append("- Brief explanations\n\n");
+        
+        prompt.append("JSON format (CONCISE explanations):\n");
+        prompt.append("{\"questions\":[{\"id\":\"q1\",\"question\":\"?\",\"type\":\"multiple-choice\",");
+        prompt.append("\"options\":[\"A\",\"B\",\"C\",\"D\"],\"correctAnswer\":0,");
+        prompt.append("\"explanation\":\"Brief.\",\"points\":2,\"moduleReference\":\"Module 1\"}]}\n\n");
+        prompt.append("CRITICAL: Return ONLY JSON starting with {\"questions\":[...]}. Keep explanations SHORT (max 20 words).\n");
+        
+        // Call OpenAI with appropriate token limit
+        // gpt-4o-mini has 8192 total tokens, so we need: prompt_tokens + completion_tokens < 8192
+        // With ~500 tokens for prompt, we can safely use 4000 tokens for completion
+        return callOpenAI(prompt.toString(), 4000);
+    }
+    
+    /**
+     * Convert a module to content map for AI processing
+     */
+    private Map<String, Object> convertModuleToContent(ManualTrainingModule module) {
+        Map<String, Object> content = new HashMap<>();
+        content.put("title", module.getTitle());
+        content.put("description", module.getDescription());
+        
+        // Convert sections to simple maps for AI processing
+        java.util.List<Map<String, Object>> sectionsData = new java.util.ArrayList<>();
+        if (module.getSections() != null) {
+            for (ManualTrainingModule.TrainingSection section : module.getSections()) {
+                Map<String, Object> sectionMap = new HashMap<>();
+                sectionMap.put("id", section.getId());
+                sectionMap.put("title", section.getTitle());
+                sectionMap.put("type", section.getType());
+                sectionMap.put("orderIndex", section.getOrderIndex());
+                sectionMap.put("estimatedDuration", section.getEstimatedDuration());
+                
+                // Include content details if available
+                if (section.getContent() != null) {
+                    Map<String, Object> contentMap = new HashMap<>();
+                    ManualTrainingModule.SectionContent cont = section.getContent();
+                    
+                    if (cont.getText() != null) contentMap.put("text", cont.getText());
+                    if (cont.getYoutubeUrl() != null) contentMap.put("youtubeUrl", cont.getYoutubeUrl());
+                    if (cont.getKeyPoints() != null) contentMap.put("keyPoints", cont.getKeyPoints());
+                    
+                    sectionMap.put("content", contentMap);
+                }
+                
+                sectionsData.add(sectionMap);
+            }
+        }
+        content.put("sections", sectionsData);
+        
+        return content;
     }
 }

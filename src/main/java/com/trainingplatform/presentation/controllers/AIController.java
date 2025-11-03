@@ -142,4 +142,97 @@ public class AIController {
         public String getPublicId() { return publicId; }
         public void setPublicId(String publicId) { this.publicId = publicId; }
     }
+    
+    /**
+     * Generate quiz questions using AI for a module
+     */
+    @PostMapping("/generate-quiz")
+    public ResponseEntity<Map<String, Object>> generateQuiz(@RequestBody GenerateQuizRequest request) {
+        Map<String, Object> response = new HashMap<>();
+        
+        try {
+            log.info("Generating quiz with {} questions for module", request.getNumberOfQuestions());
+            
+            Map<String, Object> result = aiService.generateQuiz(
+                    request.getModuleContent(),
+                    request.getNumberOfQuestions(),
+                    request.getDifficulty(),
+                    request.getQuestionTypes()
+            );
+            
+            response.put("success", true);
+            response.put("data", result);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error generating quiz: {}", e.getMessage(), e);
+            response.put("success", false);
+            response.put("message", "Error generating quiz: " + e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+    
+    /**
+     * Generate a final exam for the entire training
+     */
+    @PostMapping("/generate-final-exam")
+    public ResponseEntity<Map<String, Object>> generateFinalExam(@RequestBody GenerateFinalExamRequest request) {
+        Map<String, Object> response = new HashMap<>();
+        
+        try {
+            log.info("Generating final exam with {} questions for training {}", 
+                request.getNumberOfQuestions(), request.getTrainingId());
+            
+            Map<String, Object> result = aiService.generateFinalExam(
+                    request.getTrainingId(),
+                    request.getNumberOfQuestions()
+            );
+            
+            response.put("success", true);
+            response.put("data", result);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error generating final exam: {}", e.getMessage(), e);
+            response.put("success", false);
+            response.put("message", "Error generating final exam: " + e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+    
+    public static class GenerateQuizRequest {
+        private Map<String, Object> moduleContent;
+        private int numberOfQuestions;
+        private String difficulty;
+        private Map<String, Boolean> questionTypes;
+        private String moduleId;
+        private String trainingId;
+
+        public Map<String, Object> getModuleContent() { return moduleContent; }
+        public void setModuleContent(Map<String, Object> moduleContent) { this.moduleContent = moduleContent; }
+
+        public int getNumberOfQuestions() { return numberOfQuestions; }
+        public void setNumberOfQuestions(int numberOfQuestions) { this.numberOfQuestions = numberOfQuestions; }
+
+        public String getDifficulty() { return difficulty; }
+        public void setDifficulty(String difficulty) { this.difficulty = difficulty; }
+
+        public Map<String, Boolean> getQuestionTypes() { return questionTypes; }
+        public void setQuestionTypes(Map<String, Boolean> questionTypes) { this.questionTypes = questionTypes; }
+
+        public String getModuleId() { return moduleId; }
+        public void setModuleId(String moduleId) { this.moduleId = moduleId; }
+
+        public String getTrainingId() { return trainingId; }
+        public void setTrainingId(String trainingId) { this.trainingId = trainingId; }
+    }
+    
+    public static class GenerateFinalExamRequest {
+        private String trainingId;
+        private int numberOfQuestions;
+
+        public String getTrainingId() { return trainingId; }
+        public void setTrainingId(String trainingId) { this.trainingId = trainingId; }
+
+        public int getNumberOfQuestions() { return numberOfQuestions; }
+        public void setNumberOfQuestions(int numberOfQuestions) { this.numberOfQuestions = numberOfQuestions; }
+    }
 }

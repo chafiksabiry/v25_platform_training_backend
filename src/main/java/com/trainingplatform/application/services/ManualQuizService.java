@@ -146,10 +146,30 @@ public class ManualQuizService {
     }
     
     /**
-     * Submit quiz attempt
+     * Submit quiz attempt with security validation
      */
-    public QuizResult submitQuiz(String userId, String quizId, Map<String, Object> answers) {
+    public QuizResult submitQuiz(String userId, String quizId, Map<String, Object> answers, 
+                                  com.trainingplatform.core.entities.QuizAttemptMetadata metadata) {
         ManualQuiz quiz = getQuizById(quizId);
+        
+        // ✅ SECURITY VALIDATION
+        SecurityValidationResult securityResult = validateQuizSecurity(quiz, metadata);
+        
+        if (!securityResult.isValid()) {
+            log.error("🚨 SECURITY VIOLATION: User {} - Quiz {} - Reason: {}", 
+                     userId, quizId, securityResult.getReason());
+            
+            // Return failed result with security warning
+            return QuizResult.builder()
+                .score(0)
+                .earnedPoints(0)
+                .totalPoints(0)
+                .passed(false)
+                .correctness(new HashMap<>())
+                .securityViolation(true)
+                .securityMessage(securityResult.getReason())
+                .build();
+        }
         
         // Calculate score
         int totalPoints = quiz.getQuestions().stream()
@@ -169,13 +189,27 @@ public class ManualQuizService {
             }
         }
         
-        int scorePercentage = (totalPoints > 0) ? (earnedPoints * 100 / totalPoints) : 0;
+        // Apply penalty multiplier based on violations
+        double penaltyMultiplier = calculatePenaltyMultiplier(metadata);
+        
+        int scorePercentage = (totalPoints > 0) ? 
+            (int)((earnedPoints * 100.0 / totalPoints) * penaltyMultiplier) : 0;
         boolean passed = scorePercentage >= quiz.getPassingScore();
         
-        // Save to progress
-        saveQuizAttempt(userId, quiz, scorePercentage, earnedPoints, totalPoints, passed, answers);
+        // Log security metrics
+        if (metadata.getViolationCount() != null && metadata.getViolationCount() > 0) {
+            log.warn("⚠️ User {} had {} violations - Score penalty applied: {}%", 
+                    userId, metadata.getViolationCount(), 
+                    (int)((1 - penaltyMultiplier) * 100));
+        }
         
-        log.info("User {} submitted quiz {}: {}% ({})", userId, quizId, scorePercentage, passed ? "PASSED" : "FAILED");
+        // Save to progress with metadata
+        saveQuizAttempt(userId, quiz, scorePercentage, earnedPoints, totalPoints, passed, answers, metadata);
+        
+        log.info("User {} submitted quiz {}: {}% ({}) - Violations: {}", 
+                userId, quizId, scorePercentage, 
+                passed ? "PASSED" : "FAILED",
+                metadata.getViolationCount() != null ? metadata.getViolationCount() : 0);
         
         return QuizResult.builder()
             .score(scorePercentage)
@@ -183,7 +217,97 @@ public class ManualQuizService {
             .totalPoints(totalPoints)
             .passed(passed)
             .correctness(correctness)
+            .penaltyApplied(penaltyMultiplier < 1.0)
+            .penaltyPercentage((int)((1 - penaltyMultiplier) * 100))
             .build();
+    }
+    
+    /**
+     * Validate quiz security based on metadata
+     */
+    private SecurityValidationResult validateQuizSecurity(ManualQuiz quiz, 
+                                                          com.trainingplatform.core.entities.QuizAttemptMetadata metadata) {
+        if (metadata == null) {
+            return SecurityValidationResult.invalid("No security metadata provided");
+        }
+        
+        // 1. Validate timing
+        if (metadata.getStartTime() != null && metadata.getEndTime() != null) {
+            long totalTime = metadata.getEndTime() - metadata.getStartTime();
+            long minExpectedTime = quiz.getQuestions().size() * 10000L; // 10 seconds per question
+            
+            if (totalTime < minExpectedTime) {
+                return SecurityValidationResult.invalid(
+                    String.format("Quiz completed too quickly (%d ms). Minimum expected: %d ms", 
+                                totalTime, minExpectedTime));
+            }
+        }
+        
+        // 2. Validate violations threshold
+        if (metadata.getViolationCount() != null && metadata.getViolationCount() > 10) {
+            return SecurityValidationResult.invalid(
+                String.format("Too many violations detected (%d). Maximum allowed: 10", 
+                            metadata.getViolationCount()));
+        }
+        
+        // 3. Validate question response times (detect bot patterns)
+        if (metadata.getQuestionResponseTimes() != null) {
+            long suspiciouslyFastCount = metadata.getQuestionResponseTimes().values().stream()
+                .filter(time -> time != null && time < 2000) // < 2 seconds
+                .count();
+            
+            // If more than 80% of questions answered in < 2 seconds → likely bot
+            if (suspiciouslyFastCount > quiz.getQuestions().size() * 0.8) {
+                return SecurityValidationResult.invalid(
+                    String.format("Bot-like behavior detected: %d/%d questions answered instantly", 
+                                suspiciouslyFastCount, quiz.getQuestions().size()));
+            }
+        }
+        
+        return SecurityValidationResult.valid();
+    }
+    
+    /**
+     * Calculate penalty multiplier based on violations
+     * Each violation reduces score by 5%, up to maximum 50% penalty
+     */
+    private double calculatePenaltyMultiplier(com.trainingplatform.core.entities.QuizAttemptMetadata metadata) {
+        if (metadata.getViolationCount() == null || metadata.getViolationCount() == 0) {
+            return 1.0; // No penalty
+        }
+        
+        // -5% per violation, max 50% penalty
+        double penalty = Math.min(metadata.getViolationCount() * 0.05, 0.5);
+        return 1.0 - penalty;
+    }
+    
+    /**
+     * Security validation result
+     */
+    private static class SecurityValidationResult {
+        private final boolean valid;
+        private final String reason;
+        
+        private SecurityValidationResult(boolean valid, String reason) {
+            this.valid = valid;
+            this.reason = reason;
+        }
+        
+        public static SecurityValidationResult valid() {
+            return new SecurityValidationResult(true, null);
+        }
+        
+        public static SecurityValidationResult invalid(String reason) {
+            return new SecurityValidationResult(false, reason);
+        }
+        
+        public boolean isValid() {
+            return valid;
+        }
+        
+        public String getReason() {
+            return reason;
+        }
     }
     
     private boolean checkAnswer(ManualQuiz.QuizQuestion question, Object userAnswer) {
@@ -206,7 +330,8 @@ public class ManualQuizService {
     }
     
     private void saveQuizAttempt(String userId, ManualQuiz quiz, int score, int earnedPoints, 
-                                  int totalPoints, boolean passed, Map<String, Object> answers) {
+                                  int totalPoints, boolean passed, Map<String, Object> answers,
+                                  com.trainingplatform.core.entities.QuizAttemptMetadata metadata) {
         TrainingProgress progress = progressRepository
             .findByUserIdAndTrainingId(userId, quiz.getTrainingId())
             .orElseGet(() -> {
@@ -229,8 +354,16 @@ public class ManualQuizService {
             .score(score)
             .maxScore(100)
             .passed(passed)
-            .startedAt(LocalDateTime.now())
-            .completedAt(LocalDateTime.now())
+            .startedAt(metadata.getStartTime() != null ? 
+                      java.time.Instant.ofEpochMilli(metadata.getStartTime())
+                          .atZone(java.time.ZoneId.systemDefault())
+                          .toLocalDateTime() : 
+                      LocalDateTime.now())
+            .completedAt(metadata.getEndTime() != null ? 
+                        java.time.Instant.ofEpochMilli(metadata.getEndTime())
+                            .atZone(java.time.ZoneId.systemDefault())
+                            .toLocalDateTime() : 
+                        LocalDateTime.now())
             .answers(answers)
             .build();
         
@@ -238,6 +371,14 @@ public class ManualQuizService {
         progress.setLastAccessedAt(LocalDateTime.now());
         
         progressRepository.save(progress);
+        
+        // Log security metadata for audit trail
+        if (metadata.getViolationCount() != null && metadata.getViolationCount() > 0) {
+            log.info("📊 Security Audit - User: {}, Quiz: {}, Violations: {}, Types: {}", 
+                    userId, quiz.getId(), 
+                    metadata.getViolationCount(),
+                    metadata.getViolationTypes());
+        }
     }
     
     /**
@@ -256,6 +397,10 @@ public class ManualQuizService {
         private int totalPoints;
         private boolean passed;
         private Map<String, Boolean> correctness;
+        private boolean securityViolation;
+        private String securityMessage;
+        private boolean penaltyApplied;
+        private int penaltyPercentage;
         
         public static QuizResultBuilder builder() {
             return new QuizResultBuilder();
@@ -266,6 +411,10 @@ public class ManualQuizService {
         public int getTotalPoints() { return totalPoints; }
         public boolean isPassed() { return passed; }
         public Map<String, Boolean> getCorrectness() { return correctness; }
+        public boolean isSecurityViolation() { return securityViolation; }
+        public String getSecurityMessage() { return securityMessage; }
+        public boolean isPenaltyApplied() { return penaltyApplied; }
+        public int getPenaltyPercentage() { return penaltyPercentage; }
         
         public static class QuizResultBuilder {
             private int score;
@@ -273,6 +422,10 @@ public class ManualQuizService {
             private int totalPoints;
             private boolean passed;
             private Map<String, Boolean> correctness;
+            private boolean securityViolation;
+            private String securityMessage;
+            private boolean penaltyApplied;
+            private int penaltyPercentage;
             
             public QuizResultBuilder score(int score) {
                 this.score = score;
@@ -299,6 +452,26 @@ public class ManualQuizService {
                 return this;
             }
             
+            public QuizResultBuilder securityViolation(boolean securityViolation) {
+                this.securityViolation = securityViolation;
+                return this;
+            }
+            
+            public QuizResultBuilder securityMessage(String securityMessage) {
+                this.securityMessage = securityMessage;
+                return this;
+            }
+            
+            public QuizResultBuilder penaltyApplied(boolean penaltyApplied) {
+                this.penaltyApplied = penaltyApplied;
+                return this;
+            }
+            
+            public QuizResultBuilder penaltyPercentage(int penaltyPercentage) {
+                this.penaltyPercentage = penaltyPercentage;
+                return this;
+            }
+            
             public QuizResult build() {
                 QuizResult result = new QuizResult();
                 result.score = this.score;
@@ -306,6 +479,10 @@ public class ManualQuizService {
                 result.totalPoints = this.totalPoints;
                 result.passed = this.passed;
                 result.correctness = this.correctness;
+                result.securityViolation = this.securityViolation;
+                result.securityMessage = this.securityMessage;
+                result.penaltyApplied = this.penaltyApplied;
+                result.penaltyPercentage = this.penaltyPercentage;
                 return result;
             }
         }
