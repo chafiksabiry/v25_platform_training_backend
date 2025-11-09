@@ -21,6 +21,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -122,7 +123,8 @@ public class AIService {
         return metadata;
     }
 
-    public void organizeTrainingContent(String trainingId, List<FileInfo> files) throws Exception {
+    public void organizeTrainingContent(String trainingId, List<FileInfo> files, String organizationInstructions, 
+                                       boolean generateModuleQuizzes, boolean generateFinalExam) throws Exception {
         ManualTraining training = manualTrainingRepository.findById(trainingId)
                 .orElseThrow(() -> new RuntimeException("Training not found"));
 
@@ -141,7 +143,7 @@ public class AIService {
         }
 
         // Build prompt for OpenAI
-        String prompt = buildOrganizationPrompt(training, files);
+        String prompt = buildOrganizationPrompt(training, files, organizationInstructions);
 
         // Call OpenAI API
         Map<String, Object> aiResponse = callOpenAI(prompt);
@@ -149,15 +151,42 @@ public class AIService {
         // Parse response and create modules/sections
         createModulesFromAIResponse(training, aiResponse, files);
         
-        // ✨ NEW: Automatically generate quizzes for each module
-        log.info("Auto-generating quizzes for training: {}", trainingId);
-        generateQuizzesForTraining(trainingId);
+        // Generate quizzes based on user options
+        if (generateModuleQuizzes || generateFinalExam) {
+            log.info("Auto-generating quizzes for training: {} (module quizzes: {}, final exam: {})", 
+                trainingId, generateModuleQuizzes, generateFinalExam);
+            generateQuizzesForTraining(trainingId, generateModuleQuizzes, generateFinalExam);
+        } else {
+            log.info("Skipping quiz generation for training: {} (user opted out)", trainingId);
+        }
+    }
+    
+    /**
+     * Calculate number of questions for a module (5-15 based on module content)
+     */
+    private int calculateQuestionsForModule(ManualTrainingModule module) {
+        int baseQuestions = 5; // Minimum
+        int maxQuestions = 15; // Maximum
+        
+        // Base calculation on number of sections
+        int sectionCount = (module.getSections() != null) ? module.getSections().size() : 0;
+        
+        // Calculate: 5 + (sections * 2), capped at 15
+        int calculatedQuestions = baseQuestions + (sectionCount * 2);
+        
+        // Ensure it's between 5 and 15
+        int numberOfQuestions = Math.max(baseQuestions, Math.min(maxQuestions, calculatedQuestions));
+        
+        log.debug("Module '{}' has {} sections, generating {} questions", 
+            module.getTitle(), sectionCount, numberOfQuestions);
+        
+        return numberOfQuestions;
     }
     
     /**
      * Automatically generate quizzes for all modules and final exam
      */
-    private void generateQuizzesForTraining(String trainingId) {
+    private void generateQuizzesForTraining(String trainingId, boolean generateModuleQuizzes, boolean generateFinalExam) {
         try {
             // Get all modules for this training
             List<ManualTrainingModule> modules = manualTrainingModuleRepository.findByTrainingId(trainingId);
@@ -167,9 +196,11 @@ public class AIService {
                 return;
             }
             
-            log.info("Generating quizzes for {} modules", modules.size());
+            log.info("Generating quizzes for {} modules (module quizzes: {}, final exam: {})", 
+                modules.size(), generateModuleQuizzes, generateFinalExam);
             
-            // Generate quiz for each module (5-7 questions)
+            // Generate quiz for each module (5-15 questions based on module content)
+            if (generateModuleQuizzes) {
             for (ManualTrainingModule module : modules) {
                 try {
                     log.info("Generating quiz for module: {}", module.getTitle());
@@ -181,7 +212,10 @@ public class AIService {
                     questionTypes.put("trueFalse", true);
                     questionTypes.put("shortAnswer", false);
                     
-                    Map<String, Object> quizData = generateQuiz(moduleContent, 6, "medium", questionTypes);
+                        // Calculate dynamic number of questions (5-15)
+                        int numberOfQuestions = calculateQuestionsForModule(module);
+                        
+                        Map<String, Object> quizData = generateQuiz(moduleContent, numberOfQuestions, "medium", questionTypes);
                     
                     // Create the quiz
                     @SuppressWarnings("unchecked")
@@ -236,14 +270,15 @@ public class AIService {
                 } catch (Exception e) {
                     log.error("Failed to generate quiz for module {}: {}", module.getTitle(), e.getMessage());
                     // Continue with other modules even if one fails
+                    }
                 }
             }
             
-            // Generate final exam (8-10 questions)
-            if (modules.size() > 1) {
+            // Generate final exam (20 questions)
+            if (generateFinalExam && modules.size() > 1) {
                 try {
-                    log.info("Generating final exam for training");
-                    Map<String, Object> examData = generateFinalExam(trainingId, 9);
+                    log.info("Generating final exam for training with 20 questions");
+                    Map<String, Object> examData = generateFinalExam(trainingId, 20);
                     
                     // Handle nested exam structure
                     @SuppressWarnings("unchecked")
@@ -315,7 +350,7 @@ public class AIService {
         }
     }
 
-    private String buildOrganizationPrompt(ManualTraining training, List<FileInfo> files) {
+    private String buildOrganizationPrompt(ManualTraining training, List<FileInfo> files, String organizationInstructions) {
         StringBuilder prompt = new StringBuilder();
         prompt.append("Create training modules from files. Analyze content and organize logically.\n\n");
         
@@ -324,6 +359,13 @@ public class AIService {
             prompt.append(training.getDescription()).append("\n");
         }
         prompt.append("\n");
+        
+        // Add user's organization instructions if provided
+        if (organizationInstructions != null && !organizationInstructions.trim().isEmpty()) {
+            prompt.append("USER ORGANIZATION INSTRUCTIONS:\n");
+            prompt.append(organizationInstructions.trim()).append("\n\n");
+            prompt.append("IMPORTANT: Follow the user's instructions above when organizing the content.\n\n");
+        }
         
         prompt.append("FILES:\n");
         for (int i = 0; i < files.size(); i++) {
@@ -336,6 +378,10 @@ public class AIService {
         }
 
         prompt.append("\nTASK: Create modules with sections from file content. Group related files into modules.\n");
+        
+        if (organizationInstructions != null && !organizationInstructions.trim().isEmpty()) {
+            prompt.append("PRIORITY: Follow the user's organization instructions provided above.\n");
+        }
         
         prompt.append("\nRULES:\n");
         prompt.append("- Total ").append(files.size()).append(" sections (1 per file, fileIndex 0-").append(files.size() - 1).append(")\n");
@@ -845,6 +891,95 @@ public class AIService {
     }
     
     /**
+     * Analyze a document with AI to extract key topics, learning objectives, etc.
+     */
+    public Map<String, Object> analyzeDocument(MultipartFile file) throws Exception {
+        if (!checkAIAvailability()) {
+            throw new RuntimeException("AI service is not available");
+        }
+
+        // Extract text content from file
+        byte[] fileBytes = file.getBytes();
+        String content = extractTextFromBytes(fileBytes, file.getOriginalFilename());
+        
+        // Limit content to avoid token limits
+        if (content.length() > 4000) {
+            content = content.substring(0, 4000) + "\n[...content truncated...]";
+        }
+
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("You are an expert instructional designer analyzing training content.\n\n");
+        prompt.append("=== DOCUMENT CONTENT ===\n");
+        prompt.append(content).append("\n\n");
+        
+        prompt.append("=== YOUR TASK ===\n");
+        prompt.append("Analyze this document and extract:\n");
+        prompt.append("1. Key topics (5-10 main topics)\n");
+        prompt.append("2. Difficulty level (1-10, where 1=beginner, 10=expert)\n");
+        prompt.append("3. Estimated read time in minutes\n");
+        prompt.append("4. Learning objectives (3-5 clear objectives)\n");
+        prompt.append("5. Prerequisites (what learners should know before)\n");
+        prompt.append("6. Suggested modules (how to organize this content into 3-5 modules)\n\n");
+        
+        prompt.append("CRITICAL: Return ONLY raw JSON. NO markdown, NO code blocks, NO extra text.\n");
+        prompt.append("Start with { and end with }. Nothing else.\n\n");
+        
+        prompt.append("Required JSON format:\n");
+        prompt.append("{\n");
+        prompt.append("  \"keyTopics\": [\"topic1\", \"topic2\", ...],\n");
+        prompt.append("  \"difficulty\": 5,\n");
+        prompt.append("  \"estimatedReadTime\": 30,\n");
+        prompt.append("  \"learningObjectives\": [\"objective1\", \"objective2\", ...],\n");
+        prompt.append("  \"prerequisites\": [\"prerequisite1\", \"prerequisite2\", ...],\n");
+        prompt.append("  \"suggestedModules\": [\"Module 1\", \"Module 2\", ...]\n");
+        prompt.append("}\n\n");
+        prompt.append("REMEMBER: Return ONLY the JSON object. No text before or after.\n");
+        
+        // Call OpenAI
+        return callOpenAI(prompt.toString(), 2000);
+    }
+    
+    /**
+     * Analyze a URL (YouTube or web page) with AI
+     */
+    public Map<String, Object> analyzeUrl(String url) throws Exception {
+        if (!checkAIAvailability()) {
+            throw new RuntimeException("AI service is not available");
+        }
+
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("You are an expert instructional designer analyzing web content.\n\n");
+        prompt.append("=== URL TO ANALYZE ===\n");
+        prompt.append(url).append("\n\n");
+        
+        prompt.append("=== YOUR TASK ===\n");
+        prompt.append("Analyze this URL (YouTube video or web page) and extract:\n");
+        prompt.append("1. Key topics (5-10 main topics)\n");
+        prompt.append("2. Difficulty level (1-10, where 1=beginner, 10=expert)\n");
+        prompt.append("3. Estimated duration in minutes\n");
+        prompt.append("4. Learning objectives (3-5 clear objectives)\n");
+        prompt.append("5. Prerequisites (what learners should know before)\n");
+        prompt.append("6. Suggested modules (how to organize this content into 3-5 modules)\n\n");
+        
+        prompt.append("CRITICAL: Return ONLY raw JSON. NO markdown, NO code blocks, NO extra text.\n");
+        prompt.append("Start with { and end with }. Nothing else.\n\n");
+        
+        prompt.append("Required JSON format:\n");
+        prompt.append("{\n");
+        prompt.append("  \"keyTopics\": [\"topic1\", \"topic2\", ...],\n");
+        prompt.append("  \"difficulty\": 5,\n");
+        prompt.append("  \"estimatedReadTime\": 30,\n");
+        prompt.append("  \"learningObjectives\": [\"objective1\", \"objective2\", ...],\n");
+        prompt.append("  \"prerequisites\": [\"prerequisite1\", \"prerequisite2\", ...],\n");
+        prompt.append("  \"suggestedModules\": [\"Module 1\", \"Module 2\", ...]\n");
+        prompt.append("}\n\n");
+        prompt.append("REMEMBER: Return ONLY the JSON object. No text before or after.\n");
+        
+        // Call OpenAI
+        return callOpenAI(prompt.toString(), 2000);
+    }
+    
+    /**
      * Convert a module to content map for AI processing
      */
     private Map<String, Object> convertModuleToContent(ManualTrainingModule module) {
@@ -881,5 +1016,85 @@ public class AIService {
         content.put("sections", sectionsData);
         
         return content;
+    }
+
+    /**
+     * Generate initial organization suggestion based on uploaded files and their analyses
+     */
+    public String generateInitialOrganizationSuggestion(List<FileInfo> files, List<Map<String, Object>> analyses) throws Exception {
+        if (!checkAIAvailability()) {
+            throw new RuntimeException("AI service is not available");
+        }
+
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("You are an expert instructional designer. Analyze the uploaded files and suggest how to organize them into a training program.\n\n");
+        
+        prompt.append("=== UPLOADED FILES ===\n");
+        for (int i = 0; i < files.size(); i++) {
+            FileInfo file = files.get(i);
+            prompt.append(String.format("%d. %s (Type: %s)\n", (i + 1), file.getName(), file.getType()));
+        }
+        
+        if (analyses != null && !analyses.isEmpty()) {
+            prompt.append("\n=== FILE ANALYSES ===\n");
+            for (Map<String, Object> analysis : analyses) {
+                String fileName = (String) analysis.get("fileName");
+                @SuppressWarnings("unchecked")
+                List<String> keyTopics = (List<String>) analysis.get("keyTopics");
+                Integer difficulty = (Integer) analysis.get("difficulty");
+                Integer estimatedReadTime = (Integer) analysis.get("estimatedReadTime");
+                
+                prompt.append(String.format("\nFile: %s\n", fileName));
+                if (keyTopics != null && !keyTopics.isEmpty()) {
+                    prompt.append("Key Topics: ").append(String.join(", ", keyTopics)).append("\n");
+                }
+                if (difficulty != null) {
+                    prompt.append("Difficulty: ").append(difficulty).append("/10\n");
+                }
+                if (estimatedReadTime != null) {
+                    prompt.append("Estimated Duration: ").append(estimatedReadTime).append(" minutes\n");
+                }
+            }
+        }
+        
+        prompt.append("\n=== YOUR TASK ===\n");
+        prompt.append("Based on the files and their analyses, suggest a logical organization structure for a training program.\n\n");
+        prompt.append("Provide a clear, concise description (2-4 sentences) of:\n");
+        prompt.append("1. How many modules to create\n");
+        prompt.append("2. What each module should focus on\n");
+        prompt.append("3. How many sections per module (approximately)\n");
+        prompt.append("4. The logical flow/sequence of modules\n\n");
+        prompt.append("CRITICAL: Return ONLY the organization description. NO markdown, NO code blocks, NO JSON, NO extra text.\n");
+        prompt.append("Just plain text describing the suggested organization structure.\n");
+        prompt.append("Example format: \"Create 3 modules: Module 1 - Introduction (3-4 sections covering basics), Module 2 - Core Concepts (4-5 sections with practical examples), Module 3 - Advanced Topics (3-4 sections for advanced learners).\"\n");
+        
+        Map<String, Object> response = callOpenAI(prompt.toString(), 500);
+        
+        // Extract the organization text from the response
+        // The response might be a string directly or in a nested structure
+        String organization = null;
+        if (response.get("organization") instanceof String) {
+            organization = (String) response.get("organization");
+        } else if (response.get("text") instanceof String) {
+            organization = (String) response.get("text");
+        } else if (response.get("suggestion") instanceof String) {
+            organization = (String) response.get("suggestion");
+        } else {
+            // Try to find any string value in the response
+            for (Object value : response.values()) {
+                if (value instanceof String && ((String) value).length() > 50) {
+                    organization = (String) value;
+                    break;
+                }
+            }
+        }
+        
+        if (organization == null || organization.trim().isEmpty()) {
+            // Fallback: use a default suggestion
+            organization = String.format("Create %d modules based on the uploaded files. Organize content logically by topic and difficulty level.", 
+                Math.max(2, Math.min(5, files.size() / 2)));
+        }
+        
+        return organization.trim();
     }
 }

@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.HashMap;
 import java.util.List;
@@ -69,6 +70,28 @@ public class AIController {
         }
     }
     
+    @PostMapping("/generate-initial-organization")
+    public ResponseEntity<Map<String, Object>> generateInitialOrganization(@RequestBody GenerateInitialOrganizationRequest request) {
+        Map<String, Object> response = new HashMap<>();
+        try {
+            log.info("Generating initial organization suggestion for {} files", request.getFiles().size());
+            
+            String organization = aiService.generateInitialOrganizationSuggestion(
+                request.getFiles(),
+                request.getAnalyses()
+            );
+            
+            response.put("success", true);
+            response.put("organization", organization);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error generating initial organization: {}", e.getMessage(), e);
+            response.put("success", false);
+            response.put("error", "Error generating initial organization: " + e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+    
     @PostMapping("/organize-training")
     public ResponseEntity<Map<String, Object>> organizeTraining(@RequestBody OrganizeTrainingRequest request) {
             Map<String, Object> response = new HashMap<>();
@@ -81,7 +104,17 @@ public class AIController {
                     .map(f -> new AIService.FileInfo(f.getName(), f.getType(), f.getUrl(), f.getPublicId()))
                     .toList();
             
-            aiService.organizeTrainingContent(request.getTrainingId(), files);
+            GenerationOptionsRequest options = request.getGenerationOptions();
+            boolean generateModuleQuizzes = options != null ? options.getGenerateModuleQuizzes() : false;
+            boolean generateFinalExam = options != null ? options.getGenerateFinalExam() : false;
+            
+            aiService.organizeTrainingContent(
+                request.getTrainingId(), 
+                files,
+                request.getOrganizationInstructions(),
+                generateModuleQuizzes,
+                generateFinalExam
+            );
             
             response.put("success", true);
             response.put("message", "Training content organized successfully");
@@ -116,12 +149,35 @@ public class AIController {
     public static class OrganizeTrainingRequest {
         private String trainingId;
         private List<FileInfoRequest> files;
+        private String organizationInstructions;
+        private GenerationOptionsRequest generationOptions;
 
         public String getTrainingId() { return trainingId; }
         public void setTrainingId(String trainingId) { this.trainingId = trainingId; }
 
         public List<FileInfoRequest> getFiles() { return files; }
         public void setFiles(List<FileInfoRequest> files) { this.files = files; }
+
+        public String getOrganizationInstructions() { return organizationInstructions; }
+        public void setOrganizationInstructions(String organizationInstructions) { 
+            this.organizationInstructions = organizationInstructions; 
+        }
+
+        public GenerationOptionsRequest getGenerationOptions() { return generationOptions; }
+        public void setGenerationOptions(GenerationOptionsRequest generationOptions) {
+            this.generationOptions = generationOptions;
+        }
+    }
+
+    public static class GenerationOptionsRequest {
+        private Boolean generateModuleQuizzes;
+        private Boolean generateFinalExam;
+
+        public Boolean getGenerateModuleQuizzes() { return generateModuleQuizzes != null ? generateModuleQuizzes : false; }
+        public void setGenerateModuleQuizzes(Boolean generateModuleQuizzes) { this.generateModuleQuizzes = generateModuleQuizzes; }
+
+        public Boolean getGenerateFinalExam() { return generateFinalExam != null ? generateFinalExam : false; }
+        public void setGenerateFinalExam(Boolean generateFinalExam) { this.generateFinalExam = generateFinalExam; }
     }
 
     public static class FileInfoRequest {
@@ -141,6 +197,36 @@ public class AIController {
 
         public String getPublicId() { return publicId; }
         public void setPublicId(String publicId) { this.publicId = publicId; }
+    }
+
+    public static class GenerateInitialOrganizationRequest {
+        private List<FileInfoRequest> files;
+        private List<FileAnalysisRequest> analyses;
+
+        public List<FileInfoRequest> getFiles() { return files; }
+        public void setFiles(List<FileInfoRequest> files) { this.files = files; }
+
+        public List<FileAnalysisRequest> getAnalyses() { return analyses; }
+        public void setAnalyses(List<FileAnalysisRequest> analyses) { this.analyses = analyses; }
+    }
+
+    public static class FileAnalysisRequest {
+        private String fileName;
+        private List<String> keyTopics;
+        private Integer difficulty;
+        private Integer estimatedReadTime;
+
+        public String getFileName() { return fileName; }
+        public void setFileName(String fileName) { this.fileName = fileName; }
+
+        public List<String> getKeyTopics() { return keyTopics; }
+        public void setKeyTopics(List<String> keyTopics) { this.keyTopics = keyTopics; }
+
+        public Integer getDifficulty() { return difficulty; }
+        public void setDifficulty(Integer difficulty) { this.difficulty = difficulty; }
+
+        public Integer getEstimatedReadTime() { return estimatedReadTime; }
+        public void setEstimatedReadTime(Integer estimatedReadTime) { this.estimatedReadTime = estimatedReadTime; }
     }
     
     /**
@@ -234,5 +320,52 @@ public class AIController {
 
         public int getNumberOfQuestions() { return numberOfQuestions; }
         public void setNumberOfQuestions(int numberOfQuestions) { this.numberOfQuestions = numberOfQuestions; }
+    }
+    
+    /**
+     * Analyze a document with AI to extract key topics, learning objectives, etc.
+     */
+    @PostMapping("/analyze-document")
+    public ResponseEntity<Map<String, Object>> analyzeDocument(@RequestParam("file") MultipartFile file) {
+        Map<String, Object> response = new HashMap<>();
+        
+        try {
+            log.info("Analyzing document: {}", file.getOriginalFilename());
+            
+            Map<String, Object> analysis = aiService.analyzeDocument(file);
+            
+            response.put("success", true);
+            response.put("analysis", analysis);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error analyzing document: {}", e.getMessage(), e);
+            response.put("success", false);
+            response.put("error", "Error analyzing document: " + e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+    
+    /**
+     * Analyze a URL (YouTube or web page) with AI
+     */
+    @PostMapping("/analyze-url")
+    public ResponseEntity<Map<String, Object>> analyzeUrl(@RequestBody Map<String, String> request) {
+        Map<String, Object> response = new HashMap<>();
+        
+        try {
+            String url = request.get("url");
+            log.info("Analyzing URL: {}", url);
+            
+            Map<String, Object> analysis = aiService.analyzeUrl(url);
+            
+            response.put("success", true);
+            response.put("analysis", analysis);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error analyzing URL: {}", e.getMessage(), e);
+            response.put("success", false);
+            response.put("error", "Error analyzing URL: " + e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
     }
 }

@@ -197,7 +197,7 @@ public class ManualQuizService {
         boolean passed = scorePercentage >= quiz.getPassingScore();
         
         // Log security metrics
-        if (metadata.getViolationCount() != null && metadata.getViolationCount() > 0) {
+        if (metadata != null && metadata.getViolationCount() != null && metadata.getViolationCount() > 0) {
             log.warn("⚠️ User {} had {} violations - Score penalty applied: {}%", 
                     userId, metadata.getViolationCount(), 
                     (int)((1 - penaltyMultiplier) * 100));
@@ -209,7 +209,7 @@ public class ManualQuizService {
         log.info("User {} submitted quiz {}: {}% ({}) - Violations: {}", 
                 userId, quizId, scorePercentage, 
                 passed ? "PASSED" : "FAILED",
-                metadata.getViolationCount() != null ? metadata.getViolationCount() : 0);
+                metadata != null && metadata.getViolationCount() != null ? metadata.getViolationCount() : 0);
         
         return QuizResult.builder()
             .score(scorePercentage)
@@ -224,14 +224,21 @@ public class ManualQuizService {
     
     /**
      * Validate quiz security based on metadata
+     * TOUTES LES VALIDATIONS DÉSACTIVÉES
      */
     private SecurityValidationResult validateQuizSecurity(ManualQuiz quiz, 
                                                           com.trainingplatform.core.entities.QuizAttemptMetadata metadata) {
+        // Toutes les validations de sécurité sont désactivées
+        // Les quiz peuvent être soumis sans restrictions de temps ou de comportement
+        return SecurityValidationResult.valid();
+        
+        /* VALIDATIONS DÉSACTIVÉES:
+        
         if (metadata == null) {
             return SecurityValidationResult.invalid("No security metadata provided");
         }
         
-        // 1. Validate timing
+        // 1. Validate timing - DÉSACTIVÉ
         if (metadata.getStartTime() != null && metadata.getEndTime() != null) {
             long totalTime = metadata.getEndTime() - metadata.getStartTime();
             long minExpectedTime = quiz.getQuestions().size() * 10000L; // 10 seconds per question
@@ -265,20 +272,27 @@ public class ManualQuizService {
         }
         
         return SecurityValidationResult.valid();
+        */
     }
     
     /**
      * Calculate penalty multiplier based on violations
      * Each violation reduces score by 5%, up to maximum 50% penalty
+     * DÉSACTIVÉ - Aucune pénalité appliquée
      */
     private double calculatePenaltyMultiplier(com.trainingplatform.core.entities.QuizAttemptMetadata metadata) {
-        if (metadata.getViolationCount() == null || metadata.getViolationCount() == 0) {
+        // Aucune pénalité appliquée - toujours retourner 1.0
+        return 1.0;
+        
+        /* PÉNALITÉS DÉSACTIVÉES:
+        if (metadata == null || metadata.getViolationCount() == null || metadata.getViolationCount() == 0) {
             return 1.0; // No penalty
         }
         
         // -5% per violation, max 50% penalty
         double penalty = Math.min(metadata.getViolationCount() * 0.05, 0.5);
         return 1.0 - penalty;
+        */
     }
     
     /**
@@ -315,15 +329,24 @@ public class ManualQuizService {
         
         Object correctAnswer = question.getCorrectAnswer();
         
-        if (correctAnswer instanceof List) {
-            // Multiple correct answers
-            return correctAnswer.equals(userAnswer);
-        } else if (correctAnswer instanceof String) {
-            return correctAnswer.equals(userAnswer.toString());
-        } else if (correctAnswer instanceof Integer) {
-            return correctAnswer.equals(Integer.parseInt(userAnswer.toString()));
-        } else if (correctAnswer instanceof Boolean) {
-            return correctAnswer.equals(Boolean.parseBoolean(userAnswer.toString()));
+        try {
+            if (correctAnswer instanceof List) {
+                // Multiple correct answers
+                return correctAnswer.equals(userAnswer);
+            } else if (correctAnswer instanceof String) {
+                return correctAnswer.equals(userAnswer.toString());
+            } else if (correctAnswer instanceof Integer) {
+                try {
+                    return correctAnswer.equals(Integer.parseInt(userAnswer.toString()));
+                } catch (NumberFormatException e) {
+                    return false;
+                }
+            } else if (correctAnswer instanceof Boolean) {
+                return correctAnswer.equals(Boolean.parseBoolean(userAnswer.toString()));
+            }
+        } catch (Exception e) {
+            log.warn("Error checking answer for question {}: {}", question.getId(), e.getMessage());
+            return false;
         }
         
         return false;
@@ -354,12 +377,12 @@ public class ManualQuizService {
             .score(score)
             .maxScore(100)
             .passed(passed)
-            .startedAt(metadata.getStartTime() != null ? 
+            .startedAt(metadata != null && metadata.getStartTime() != null ? 
                       java.time.Instant.ofEpochMilli(metadata.getStartTime())
                           .atZone(java.time.ZoneId.systemDefault())
                           .toLocalDateTime() : 
                       LocalDateTime.now())
-            .completedAt(metadata.getEndTime() != null ? 
+            .completedAt(metadata != null && metadata.getEndTime() != null ? 
                         java.time.Instant.ofEpochMilli(metadata.getEndTime())
                             .atZone(java.time.ZoneId.systemDefault())
                             .toLocalDateTime() : 
@@ -373,7 +396,7 @@ public class ManualQuizService {
         progressRepository.save(progress);
         
         // Log security metadata for audit trail
-        if (metadata.getViolationCount() != null && metadata.getViolationCount() > 0) {
+        if (metadata != null && metadata.getViolationCount() != null && metadata.getViolationCount() > 0) {
             log.info("📊 Security Audit - User: {}, Quiz: {}, Violations: {}, Types: {}", 
                     userId, quiz.getId(), 
                     metadata.getViolationCount(),
