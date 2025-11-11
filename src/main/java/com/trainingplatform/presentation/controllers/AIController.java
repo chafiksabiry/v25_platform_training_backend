@@ -233,6 +233,10 @@ public class AIController {
 
         public Integer getEstimatedReadTime() { return estimatedReadTime; }
         public void setEstimatedReadTime(Integer estimatedReadTime) { this.estimatedReadTime = estimatedReadTime; }
+        public String get(String string) {
+            // TODO Auto-generated method stub
+            throw new UnsupportedOperationException("Unimplemented method 'get'");
+        }
     }
     
     /**

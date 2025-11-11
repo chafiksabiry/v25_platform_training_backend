@@ -1033,18 +1033,51 @@ public class AIService {
         
         prompt.append("=== UPLOADED FILES ===\n");
         for (int i = 0; i < files.size(); i++) {
-            FileInfo file = list.get(i);
+            FileInfoRequest file = files.get(i);
             prompt.append(String.format("%d. %s (Type: %s)\n", (i + 1), file.getName(), file.getType()));
         }
         
-        if (analyses != null && !list2.isEmpty()) {
+        if (analyses != null && !analyses.isEmpty()) {
             prompt.append("\n=== FILE ANALYSES ===\n");
-            for (Map<String, Object> analysis : analyses) {
-                String fileName = (String) analysis.get("fileName");
+            for (FileAnalysisRequest analysis : analyses) {
+                String fileName = null;
+                Object fileNameObj = analysis.get("fileName");
+                if (fileNameObj instanceof String) {
+                    fileName = (String) fileNameObj;
+                }
+
                 @SuppressWarnings("unchecked")
-                List<String> keyTopics = (List<String>) analysis.get("keyTopics");
-                Integer difficulty = (Integer) analysis.get("difficulty");
-                Integer estimatedReadTime = (Integer) analysis.get("estimatedReadTime");
+                Object keyTopicsObj = analysis.get("keyTopics");
+                List<String> keyTopics = new ArrayList<>();
+                if (keyTopicsObj instanceof List) {
+                    for (Object obj : (List<?>) keyTopicsObj) {
+                        if (obj instanceof String) {
+                            keyTopics.add((String) obj);
+                        }
+                    }
+                }
+
+                Integer difficulty = null;
+                Object diffObj = analysis.get("difficulty");
+                if (diffObj instanceof Number) {
+                    difficulty = ((Number) diffObj).intValue();
+                } else if (diffObj instanceof String) {
+                    try {
+                        difficulty = Integer.parseInt((String) diffObj);
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+
+                Integer estimatedReadTime = null;
+                Object estObj = analysis.get("estimatedReadTime");
+                if (estObj instanceof Number) {
+                    estimatedReadTime = ((Number) estObj).intValue();
+                } else if (estObj instanceof String) {
+                    try {
+                        estimatedReadTime = Integer.parseInt((String) estObj);
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
                 
                 prompt.append(String.format("\nFile: %s\n", fileName));
                 if (keyTopics != null && !keyTopics.isEmpty()) {
@@ -1098,11 +1131,5 @@ public class AIService {
         }
         
         return organization.trim();
-    }
-
-    public String generateInitialOrganizationSuggestion(List<FileInfoRequest> files,
-            List<FileAnalysisRequest> analyses) {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'generateInitialOrganizationSuggestion'");
     }
 }
