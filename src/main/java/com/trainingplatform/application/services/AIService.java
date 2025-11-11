@@ -3,8 +3,6 @@ package com.trainingplatform.application.services;
 import com.trainingplatform.core.entities.ManualTraining;
 import com.trainingplatform.core.entities.ManualTrainingModule;
 import com.trainingplatform.infrastructure.repositories.ManualTrainingRepository;
-import com.trainingplatform.presentation.controllers.AIController.FileAnalysisRequest;
-import com.trainingplatform.presentation.controllers.AIController.FileInfoRequest;
 import com.trainingplatform.infrastructure.repositories.ManualTrainingModuleRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -645,6 +643,34 @@ public class AIService {
         public String getPublicId() { return publicId; }
         public void setPublicId(String publicId) { this.publicId = publicId; }
     }
+
+    public static class FileAnalysis {
+        private String fileName;
+        private List<String> keyTopics;
+        private Integer difficulty;
+        private Integer estimatedReadTime;
+
+        public FileAnalysis() {}
+
+        public FileAnalysis(String fileName, List<String> keyTopics, Integer difficulty, Integer estimatedReadTime) {
+            this.fileName = fileName;
+            this.keyTopics = keyTopics;
+            this.difficulty = difficulty;
+            this.estimatedReadTime = estimatedReadTime;
+        }
+
+        public String getFileName() { return fileName; }
+        public void setFileName(String fileName) { this.fileName = fileName; }
+
+        public List<String> getKeyTopics() { return keyTopics; }
+        public void setKeyTopics(List<String> keyTopics) { this.keyTopics = keyTopics; }
+
+        public Integer getDifficulty() { return difficulty; }
+        public void setDifficulty(Integer difficulty) { this.difficulty = difficulty; }
+
+        public Integer getEstimatedReadTime() { return estimatedReadTime; }
+        public void setEstimatedReadTime(Integer estimatedReadTime) { this.estimatedReadTime = estimatedReadTime; }
+    }
     
     /**
      * Downloads and extracts text content from a file URL
@@ -1023,7 +1049,7 @@ public class AIService {
     /**
      * Generate initial organization suggestion based on uploaded files and their analyses
      */
-    public String generateInitialOrganizationSuggestion(List<FileInfoRequest> files, List<FileAnalysisRequest> analyses) throws Exception {
+    public String generateInitialOrganizationSuggestion(List<FileInfo> files, List<FileAnalysis> analyses) throws Exception {
         if (!checkAIAvailability()) {
             throw new RuntimeException("AI service is not available");
         }
@@ -1033,51 +1059,17 @@ public class AIService {
         
         prompt.append("=== UPLOADED FILES ===\n");
         for (int i = 0; i < files.size(); i++) {
-            FileInfoRequest file = files.get(i);
+            FileInfo file = files.get(i);
             prompt.append(String.format("%d. %s (Type: %s)\n", (i + 1), file.getName(), file.getType()));
         }
         
         if (analyses != null && !analyses.isEmpty()) {
             prompt.append("\n=== FILE ANALYSES ===\n");
-            for (FileAnalysisRequest analysis : analyses) {
-                String fileName = null;
-                Object fileNameObj = analysis.get("fileName");
-                if (fileNameObj instanceof String) {
-                    fileName = (String) fileNameObj;
-                }
-
-                @SuppressWarnings("unchecked")
-                Object keyTopicsObj = analysis.get("keyTopics");
-                List<String> keyTopics = new ArrayList<>();
-                if (keyTopicsObj instanceof List) {
-                    for (Object obj : (List<?>) keyTopicsObj) {
-                        if (obj instanceof String) {
-                            keyTopics.add((String) obj);
-                        }
-                    }
-                }
-
-                Integer difficulty = null;
-                Object diffObj = analysis.get("difficulty");
-                if (diffObj instanceof Number) {
-                    difficulty = ((Number) diffObj).intValue();
-                } else if (diffObj instanceof String) {
-                    try {
-                        difficulty = Integer.parseInt((String) diffObj);
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-
-                Integer estimatedReadTime = null;
-                Object estObj = analysis.get("estimatedReadTime");
-                if (estObj instanceof Number) {
-                    estimatedReadTime = ((Number) estObj).intValue();
-                } else if (estObj instanceof String) {
-                    try {
-                        estimatedReadTime = Integer.parseInt((String) estObj);
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
+            for (FileAnalysis analysis : analyses) {
+                String fileName = analysis.getFileName();
+                List<String> keyTopics = analysis.getKeyTopics();
+                Integer difficulty = analysis.getDifficulty();
+                Integer estimatedReadTime = analysis.getEstimatedReadTime();
                 
                 prompt.append(String.format("\nFile: %s\n", fileName));
                 if (keyTopics != null && !keyTopics.isEmpty()) {

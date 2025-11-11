@@ -10,7 +10,6 @@ import org.springframework.web.multipart.MultipartFile;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/ai")
@@ -75,18 +74,28 @@ public class AIController {
     public ResponseEntity<Map<String, Object>> generateInitialOrganization(@RequestBody GenerateInitialOrganizationRequest request) {
         Map<String, Object> response = new HashMap<>();
         try {
-            log.info("Generating initial organization suggestion for {} files", request.getFiles().size());
-
-            // Convert request files to AIService.FileInfo
-            List<AIService.FileInfo> files = request.getFiles().stream()
+            int fileCount = request.getFiles() != null ? request.getFiles().size() : 0;
+            log.info("Generating initial organization suggestion for {} files", fileCount);
+            
+            // Convert request FileInfoRequest -> AIService.FileInfo
+            List<AIService.FileInfo> files = request.getFiles() != null
+                ? request.getFiles().stream()
                     .map(f -> new AIService.FileInfo(f.getName(), f.getType(), f.getUrl(), f.getPublicId()))
-                    .collect(Collectors.toList());
+                    .toList()
+                : List.of();
 
+            // Convert request FileAnalysisRequest -> AIService.FileAnalysis (if analyses exist)
+            List<AIService.FileAnalysis> analyses = request.getAnalyses() != null
+                ? request.getAnalyses().stream()
+                    .map(a -> new AIService.FileAnalysis(a.getFileName(), a.getKeyTopics(), a.getDifficulty(), a.getEstimatedReadTime()))
+                    .toList()
+                : List.of();
+            
             String organization = aiService.generateInitialOrganizationSuggestion(
                 files,
-                request.getAnalyses()
+                analyses
             );
-
+            
             response.put("success", true);
             response.put("organization", organization);
             return ResponseEntity.ok(response);
@@ -233,10 +242,6 @@ public class AIController {
 
         public Integer getEstimatedReadTime() { return estimatedReadTime; }
         public void setEstimatedReadTime(Integer estimatedReadTime) { this.estimatedReadTime = estimatedReadTime; }
-        public String get(String string) {
-            // TODO Auto-generated method stub
-            throw new UnsupportedOperationException("Unimplemented method 'get'");
-        }
     }
     
     /**
