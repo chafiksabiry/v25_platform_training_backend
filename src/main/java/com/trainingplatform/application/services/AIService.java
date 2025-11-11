@@ -3,6 +3,8 @@ package com.trainingplatform.application.services;
 import com.trainingplatform.core.entities.ManualTraining;
 import com.trainingplatform.core.entities.ManualTrainingModule;
 import com.trainingplatform.infrastructure.repositories.ManualTrainingRepository;
+import com.trainingplatform.presentation.controllers.AIController.FileAnalysisRequest;
+import com.trainingplatform.presentation.controllers.AIController.FileInfoRequest;
 import com.trainingplatform.infrastructure.repositories.ManualTrainingModuleRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -1021,7 +1023,7 @@ public class AIService {
     /**
      * Generate initial organization suggestion based on uploaded files and their analyses
      */
-    public String generateInitialOrganizationSuggestion(List<FileInfo> files, List<Map<String, Object>> analyses) throws Exception {
+    public String generateInitialOrganizationSuggestion(List<FileInfoRequest> files, List<FileAnalysisRequest> analyses) throws Exception {
         if (!checkAIAvailability()) {
             throw new RuntimeException("AI service is not available");
         }
@@ -1031,11 +1033,11 @@ public class AIService {
         
         prompt.append("=== UPLOADED FILES ===\n");
         for (int i = 0; i < files.size(); i++) {
-            FileInfo file = files.get(i);
+            FileInfo file = list.get(i);
             prompt.append(String.format("%d. %s (Type: %s)\n", (i + 1), file.getName(), file.getType()));
         }
         
-        if (analyses != null && !analyses.isEmpty()) {
+        if (analyses != null && !list2.isEmpty()) {
             prompt.append("\n=== FILE ANALYSES ===\n");
             for (Map<String, Object> analysis : analyses) {
                 String fileName = (String) analysis.get("fileName");
@@ -1096,5 +1098,11 @@ public class AIService {
         }
         
         return organization.trim();
+    }
+
+    public String generateInitialOrganizationSuggestion(List<FileInfoRequest> files,
+            List<FileAnalysisRequest> analyses) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'generateInitialOrganizationSuggestion'");
     }
 }
