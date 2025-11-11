@@ -76,12 +76,17 @@ public class AIController {
         Map<String, Object> response = new HashMap<>();
         try {
             log.info("Generating initial organization suggestion for {} files", request.getFiles().size());
-            
+
+            // Convert request files to AIService.FileInfo
+            List<AIService.FileInfo> files = request.getFiles().stream()
+                    .map(f -> new AIService.FileInfo(f.getName(), f.getType(), f.getUrl(), f.getPublicId()))
+                    .collect(Collectors.toList());
+
             String organization = aiService.generateInitialOrganizationSuggestion(
-                request.getFiles(),
+                files,
                 request.getAnalyses()
             );
-            
+
             response.put("success", true);
             response.put("organization", organization);
             return ResponseEntity.ok(response);
