@@ -30,6 +30,7 @@ public class CorsFilter implements Filter {
         if (origin != null && (origin.equals("http://localhost:5190") || 
                                origin.equals("http://38.242.208.242:5190") ||
                                origin.equals("https://training.harx.ai") ||
+                               origin.equals("https://v25.harx.ai") ||
                                origin.equals("https://api-training.harx.ai") ||
                                origin.startsWith("http://localhost:") ||
                                origin.endsWith(".harx.ai"))) {

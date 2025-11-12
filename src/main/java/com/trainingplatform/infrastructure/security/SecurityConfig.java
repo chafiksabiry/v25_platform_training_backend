@@ -47,9 +47,10 @@ public class SecurityConfig {
             "http://localhost:5190", 
             "http://38.242.208.242:5190", 
             "https://training.harx.ai",
+            "https://v25.harx.ai",
             "https://api-training.harx.ai",
             "http://localhost:*", 
-            "*.harx.ai",
+            "https://*.harx.ai",
             "*"
         ));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
