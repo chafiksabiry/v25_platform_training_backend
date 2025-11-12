@@ -33,7 +33,7 @@ app:
     expiration: ${JWT_EXPIRATION:86400000}
   
   cors:
-    allowed-origins: ${CORS_ORIGIN:https://training.harx.ai}
+    allowed-origins: ${CORS_ORIGIN:https://training.harx.ai,https://v25.harx.ai}
   
   upload:
     directory: ${UPLOAD_DIR:uploads}
