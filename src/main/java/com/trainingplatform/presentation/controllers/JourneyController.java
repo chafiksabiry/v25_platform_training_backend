@@ -238,6 +238,12 @@ public class JourneyController {
             if (data.containsKey("status")) {
                 entity.setStatus((String) data.get("status"));
             }
+            if (data.containsKey("companyId")) {
+                entity.setCompanyId((String) data.get("companyId"));
+            }
+            if (data.containsKey("gigId")) {
+                entity.setGigId((String) data.get("gigId"));
+            }
             
             System.err.println("⚠️ Conversion partielle - certains champs peuvent manquer: " + e.getMessage());
             return entity;

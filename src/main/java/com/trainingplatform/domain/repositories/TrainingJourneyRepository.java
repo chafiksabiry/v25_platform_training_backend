@@ -23,5 +23,20 @@ public interface TrainingJourneyRepository extends MongoRepository<TrainingJourn
      * Find journeys that contain a specific rep ID in enrolled reps
      */
     List<TrainingJourneyEntity> findByEnrolledRepIdsContaining(String repId);
+    
+    /**
+     * Find journeys by company ID
+     */
+    List<TrainingJourneyEntity> findByCompanyId(String companyId);
+    
+    /**
+     * Find journeys by gig ID
+     */
+    List<TrainingJourneyEntity> findByGigId(String gigId);
+    
+    /**
+     * Find journeys by company ID and gig ID
+     */
+    List<TrainingJourneyEntity> findByCompanyIdAndGigId(String companyId, String gigId);
 }
 

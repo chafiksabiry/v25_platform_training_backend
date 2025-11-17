@@ -17,6 +17,9 @@ public class TrainingJourneyEntity {
     private String industry;
     private String status; // draft, active, completed, archived
     
+    private String companyId;
+    private String gigId;
+    
     private CompanyInfo company;
     private TrainingVision vision;
     private List<TrainingModuleEntity> modules;
@@ -69,6 +72,22 @@ public class TrainingJourneyEntity {
     
     public void setStatus(String status) {
         this.status = status;
+    }
+    
+    public String getCompanyId() {
+        return companyId;
+    }
+    
+    public void setCompanyId(String companyId) {
+        this.companyId = companyId;
+    }
+    
+    public String getGigId() {
+        return gigId;
+    }
+    
+    public void setGigId(String gigId) {
+        this.gigId = gigId;
     }
     
     public CompanyInfo getCompany() {
