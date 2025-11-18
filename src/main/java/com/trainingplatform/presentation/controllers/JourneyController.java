@@ -91,9 +91,45 @@ public class JourneyController {
      * Create or update a training journey
      */
     @PostMapping
-    public ResponseEntity<Map<String, Object>> createJourney(@RequestBody TrainingJourneyEntity journey) {
+    public ResponseEntity<Map<String, Object>> createJourney(@RequestBody Map<String, Object> journeyData) {
         try {
+            System.out.println("[JourneyController] Create journey - journeyData keys: " + journeyData.keySet());
+            System.out.println("[JourneyController] Create journey - title: " + journeyData.get("title"));
+            System.out.println("[JourneyController] Create journey - industry: " + journeyData.get("industry"));
+            
+            TrainingJourneyEntity journey = convertToEntity(journeyData);
+            
+            // Ensure title and industry are set
+            if (journeyData.containsKey("title") && journey.getTitle() == null) {
+                journey.setTitle((String) journeyData.get("title"));
+            }
+            if (journeyData.containsKey("industry") && journey.getIndustry() == null) {
+                Object industryObj = journeyData.get("industry");
+                if (industryObj instanceof String) {
+                    journey.setIndustry((String) industryObj);
+                } else if (industryObj instanceof Map) {
+                    Map<String, Object> industryMap = (Map<String, Object>) industryObj;
+                    if (industryMap.containsKey("$oid")) {
+                        journey.setIndustry((String) industryMap.get("$oid"));
+                    } else if (industryMap.containsKey("_id")) {
+                        Object idObj = industryMap.get("_id");
+                        if (idObj instanceof String) {
+                            journey.setIndustry((String) idObj);
+                        } else if (idObj instanceof Map) {
+                            Map<String, Object> idMap = (Map<String, Object>) idObj;
+                            journey.setIndustry((String) idMap.get("$oid"));
+                        }
+                    }
+                }
+            }
+            
+            System.out.println("[JourneyController] After conversion - title: " + journey.getTitle());
+            System.out.println("[JourneyController] After conversion - industry: " + journey.getIndustry());
+            
             TrainingJourneyEntity savedJourney = journeyService.saveJourney(journey);
+            
+            System.out.println("[JourneyController] After save - title: " + savedJourney.getTitle());
+            System.out.println("[JourneyController] After save - industry: " + savedJourney.getIndustry());
             
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
@@ -102,6 +138,8 @@ public class JourneyController {
             
             return ResponseEntity.ok(response);
         } catch (Exception e) {
+            System.err.println("[JourneyController] Error in createJourney: " + e.getMessage());
+            e.printStackTrace();
             Map<String, Object> errorResponse = new HashMap<>();
             errorResponse.put("success", false);
             errorResponse.put("error", e.getMessage());
@@ -120,11 +158,47 @@ public class JourneyController {
             Map<String, Object> journeyData = (Map<String, Object>) request.get("journey");
             List<String> enrolledRepIds = (List<String>) request.get("enrolledRepIds");
             
+            System.out.println("[JourneyController] Launch journey - journeyData keys: " + journeyData.keySet());
+            System.out.println("[JourneyController] Launch journey - title: " + journeyData.get("title"));
+            System.out.println("[JourneyController] Launch journey - industry: " + journeyData.get("industry"));
+            
             // Convert journeyData to TrainingJourneyEntity
             TrainingJourneyEntity journey = convertToEntity(journeyData);
             
+            // Ensure title and industry are set (they might be missing from the conversion)
+            if (journeyData.containsKey("title") && journey.getTitle() == null) {
+                journey.setTitle((String) journeyData.get("title"));
+            }
+            if (journeyData.containsKey("industry") && journey.getIndustry() == null) {
+                Object industryObj = journeyData.get("industry");
+                // Handle both String and ObjectId cases
+                if (industryObj instanceof String) {
+                    journey.setIndustry((String) industryObj);
+                } else if (industryObj instanceof Map) {
+                    // If it's an object with _id, extract the _id
+                    Map<String, Object> industryMap = (Map<String, Object>) industryObj;
+                    if (industryMap.containsKey("$oid")) {
+                        journey.setIndustry((String) industryMap.get("$oid"));
+                    } else if (industryMap.containsKey("_id")) {
+                        Object idObj = industryMap.get("_id");
+                        if (idObj instanceof String) {
+                            journey.setIndustry((String) idObj);
+                        } else if (idObj instanceof Map) {
+                            Map<String, Object> idMap = (Map<String, Object>) idObj;
+                            journey.setIndustry((String) idMap.get("$oid"));
+                        }
+                    }
+                }
+            }
+            
+            System.out.println("[JourneyController] After conversion - title: " + journey.getTitle());
+            System.out.println("[JourneyController] After conversion - industry: " + journey.getIndustry());
+            
             // Launch the journey
             TrainingJourneyEntity launchedJourney = journeyService.launchJourney(journey, enrolledRepIds);
+            
+            System.out.println("[JourneyController] After launch - title: " + launchedJourney.getTitle());
+            System.out.println("[JourneyController] After launch - industry: " + launchedJourney.getIndustry());
             
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
@@ -134,6 +208,8 @@ public class JourneyController {
             
             return ResponseEntity.ok(response);
         } catch (Exception e) {
+            System.err.println("[JourneyController] Error in launchJourney: " + e.getMessage());
+            e.printStackTrace();
             Map<String, Object> errorResponse = new HashMap<>();
             errorResponse.put("success", false);
             errorResponse.put("error", e.getMessage());
