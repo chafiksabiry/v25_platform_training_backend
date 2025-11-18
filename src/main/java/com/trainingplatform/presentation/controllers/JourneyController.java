@@ -214,6 +214,31 @@ public class JourneyController {
         }
     }
     
+    /**
+     * GET /journeys/trainer/dashboard
+     * Get trainer dashboard statistics by companyId and optionally gigId
+     */
+    @GetMapping("/trainer/dashboard")
+    public ResponseEntity<?> getTrainerDashboard(
+            @RequestParam String companyId,
+            @RequestParam(required = false) String gigId) {
+        try {
+            com.trainingplatform.presentation.dtos.TrainerDashboardDTO dashboard = 
+                journeyService.getTrainerDashboard(companyId, gigId);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("data", dashboard);
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+    
     // Helper method to convert Map to TrainingJourneyEntity using Jackson
     private TrainingJourneyEntity convertToEntity(Map<String, Object> data) {
         try {
