@@ -3,7 +3,9 @@ package com.trainingplatform.presentation.controllers;
 import com.trainingplatform.application.services.TrainingJourneyService;
 import com.trainingplatform.domain.entities.TrainingJourneyEntity;
 import com.trainingplatform.domain.entities.GigEntity;
+import com.trainingplatform.domain.entities.IndustryEntity;
 import com.trainingplatform.domain.repositories.GigRepository;
+import com.trainingplatform.domain.repositories.IndustryRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -25,6 +27,9 @@ public class JourneyController {
     
     @Autowired
     private GigRepository gigRepository;
+    
+    @Autowired
+    private IndustryRepository industryRepository;
     
     @Autowired
     private ObjectMapper objectMapper;
@@ -341,10 +346,11 @@ public class JourneyController {
             
             List<TrainingJourneyEntity> journeys = journeyService.getJourneysByCompanyAndGig(companyId, gigId);
             
-            // Populate gig titles
-            List<Map<String, Object>> journeysWithGigTitles = journeys.stream().map(journey -> {
+            // Populate gig titles and industry titles
+            List<Map<String, Object>> journeysWithPopulated = journeys.stream().map(journey -> {
                 Map<String, Object> journeyMap = objectMapper.convertValue(journey, Map.class);
                 
+                // Populate gig title
                 if (journey.getGigId() != null && !journey.getGigId().isEmpty()) {
                     Optional<GigEntity> gigOpt = gigRepository.findById(journey.getGigId());
                     if (gigOpt.isPresent()) {
@@ -356,12 +362,24 @@ public class JourneyController {
                     journeyMap.put("gigTitle", null);
                 }
                 
+                // Populate industry title
+                if (journey.getIndustry() != null && !journey.getIndustry().isEmpty()) {
+                    Optional<IndustryEntity> industryOpt = industryRepository.findById(journey.getIndustry());
+                    if (industryOpt.isPresent()) {
+                        journeyMap.put("industryTitle", industryOpt.get().getName());
+                    } else {
+                        journeyMap.put("industryTitle", null);
+                    }
+                } else {
+                    journeyMap.put("industryTitle", null);
+                }
+                
                 return journeyMap;
             }).collect(Collectors.toList());
             
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
-            response.put("data", journeysWithGigTitles);
+            response.put("data", journeysWithPopulated);
             response.put("count", journeys.size());
             
             System.out.println("[JourneyController] Found " + journeys.size() + " journeys for companyId: " + companyId + ", gigId: " + gigId);
@@ -388,10 +406,11 @@ public class JourneyController {
             
             List<TrainingJourneyEntity> journeys = journeyService.getJourneysByCompanyAndGig(companyId, null);
             
-            // Populate gig titles
-            List<Map<String, Object>> journeysWithGigTitles = journeys.stream().map(journey -> {
+            // Populate gig titles and industry titles
+            List<Map<String, Object>> journeysWithPopulated = journeys.stream().map(journey -> {
                 Map<String, Object> journeyMap = objectMapper.convertValue(journey, Map.class);
                 
+                // Populate gig title
                 if (journey.getGigId() != null && !journey.getGigId().isEmpty()) {
                     Optional<GigEntity> gigOpt = gigRepository.findById(journey.getGigId());
                     if (gigOpt.isPresent()) {
@@ -403,12 +422,24 @@ public class JourneyController {
                     journeyMap.put("gigTitle", null);
                 }
                 
+                // Populate industry title
+                if (journey.getIndustry() != null && !journey.getIndustry().isEmpty()) {
+                    Optional<IndustryEntity> industryOpt = industryRepository.findById(journey.getIndustry());
+                    if (industryOpt.isPresent()) {
+                        journeyMap.put("industryTitle", industryOpt.get().getName());
+                    } else {
+                        journeyMap.put("industryTitle", null);
+                    }
+                } else {
+                    journeyMap.put("industryTitle", null);
+                }
+                
                 return journeyMap;
             }).collect(Collectors.toList());
             
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
-            response.put("data", journeysWithGigTitles);
+            response.put("data", journeysWithPopulated);
             response.put("count", journeys.size());
             
             System.out.println("[JourneyController] Found " + journeys.size() + " journeys for companyId: " + companyId);
