@@ -111,36 +111,101 @@ public class TrainingJourneyService {
      * Get journeys by company ID and optionally by gig ID
      */
     public List<TrainingJourneyEntity> getJourneysByCompanyAndGig(String companyId, String gigId) {
+        System.out.println("[TrainerDashboard] getJourneysByCompanyAndGig - companyId: " + companyId + ", gigId: " + gigId);
+        
+        List<TrainingJourneyEntity> journeys;
         if (gigId != null && !gigId.isEmpty()) {
-            return journeyRepository.findByCompanyIdAndGigId(companyId, gigId);
+            System.out.println("[TrainerDashboard] Searching by companyId AND gigId");
+            journeys = journeyRepository.findByCompanyIdAndGigId(companyId, gigId);
         } else {
-            return journeyRepository.findByCompanyId(companyId);
+            System.out.println("[TrainerDashboard] Searching by companyId only");
+            journeys = journeyRepository.findByCompanyId(companyId);
         }
+        
+        System.out.println("[TrainerDashboard] Found " + journeys.size() + " journeys");
+        for (TrainingJourneyEntity journey : journeys) {
+            System.out.println("[TrainerDashboard] Journey: " + journey.getId() + " - " + journey.getTitle() + 
+                             " (companyId: " + journey.getCompanyId() + ", gigId: " + journey.getGigId() + ")");
+        }
+        
+        return journeys;
     }
     
     /**
      * Get trainer dashboard statistics
      */
     public TrainerDashboardDTO getTrainerDashboard(String companyId, String gigId) {
+        System.out.println("[TrainerDashboard] Getting dashboard for companyId: " + companyId + ", gigId: " + gigId);
+        
         // Get all journeys for this company/gig
         List<TrainingJourneyEntity> journeys = getJourneysByCompanyAndGig(companyId, gigId);
+        System.out.println("[TrainerDashboard] Found " + journeys.size() + " journeys");
         
         // Collect all unique enrolled rep IDs
         Set<String> enrolledRepIds = new HashSet<>();
         for (TrainingJourneyEntity journey : journeys) {
-            if (journey.getEnrolledRepIds() != null) {
+            System.out.println("[TrainerDashboard] Journey ID: " + journey.getId() + ", Title: " + journey.getTitle());
+            System.out.println("[TrainerDashboard] Journey status: " + journey.getStatus());
+            System.out.println("[TrainerDashboard] Journey companyId: " + journey.getCompanyId() + ", gigId: " + journey.getGigId());
+            
+            if (journey.getEnrolledRepIds() != null && !journey.getEnrolledRepIds().isEmpty()) {
+                System.out.println("[TrainerDashboard] EnrolledRepIds (" + journey.getEnrolledRepIds().size() + "): " + journey.getEnrolledRepIds());
                 enrolledRepIds.addAll(journey.getEnrolledRepIds());
+            } else {
+                System.out.println("[TrainerDashboard] ⚠️ Journey has no enrolledRepIds (null or empty)");
             }
         }
         
+        System.out.println("[TrainerDashboard] Total unique enrolledRepIds collected: " + enrolledRepIds.size());
+        
         TrainerDashboardDTO dashboard = new TrainerDashboardDTO();
-        dashboard.setTotalTrainees(enrolledRepIds.size());
+        
+        // If no enrolledRepIds, return dashboard with journey info only
+        if (enrolledRepIds.isEmpty()) {
+            System.out.println("[TrainerDashboard] No enrolledRepIds found. Returning dashboard with journey statistics only.");
+            dashboard.setTotalTrainees(0);
+            dashboard.setActiveTrainees(0);
+            dashboard.setCompletionRate(0.0);
+            dashboard.setAverageEngagement(0.0);
+            dashboard.setTopPerformers(new ArrayList<>());
+            dashboard.setStrugglingTrainees(new ArrayList<>());
+            dashboard.setUpcomingDeadlines(new ArrayList<>());
+            
+            // Generate AI insights based on journeys only
+            List<TrainerDashboardDTO.AIInsight> insights = new ArrayList<>();
+            if (journeys.isEmpty()) {
+                TrainerDashboardDTO.AIInsight insight = new TrainerDashboardDTO.AIInsight();
+                insight.setId("insight-no-journeys");
+                insight.setTitle("No Training Journeys");
+                insight.setDescription("No training journeys found for this company/gig. Create a new journey to get started.");
+                insight.setPriority("medium");
+                insight.setSuggestedActions(Arrays.asList(
+                    "Create a new training journey",
+                    "Check if the company ID and gig ID are correct"
+                ));
+                insights.add(insight);
+            } else {
+                TrainerDashboardDTO.AIInsight insight = new TrainerDashboardDTO.AIInsight();
+                insight.setId("insight-no-trainees");
+                insight.setTitle("No Trainees Enrolled");
+                insight.setDescription("You have " + journeys.size() + " journey(s) but no trainees are enrolled yet. Launch a journey with enrolled reps to start tracking progress.");
+                insight.setPriority("low");
+                insight.setSuggestedActions(Arrays.asList(
+                    "Launch a journey and enroll trainees",
+                    "Check journey enrollment settings"
+                ));
+                insights.add(insight);
+            }
+            dashboard.setAiInsights(insights);
+            return dashboard;
+        }
+        
+        dashboard.setTotalTrainees(0); // Will be updated later with actual valid rep count
         
         // Get all rep progress for these journeys
         Map<String, List<RepProgress>> repProgressMap = new HashMap<>();
         Map<String, Rep> repMap = new HashMap<>();
         
-        int totalProgress = 0;
         int totalEngagement = 0;
         int activeCount = 0;
         int completedCount = 0;
@@ -148,12 +213,25 @@ public class TrainingJourneyService {
         List<TrainerDashboardDTO.TraineeInfo> allTrainees = new ArrayList<>();
         
         for (String repId : enrolledRepIds) {
-            // Get rep info
+            if (repId == null || repId.trim().isEmpty()) {
+                System.out.println("[TrainerDashboard] Warning: Empty repId found, skipping");
+                continue;
+            }
+            
+            // Get rep info - skip if rep doesn't exist
             Optional<Rep> repOpt = repRepository.findById(repId);
-            if (!repOpt.isPresent()) continue;
+            if (!repOpt.isPresent()) {
+                System.out.println("[TrainerDashboard] Warning: Rep not found for ID: " + repId);
+                continue;
+            }
             
             Rep rep = repOpt.get();
+            if (rep == null) {
+                System.out.println("[TrainerDashboard] Warning: Rep is null for ID: " + repId);
+                continue;
+            }
             repMap.put(repId, rep);
+            System.out.println("[TrainerDashboard] Found Rep: " + rep.getName() + " (ID: " + repId + ")");
             
             // Get progress for all journeys
             List<RepProgress> progressList = new ArrayList<>();
@@ -195,8 +273,8 @@ public class TrainingJourneyService {
             // Create trainee info
             TrainerDashboardDTO.TraineeInfo traineeInfo = new TrainerDashboardDTO.TraineeInfo();
             traineeInfo.setId(repId);
-            traineeInfo.setName(rep.getName());
-            traineeInfo.setEmail(rep.getEmail());
+            traineeInfo.setName(rep.getName() != null ? rep.getName() : "Unknown");
+            traineeInfo.setEmail(rep.getEmail() != null ? rep.getEmail() : "");
             traineeInfo.setDepartment(rep.getDepartment() != null ? rep.getDepartment() : "Unknown");
             traineeInfo.setProgress(avgProgress);
             traineeInfo.setEngagement(avgEngagement);
@@ -217,16 +295,18 @@ public class TrainingJourneyService {
             allTrainees.add(traineeInfo);
         }
         
-        // Calculate averages
-        if (!enrolledRepIds.isEmpty()) {
-            dashboard.setCompletionRate((double) completedCount / enrolledRepIds.size() * 100);
-            dashboard.setAverageEngagement(totalEngagement / enrolledRepIds.size());
+        // Calculate averages - only count reps that actually exist
+        int validRepCount = repMap.size();
+        if (validRepCount > 0) {
+            dashboard.setCompletionRate((double) completedCount / validRepCount * 100);
+            dashboard.setAverageEngagement(totalEngagement / validRepCount);
         } else {
             dashboard.setCompletionRate(0);
             dashboard.setAverageEngagement(0);
         }
         
         dashboard.setActiveTrainees(activeCount);
+        dashboard.setTotalTrainees(validRepCount); // Update total to only count valid reps
         
         // Sort and get top performers (by progress and engagement)
         List<TrainerDashboardDTO.TraineeInfo> topPerformers = allTrainees.stream()
@@ -266,7 +346,7 @@ public class TrainingJourneyService {
             insights.add(insight);
         }
         
-        if (strugglingTrainees.size() > enrolledRepIds.size() * 0.3) {
+        if (repMap.size() > 0 && strugglingTrainees.size() > repMap.size() * 0.3) {
             TrainerDashboardDTO.AIInsight insight = new TrainerDashboardDTO.AIInsight();
             insight.setId("insight-2");
             insight.setTitle("High Number of Struggling Trainees");
@@ -284,16 +364,21 @@ public class TrainingJourneyService {
         
         // Generate upcoming deadlines (mock for now - can be enhanced with actual deadline data)
         List<TrainerDashboardDTO.DeadlineInfo> deadlines = new ArrayList<>();
-        for (TrainingJourneyEntity journey : journeys) {
-            if (journey.getModules() != null) {
-                for (int i = 0; i < Math.min(journey.getModules().size(), 3); i++) {
-                    TrainerDashboardDTO.DeadlineInfo deadline = new TrainerDashboardDTO.DeadlineInfo();
-                    deadline.setTraineeId(enrolledRepIds.iterator().next());
-                    deadline.setTraineeName(repMap.get(enrolledRepIds.iterator().next()).getName());
-                    deadline.setTask("Complete Module: " + journey.getModules().get(i).getTitle());
-                    deadline.setDueDate(LocalDateTime.now().plusDays(7).format(DateTimeFormatter.ofPattern("MMM dd, yyyy")));
-                    deadline.setRiskLevel("medium");
-                    deadlines.add(deadline);
+        if (!repMap.isEmpty() && !journeys.isEmpty()) {
+            String firstRepId = repMap.keySet().iterator().next();
+            Rep firstRep = repMap.get(firstRepId);
+            
+            for (TrainingJourneyEntity journey : journeys) {
+                if (journey.getModules() != null && firstRep != null) {
+                    for (int i = 0; i < Math.min(journey.getModules().size(), 3); i++) {
+                        TrainerDashboardDTO.DeadlineInfo deadline = new TrainerDashboardDTO.DeadlineInfo();
+                        deadline.setTraineeId(firstRepId);
+                        deadline.setTraineeName(firstRep.getName() != null ? firstRep.getName() : "Unknown");
+                        deadline.setTask("Complete Module: " + journey.getModules().get(i).getTitle());
+                        deadline.setDueDate(LocalDateTime.now().plusDays(7).format(DateTimeFormatter.ofPattern("MMM dd, yyyy")));
+                        deadline.setRiskLevel("medium");
+                        deadlines.add(deadline);
+                    }
                 }
             }
         }
