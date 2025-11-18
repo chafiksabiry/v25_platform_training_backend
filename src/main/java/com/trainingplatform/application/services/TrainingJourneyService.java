@@ -1,11 +1,14 @@
 package com.trainingplatform.application.services;
 
 import com.trainingplatform.domain.entities.TrainingJourneyEntity;
+import com.trainingplatform.domain.entities.GigEntity;
 import com.trainingplatform.domain.repositories.TrainingJourneyRepository;
+import com.trainingplatform.domain.repositories.GigRepository;
 import com.trainingplatform.core.entities.RepProgress;
 import com.trainingplatform.core.entities.Rep;
 import com.trainingplatform.infrastructure.repositories.RepProgressRepository;
 import com.trainingplatform.infrastructure.repositories.RepRepository;
+import java.util.Optional;
 import com.trainingplatform.presentation.dtos.TrainerDashboardDTO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -20,6 +23,9 @@ public class TrainingJourneyService {
     
     @Autowired
     private TrainingJourneyRepository journeyRepository;
+    
+    @Autowired
+    private GigRepository gigRepository;
     
     @Autowired
     private RepProgressRepository repProgressRepository;
@@ -109,6 +115,7 @@ public class TrainingJourneyService {
     
     /**
      * Get journeys by company ID and optionally by gig ID
+     * Populates gig title information
      */
     public List<TrainingJourneyEntity> getJourneysByCompanyAndGig(String companyId, String gigId) {
         System.out.println("[TrainerDashboard] getJourneysByCompanyAndGig - companyId: " + companyId + ", gigId: " + gigId);
@@ -123,7 +130,20 @@ public class TrainingJourneyService {
         }
         
         System.out.println("[TrainerDashboard] Found " + journeys.size() + " journeys");
+        
+        // Populate gig titles
         for (TrainingJourneyEntity journey : journeys) {
+            if (journey.getGigId() != null && !journey.getGigId().isEmpty()) {
+                Optional<GigEntity> gigOpt = gigRepository.findById(journey.getGigId());
+                if (gigOpt.isPresent()) {
+                    GigEntity gig = gigOpt.get();
+                    // Store gig title in a custom field or use reflection to add it
+                    // Since we can't modify the entity easily, we'll use a Map approach in the controller
+                    System.out.println("[TrainerDashboard] Found gig: " + gig.getTitle() + " for journey: " + journey.getId());
+                } else {
+                    System.out.println("[TrainerDashboard] Gig not found for ID: " + journey.getGigId());
+                }
+            }
             System.out.println("[TrainerDashboard] Journey: " + journey.getId() + " - " + journey.getTitle() + 
                              " (companyId: " + journey.getCompanyId() + ", gigId: " + journey.getGigId() + ")");
         }

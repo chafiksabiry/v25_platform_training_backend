@@ -2,6 +2,8 @@ package com.trainingplatform.presentation.controllers;
 
 import com.trainingplatform.application.services.TrainingJourneyService;
 import com.trainingplatform.domain.entities.TrainingJourneyEntity;
+import com.trainingplatform.domain.entities.GigEntity;
+import com.trainingplatform.domain.repositories.GigRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -12,6 +14,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/training_journeys")
@@ -19,6 +22,9 @@ public class JourneyController {
     
     @Autowired
     private TrainingJourneyService journeyService;
+    
+    @Autowired
+    private GigRepository gigRepository;
     
     @Autowired
     private ObjectMapper objectMapper;
@@ -259,9 +265,27 @@ public class JourneyController {
             
             List<TrainingJourneyEntity> journeys = journeyService.getJourneysByCompanyAndGig(companyId, gigId);
             
+            // Populate gig titles
+            List<Map<String, Object>> journeysWithGigTitles = journeys.stream().map(journey -> {
+                Map<String, Object> journeyMap = objectMapper.convertValue(journey, Map.class);
+                
+                if (journey.getGigId() != null && !journey.getGigId().isEmpty()) {
+                    Optional<GigEntity> gigOpt = gigRepository.findById(journey.getGigId());
+                    if (gigOpt.isPresent()) {
+                        journeyMap.put("gigTitle", gigOpt.get().getTitle());
+                    } else {
+                        journeyMap.put("gigTitle", null);
+                    }
+                } else {
+                    journeyMap.put("gigTitle", null);
+                }
+                
+                return journeyMap;
+            }).collect(Collectors.toList());
+            
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
-            response.put("data", journeys);
+            response.put("data", journeysWithGigTitles);
             response.put("count", journeys.size());
             
             System.out.println("[JourneyController] Found " + journeys.size() + " journeys for companyId: " + companyId + ", gigId: " + gigId);
@@ -288,9 +312,27 @@ public class JourneyController {
             
             List<TrainingJourneyEntity> journeys = journeyService.getJourneysByCompanyAndGig(companyId, null);
             
+            // Populate gig titles
+            List<Map<String, Object>> journeysWithGigTitles = journeys.stream().map(journey -> {
+                Map<String, Object> journeyMap = objectMapper.convertValue(journey, Map.class);
+                
+                if (journey.getGigId() != null && !journey.getGigId().isEmpty()) {
+                    Optional<GigEntity> gigOpt = gigRepository.findById(journey.getGigId());
+                    if (gigOpt.isPresent()) {
+                        journeyMap.put("gigTitle", gigOpt.get().getTitle());
+                    } else {
+                        journeyMap.put("gigTitle", null);
+                    }
+                } else {
+                    journeyMap.put("gigTitle", null);
+                }
+                
+                return journeyMap;
+            }).collect(Collectors.toList());
+            
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
-            response.put("data", journeys);
+            response.put("data", journeysWithGigTitles);
             response.put("count", journeys.size());
             
             System.out.println("[JourneyController] Found " + journeys.size() + " journeys for companyId: " + companyId);
