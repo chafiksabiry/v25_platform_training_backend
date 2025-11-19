@@ -26,15 +26,22 @@ public class CorsFilter implements Filter {
 
         // ✅ Headers CORS permissifs pour le développement et production
         String origin = request.getHeader("Origin");
+        String method = request.getMethod();
+        String path = request.getRequestURI();
+        
+        // Log pour debugging
+        System.out.println("[CorsFilter] Request: " + method + " " + path + " | Origin: " + origin);
         
         // Toujours autoriser toutes les origines pour le développement
         if (origin != null && !origin.isEmpty()) {
             response.setHeader("Access-Control-Allow-Origin", origin);
             response.setHeader("Access-Control-Allow-Credentials", "true");
+            System.out.println("[CorsFilter] Set Access-Control-Allow-Origin: " + origin);
         } else {
             // Si pas d'origine spécifiée, autoriser toutes (sans credentials)
             response.setHeader("Access-Control-Allow-Origin", "*");
             response.setHeader("Access-Control-Allow-Credentials", "false");
+            System.out.println("[CorsFilter] Set Access-Control-Allow-Origin: *");
         }
         
         // Headers CORS essentiels
@@ -48,10 +55,12 @@ public class CorsFilter implements Filter {
             "Authorization, Content-Type, X-Total-Count, Content-Length");
 
         // ✅ Si c'est une requête OPTIONS (preflight), on répond immédiatement avec 200 OK
-        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+        if ("OPTIONS".equalsIgnoreCase(method)) {
+            System.out.println("[CorsFilter] Handling OPTIONS preflight request");
             response.setStatus(HttpServletResponse.SC_OK);
             response.setContentLength(0);
             response.flushBuffer();
+            System.out.println("[CorsFilter] OPTIONS request handled successfully");
             return;
         }
 

@@ -2,6 +2,7 @@ package com.trainingplatform.infrastructure.repositories;
 
 import com.trainingplatform.core.entities.ExamFinalQuiz;
 import org.springframework.data.mongodb.repository.MongoRepository;
+import org.springframework.data.mongodb.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -13,6 +14,7 @@ public interface ExamFinalQuizRepository extends MongoRepository<ExamFinalQuiz, 
     
     List<ExamFinalQuiz> findByJourneyId(String journeyId);
     
+    @Query("{ '_id': ?0, 'trainingId': ?1 }")
     Optional<ExamFinalQuiz> findByIdAndTrainingId(String id, String trainingId);
     
     Optional<ExamFinalQuiz> findFirstByJourneyId(String journeyId); // Get first exam by journey ID
