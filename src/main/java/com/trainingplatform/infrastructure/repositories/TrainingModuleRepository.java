@@ -8,8 +8,11 @@ import java.util.List;
 
 @Repository
 public interface TrainingModuleRepository extends MongoRepository<TrainingModule, String> {
-    List<TrainingModule> findByJourneyId(String journeyId);
-    List<TrainingModule> findByJourneyIdOrderByOrderIndex(String journeyId);
-    List<TrainingModule> findByDifficulty(String difficulty);
-    List<TrainingModule> findByModuleType(String moduleType);
+    List<TrainingModule> findByTrainingJourneyId(String trainingJourneyId);
+    
+    List<TrainingModule> findByTrainingJourneyIdOrderByOrderAsc(String trainingJourneyId);
+    
+    void deleteByTrainingJourneyId(String trainingJourneyId);
+    
+    long countByTrainingJourneyId(String trainingJourneyId);
 }

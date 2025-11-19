@@ -6,6 +6,8 @@ import com.trainingplatform.domain.repositories.TrainingJourneyRepository;
 import com.trainingplatform.domain.repositories.GigRepository;
 import com.trainingplatform.core.entities.RepProgress;
 import com.trainingplatform.core.entities.Rep;
+import com.trainingplatform.core.entities.TrainingModule;
+import com.trainingplatform.application.services.TrainingModuleService;
 import com.trainingplatform.infrastructure.repositories.RepProgressRepository;
 import com.trainingplatform.infrastructure.repositories.RepRepository;
 import java.util.Optional;
@@ -32,6 +34,9 @@ public class TrainingJourneyService {
     
     @Autowired
     private RepRepository repRepository;
+    
+    @Autowired
+    private TrainingModuleService moduleService;
     
     /**
      * Create or update a training journey
@@ -389,12 +394,13 @@ public class TrainingJourneyService {
             Rep firstRep = repMap.get(firstRepId);
             
             for (TrainingJourneyEntity journey : journeys) {
-                if (journey.getModules() != null && firstRep != null) {
-                    for (int i = 0; i < Math.min(journey.getModules().size(), 3); i++) {
+                if (journey.getModuleIds() != null && !journey.getModuleIds().isEmpty() && firstRep != null) {
+                    List<TrainingModule> modules = moduleService.getModulesByTrainingJourney(journey.getId());
+                    for (int i = 0; i < Math.min(modules.size(), 3); i++) {
                         TrainerDashboardDTO.DeadlineInfo deadline = new TrainerDashboardDTO.DeadlineInfo();
                         deadline.setTraineeId(firstRepId);
                         deadline.setTraineeName(firstRep.getName() != null ? firstRep.getName() : "Unknown");
-                        deadline.setTask("Complete Module: " + journey.getModules().get(i).getTitle());
+                        deadline.setTask("Complete Module: " + modules.get(i).getTitle());
                         deadline.setDueDate(LocalDateTime.now().plusDays(7).format(DateTimeFormatter.ofPattern("MMM dd, yyyy")));
                         deadline.setRiskLevel("medium");
                         deadlines.add(deadline);

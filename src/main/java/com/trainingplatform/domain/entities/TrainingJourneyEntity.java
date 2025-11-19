@@ -22,7 +22,8 @@ public class TrainingJourneyEntity {
     
     private CompanyInfo company;
     private TrainingVision vision;
-    private List<TrainingModuleEntity> modules;
+    private List<String> moduleIds; // References to TrainingModule documents (ObjectIds)
+    private String finalExamId; // Reference to ExamFinalQuiz document (ObjectId) - 0 or 1
     private List<String> enrolledRepIds;
     
     private LocalDateTime createdAt;
@@ -106,12 +107,20 @@ public class TrainingJourneyEntity {
         this.vision = vision;
     }
     
-    public List<TrainingModuleEntity> getModules() {
-        return modules;
+    public List<String> getModuleIds() {
+        return moduleIds;
     }
     
-    public void setModules(List<TrainingModuleEntity> modules) {
-        this.modules = modules;
+    public void setModuleIds(List<String> moduleIds) {
+        this.moduleIds = moduleIds;
+    }
+    
+    public String getFinalExamId() {
+        return finalExamId;
+    }
+    
+    public void setFinalExamId(String finalExamId) {
+        this.finalExamId = finalExamId;
     }
     
     public List<String> getEnrolledRepIds() {
