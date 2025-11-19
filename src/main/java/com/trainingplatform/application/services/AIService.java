@@ -888,9 +888,22 @@ public class AIService {
         prompt.append("  ]\n");
         prompt.append("}\n\n");
         prompt.append("REMEMBER: Return ONLY the JSON object. No text before or after.\n");
+        prompt.append("CRITICAL: You MUST return ALL ").append(numberOfQuestions).append(" questions in the JSON array. Do not truncate or skip any questions.\n");
         
-        // Call OpenAI with higher token limit for quiz generation
-        return callOpenAI(prompt.toString(), 4000);
+        // Calculate maxTokens based on number of questions
+        // For 30 questions, we need more tokens (approximately 200-300 tokens per question)
+        // Base: 4000 tokens, add 200 tokens per question above 10
+        int baseTokens = 4000;
+        int additionalTokens = Math.max(0, (numberOfQuestions - 10) * 200);
+        int maxTokens = baseTokens + additionalTokens;
+        
+        // Cap at 8000 tokens (safe limit for most models)
+        maxTokens = Math.min(maxTokens, 8000);
+        
+        log.info("Generating quiz with {} questions, using {} max_tokens", numberOfQuestions, maxTokens);
+        
+        // Call OpenAI with calculated token limit
+        return callOpenAI(prompt.toString(), maxTokens);
     }
     
     /**
