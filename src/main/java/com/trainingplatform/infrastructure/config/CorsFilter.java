@@ -28,7 +28,7 @@ public class CorsFilter implements Filter {
         String origin = request.getHeader("Origin");
         
         // Toujours autoriser toutes les origines pour le développement
-        if (origin != null) {
+        if (origin != null && !origin.isEmpty()) {
             response.setHeader("Access-Control-Allow-Origin", origin);
             response.setHeader("Access-Control-Allow-Credentials", "true");
         } else {
@@ -36,17 +36,21 @@ public class CorsFilter implements Filter {
             response.setHeader("Access-Control-Allow-Origin", "*");
             response.setHeader("Access-Control-Allow-Credentials", "false");
         }
-        response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
+        
+        // Headers CORS essentiels
+        response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD");
         response.setHeader("Access-Control-Max-Age", "3600");
         response.setHeader("Access-Control-Allow-Headers", 
             "Origin, X-Requested-With, Content-Type, Accept, Authorization, " +
-            "Access-Control-Request-Method, Access-Control-Request-Headers");
+            "Access-Control-Request-Method, Access-Control-Request-Headers, " +
+            "X-Requested-With, Cache-Control, Pragma");
         response.setHeader("Access-Control-Expose-Headers", 
-            "Authorization, Content-Type, X-Total-Count");
+            "Authorization, Content-Type, X-Total-Count, Content-Length");
 
-        // ✅ Si c'est une requête OPTIONS (preflight), on répond immédiatement
+        // ✅ Si c'est une requête OPTIONS (preflight), on répond immédiatement avec 200 OK
         if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
             response.setStatus(HttpServletResponse.SC_OK);
+            response.setContentLength(0);
             return;
         }
 
