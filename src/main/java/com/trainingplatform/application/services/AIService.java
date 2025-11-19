@@ -800,104 +800,151 @@ public class AIService {
         
         prompt.append("=== MODULE INFORMATION ===\n");
         prompt.append("Title: ").append(moduleContent.get("title")).append("\n");
-        prompt.append("Description: ").append(moduleContent.get("description")).append("\n\n");
+        String description = (String) moduleContent.get("description");
+        if (description != null && !description.isEmpty()) {
+            prompt.append("Description: ").append(description).append("\n");
+        }
+        
+        // Add learning objectives if available
+        @SuppressWarnings("unchecked")
+        List<String> learningObjectives = (List<String>) moduleContent.get("learningObjectives");
+        if (learningObjectives != null && !learningObjectives.isEmpty()) {
+            prompt.append("Learning Objectives: ");
+            for (int i = 0; i < Math.min(learningObjectives.size(), 5); i++) {
+                if (i > 0) prompt.append(", ");
+                prompt.append(learningObjectives.get(i));
+            }
+            prompt.append("\n");
+        }
+        prompt.append("\n");
         
         // Add section content
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> sections = (List<Map<String, Object>>) moduleContent.get("sections");
         if (sections != null && !sections.isEmpty()) {
             prompt.append("=== SECTIONS ===\n");
-            // For large quizzes (like final exams with 30 questions), limit section content to save tokens
-            // Use very short limits to ensure we have enough tokens for 30 questions
-            int maxSectionLength = numberOfQuestions >= 20 ? 150 : 2000;
+            // For large quizzes (like final exams with 30 questions), only include titles
+            boolean includeContent = numberOfQuestions < 20;
             
-            for (int i = 0; i < sections.size(); i++) {
+            // Limit number of sections for large quizzes
+            int maxSections = numberOfQuestions >= 20 ? Math.min(sections.size(), 10) : sections.size();
+            
+            for (int i = 0; i < maxSections; i++) {
                 Map<String, Object> section = sections.get(i);
-                prompt.append(String.format("\nSection %d: %s\n", (i + 1), section.get("title")));
+                prompt.append(String.format("Section %d: %s", (i + 1), section.get("title")));
                 
-                @SuppressWarnings("unchecked")
-                Map<String, Object> content = (Map<String, Object>) section.get("content");
-                if (content != null && content.get("text") != null) {
-                    String sectionText = (String) content.get("text");
-                    // Truncate if too long to save tokens
-                    if (sectionText.length() > maxSectionLength) {
-                        sectionText = sectionText.substring(0, maxSectionLength) + "... [content truncated to save tokens]";
+                if (includeContent) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> content = (Map<String, Object>) section.get("content");
+                    if (content != null && content.get("text") != null) {
+                        String sectionText = (String) content.get("text");
+                        // Truncate if too long
+                        if (sectionText.length() > 2000) {
+                            sectionText = sectionText.substring(0, 2000) + "...";
+                        }
+                        if (!sectionText.isEmpty()) {
+                            prompt.append("\nContent: ").append(sectionText);
+                        }
                     }
-                    prompt.append("Content: ").append(sectionText).append("\n");
+                }
+                prompt.append("\n");
+            }
+            if (sections.size() > maxSections) {
+                prompt.append(String.format("... and %d more sections\n", sections.size() - maxSections));
+            }
+        }
+        
+        // Simplified prompt for large quizzes to save tokens
+        if (numberOfQuestions >= 20) {
+            prompt.append("\n=== QUIZ REQUIREMENTS ===\n");
+            prompt.append("Generate EXACTLY ").append(numberOfQuestions).append(" questions.\n");
+            if (questionDistribution != null && !questionDistribution.isEmpty()) {
+                Object mcCount = questionDistribution.get("multipleChoice");
+                Object tfCount = questionDistribution.get("trueFalse");
+                Object mcaCount = questionDistribution.get("multipleCorrect");
+                prompt.append("Distribution: ").append(mcCount).append(" multiple-choice, ")
+                      .append(tfCount).append(" true/false, ").append(mcaCount).append(" multiple-correct.\n");
+            }
+            prompt.append("Difficulty: ").append(difficulty).append("\n");
+            prompt.append("Format: JSON with questions array. Each question: id, question, type, options, correctAnswer, explanation, points.\n");
+        } else {
+            prompt.append("\n=== QUIZ REQUIREMENTS ===\n");
+            prompt.append("Number of Questions: ").append(numberOfQuestions).append("\n");
+            prompt.append("Difficulty Level: ").append(difficulty).append("\n");
+            
+            // Add question distribution if provided
+            if (questionDistribution != null && !questionDistribution.isEmpty()) {
+                prompt.append("\n=== QUESTION DISTRIBUTION (MANDATORY) ===\n");
+                Object mcCount = questionDistribution.get("multipleChoice");
+                Object tfCount = questionDistribution.get("trueFalse");
+                Object mcaCount = questionDistribution.get("multipleCorrect");
+                
+                if (mcCount != null) {
+                    prompt.append("Multiple Choice Questions: ").append(mcCount).append("\n");
+                }
+                if (tfCount != null) {
+                    prompt.append("True/False Questions: ").append(tfCount).append("\n");
+                }
+                if (mcaCount != null) {
+                    prompt.append("Multiple Correct Answer Questions: ").append(mcaCount).append("\n");
+                }
+                prompt.append("CRITICAL: You MUST follow this exact distribution. The total must equal ").append(numberOfQuestions).append(".\n");
+            } else {
+                prompt.append("Allowed Question Types:\n");
+                if (questionTypes.get("multipleChoice")) {
+                    prompt.append("- multiple-choice (4 options)\n");
+                }
+                if (questionTypes.get("trueFalse")) {
+                    prompt.append("- true-false\n");
+                }
+                if (questionTypes.get("shortAnswer")) {
+                    prompt.append("- short-answer\n");
                 }
             }
-        }
-        
-        prompt.append("\n=== QUIZ REQUIREMENTS ===\n");
-        prompt.append("Number of Questions: ").append(numberOfQuestions).append("\n");
-        prompt.append("Difficulty Level: ").append(difficulty).append("\n");
-        
-        // Add question distribution if provided
-        if (questionDistribution != null && !questionDistribution.isEmpty()) {
-            prompt.append("\n=== QUESTION DISTRIBUTION (MANDATORY) ===\n");
-            Object mcCount = questionDistribution.get("multipleChoice");
-            Object tfCount = questionDistribution.get("trueFalse");
-            Object mcaCount = questionDistribution.get("multipleCorrect");
             
-            if (mcCount != null) {
-                prompt.append("Multiple Choice Questions: ").append(mcCount).append("\n");
-            }
-            if (tfCount != null) {
-                prompt.append("True/False Questions: ").append(tfCount).append("\n");
-            }
-            if (mcaCount != null) {
-                prompt.append("Multiple Correct Answer Questions: ").append(mcaCount).append("\n");
-            }
-            prompt.append("CRITICAL: You MUST follow this exact distribution. The total must equal ").append(numberOfQuestions).append(".\n");
-        } else {
-            prompt.append("Allowed Question Types:\n");
-            if (questionTypes.get("multipleChoice")) {
-                prompt.append("- multiple-choice (4 options)\n");
-            }
-            if (questionTypes.get("trueFalse")) {
-                prompt.append("- true-false\n");
-            }
-            if (questionTypes.get("shortAnswer")) {
-                prompt.append("- short-answer\n");
-            }
+            prompt.append("\n=== YOUR TASK ===\n");
+            prompt.append("Create EXACTLY ").append(numberOfQuestions).append(" high-quality quiz questions.\n");
+            prompt.append("CRITICAL: You MUST generate exactly ").append(numberOfQuestions).append(" questions. No more, no less.\n");
+            prompt.append("If question distribution is specified, you MUST follow it exactly.\n\n");
+            
+            prompt.append("REQUIREMENTS:\n");
+            prompt.append("1. Questions must be DIRECTLY related to module content\n");
+            prompt.append("2. Cover different aspects of the material\n");
+            prompt.append("3. Difficulty: ").append(difficulty).append("\n");
+            prompt.append("4. Each question must have:\n");
+            prompt.append("   - Clear, specific question text\n");
+            prompt.append("   - For multiple-choice: 4 options with one correct answer\n");
+            prompt.append("   - For true-false: correct answer (0=True, 1=False)\n");
+            prompt.append("   - For short-answer: expected answer\n");
+            prompt.append("   - Helpful explanation\n");
+            prompt.append("   - Points (1-5 based on difficulty)\n\n");
         }
         
-        prompt.append("\n=== YOUR TASK ===\n");
-        prompt.append("Create EXACTLY ").append(numberOfQuestions).append(" high-quality quiz questions.\n");
-        prompt.append("CRITICAL: You MUST generate exactly ").append(numberOfQuestions).append(" questions. No more, no less.\n");
-        prompt.append("If question distribution is specified, you MUST follow it exactly.\n\n");
-        
-        prompt.append("REQUIREMENTS:\n");
-        prompt.append("1. Questions must be DIRECTLY related to module content\n");
-        prompt.append("2. Cover different aspects of the material\n");
-        prompt.append("3. Difficulty: ").append(difficulty).append("\n");
-        prompt.append("4. Each question must have:\n");
-        prompt.append("   - Clear, specific question text\n");
-        prompt.append("   - For multiple-choice: 4 options with one correct answer\n");
-        prompt.append("   - For true-false: correct answer (0=True, 1=False)\n");
-        prompt.append("   - For short-answer: expected answer\n");
-        prompt.append("   - Helpful explanation\n");
-        prompt.append("   - Points (1-5 based on difficulty)\n\n");
-        
-        prompt.append("CRITICAL: Return ONLY raw JSON. NO markdown, NO code blocks, NO extra text.\n");
-        prompt.append("Start with { and end with }. Nothing else.\n\n");
-        
-        prompt.append("Required JSON format:\n");
-        prompt.append("{\n");
-        prompt.append("  \"questions\": [\n");
-        prompt.append("    {\n");
-        prompt.append("      \"id\": \"q1\",\n");
-        prompt.append("      \"question\": \"Question text here?\",\n");
-        prompt.append("      \"type\": \"multiple-choice\",\n");
-        prompt.append("      \"options\": [\"Option A\", \"Option B\", \"Option C\", \"Option D\"],\n");
-        prompt.append("      \"correctAnswer\": 0,\n");
-        prompt.append("      \"explanation\": \"Why this answer is correct...\",\n");
-        prompt.append("      \"points\": 1\n");
-        prompt.append("    }\n");
-        prompt.append("  ]\n");
-        prompt.append("}\n\n");
-        prompt.append("REMEMBER: Return ONLY the JSON object. No text before or after.\n");
-        prompt.append("CRITICAL: You MUST return ALL ").append(numberOfQuestions).append(" questions in the JSON array. Do not truncate or skip any questions.\n");
+        // Simplified format instructions for large quizzes
+        if (numberOfQuestions >= 20) {
+            prompt.append("Return JSON: {\"questions\":[{id,question,type,options,correctAnswer,explanation,points},...]}\n");
+            prompt.append("MUST return ALL ").append(numberOfQuestions).append(" questions.\n");
+        } else {
+            prompt.append("CRITICAL: Return ONLY raw JSON. NO markdown, NO code blocks, NO extra text.\n");
+            prompt.append("Start with { and end with }. Nothing else.\n\n");
+            
+            prompt.append("Required JSON format:\n");
+            prompt.append("{\n");
+            prompt.append("  \"questions\": [\n");
+            prompt.append("    {\n");
+            prompt.append("      \"id\": \"q1\",\n");
+            prompt.append("      \"question\": \"Question text here?\",\n");
+            prompt.append("      \"type\": \"multiple-choice\",\n");
+            prompt.append("      \"options\": [\"Option A\", \"Option B\", \"Option C\", \"Option D\"],\n");
+            prompt.append("      \"correctAnswer\": 0,\n");
+            prompt.append("      \"explanation\": \"Why this answer is correct...\",\n");
+            prompt.append("      \"points\": 1\n");
+            prompt.append("    }\n");
+            prompt.append("  ]\n");
+            prompt.append("}\n\n");
+            prompt.append("REMEMBER: Return ONLY the JSON object. No text before or after.\n");
+            prompt.append("CRITICAL: You MUST return ALL ").append(numberOfQuestions).append(" questions in the JSON array. Do not truncate or skip any questions.\n");
+        }
         
         // Calculate maxTokens based on number of questions
         // For 30 questions, we need more tokens (approximately 200-300 tokens per question)
