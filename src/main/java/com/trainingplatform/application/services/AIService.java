@@ -807,6 +807,10 @@ public class AIService {
         List<Map<String, Object>> sections = (List<Map<String, Object>>) moduleContent.get("sections");
         if (sections != null && !sections.isEmpty()) {
             prompt.append("=== SECTIONS ===\n");
+            // For large quizzes (like final exams with 30 questions), limit section content to save tokens
+            // Use very short limits to ensure we have enough tokens for 30 questions
+            int maxSectionLength = numberOfQuestions >= 20 ? 150 : 2000;
+            
             for (int i = 0; i < sections.size(); i++) {
                 Map<String, Object> section = sections.get(i);
                 prompt.append(String.format("\nSection %d: %s\n", (i + 1), section.get("title")));
@@ -814,7 +818,12 @@ public class AIService {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> content = (Map<String, Object>) section.get("content");
                 if (content != null && content.get("text") != null) {
-                    prompt.append("Content: ").append(content.get("text")).append("\n");
+                    String sectionText = (String) content.get("text");
+                    // Truncate if too long to save tokens
+                    if (sectionText.length() > maxSectionLength) {
+                        sectionText = sectionText.substring(0, maxSectionLength) + "... [content truncated to save tokens]";
+                    }
+                    prompt.append("Content: ").append(sectionText).append("\n");
                 }
             }
         }
