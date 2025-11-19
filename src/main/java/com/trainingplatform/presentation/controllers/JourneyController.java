@@ -1,6 +1,10 @@
 package com.trainingplatform.presentation.controllers;
 
 import com.trainingplatform.application.services.TrainingJourneyService;
+import com.trainingplatform.application.services.ModuleQuizService;
+import com.trainingplatform.application.services.ExamFinalQuizService;
+import com.trainingplatform.core.entities.ModuleQuiz;
+import com.trainingplatform.core.entities.ExamFinalQuiz;
 import com.trainingplatform.domain.entities.TrainingJourneyEntity;
 import com.trainingplatform.domain.entities.GigEntity;
 import com.trainingplatform.domain.entities.IndustryEntity;
@@ -33,6 +37,12 @@ public class JourneyController {
     
     @Autowired
     private ObjectMapper objectMapper;
+    
+    @Autowired
+    private ModuleQuizService moduleQuizService;
+    
+    @Autowired
+    private ExamFinalQuizService examFinalQuizService;
     
     /**
      * GET /journeys
@@ -488,6 +498,250 @@ public class JourneyController {
             
             System.err.println("⚠️ Conversion partielle - certains champs peuvent manquer: " + e.getMessage());
             return entity;
+        }
+    }
+    
+    /**
+     * POST /training_journeys/modules/{moduleId}/quizzes
+     * Create a module quiz in module_quizzes collection
+     */
+    @PostMapping("/modules/{moduleId}/quizzes")
+    public ResponseEntity<Map<String, Object>> createModuleQuiz(
+            @PathVariable String moduleId,
+            @RequestBody Map<String, Object> quizData) {
+        try {
+            ModuleQuiz quiz = convertMapToModuleQuiz(quizData);
+            quiz.setModuleId(moduleId);
+            
+            ModuleQuiz created = moduleQuizService.createQuiz(quiz);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "Module quiz created successfully");
+            response.put("data", created);
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            System.err.println("[JourneyController] Error creating module quiz: " + e.getMessage());
+            e.printStackTrace();
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+    
+    /**
+     * GET /training_journeys/modules/quizzes/{quizId}
+     * Get a module quiz by ID
+     */
+    @GetMapping("/modules/quizzes/{quizId}")
+    public ResponseEntity<Map<String, Object>> getModuleQuiz(@PathVariable String quizId) {
+        try {
+            ModuleQuiz quiz = moduleQuizService.getQuizById(quizId);
+            
+            if (quiz != null) {
+                Map<String, Object> response = new HashMap<>();
+                response.put("success", true);
+                response.put("data", quiz);
+                return ResponseEntity.ok(response);
+            } else {
+                Map<String, Object> errorResponse = new HashMap<>();
+                errorResponse.put("success", false);
+                errorResponse.put("error", "Quiz not found");
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(errorResponse);
+            }
+        } catch (Exception e) {
+            System.err.println("[JourneyController] Error getting module quiz: " + e.getMessage());
+            e.printStackTrace();
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+    
+    /**
+     * GET /training_journeys/modules/{moduleId}/quizzes
+     * Get all quizzes for a module
+     */
+    @GetMapping("/modules/{moduleId}/quizzes")
+    public ResponseEntity<Map<String, Object>> getModuleQuizzes(@PathVariable String moduleId) {
+        try {
+            List<ModuleQuiz> quizzes = moduleQuizService.getQuizzesByModule(moduleId);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("data", quizzes);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            System.err.println("[JourneyController] Error getting module quizzes: " + e.getMessage());
+            e.printStackTrace();
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+    
+    /**
+     * POST /training_journeys/{trainingId}/final-exam
+     * Create a final exam quiz in exam_final_quizzes collection
+     */
+    @PostMapping("/{trainingId}/final-exam")
+    public ResponseEntity<Map<String, Object>> createFinalExam(
+            @PathVariable String trainingId,
+            @RequestBody Map<String, Object> examData) {
+        try {
+            ExamFinalQuiz exam = convertMapToExamFinalQuiz(examData);
+            exam.setTrainingId(trainingId);
+            exam.setJourneyId(trainingId); // Use trainingId as journeyId
+            
+            ExamFinalQuiz created = examFinalQuizService.createFinalExam(exam);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "Final exam created successfully");
+            response.put("data", created);
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            System.err.println("[JourneyController] Error creating final exam: " + e.getMessage());
+            e.printStackTrace();
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+    
+    /**
+     * GET /training_journeys/{trainingId}/final-exam
+     * Get final exam for a training journey
+     */
+    @GetMapping("/{trainingId}/final-exam")
+    public ResponseEntity<Map<String, Object>> getFinalExam(@PathVariable String trainingId) {
+        try {
+            ExamFinalQuiz exam = examFinalQuizService.getFinalExamByTraining(trainingId);
+            
+            if (exam != null) {
+                Map<String, Object> response = new HashMap<>();
+                response.put("success", true);
+                response.put("data", exam);
+                return ResponseEntity.ok(response);
+            } else {
+                Map<String, Object> errorResponse = new HashMap<>();
+                errorResponse.put("success", false);
+                errorResponse.put("error", "Final exam not found");
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(errorResponse);
+            }
+        } catch (Exception e) {
+            System.err.println("[JourneyController] Error getting final exam: " + e.getMessage());
+            e.printStackTrace();
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+    
+    /**
+     * Helper method to convert Map to ModuleQuiz
+     */
+    private ModuleQuiz convertMapToModuleQuiz(Map<String, Object> data) {
+        try {
+            return objectMapper.convertValue(data, ModuleQuiz.class);
+        } catch (Exception e) {
+            // Fallback manual conversion
+            ModuleQuiz quiz = new ModuleQuiz();
+            if (data.containsKey("title")) quiz.setTitle((String) data.get("title"));
+            if (data.containsKey("description")) quiz.setDescription((String) data.get("description"));
+            if (data.containsKey("moduleId")) quiz.setModuleId((String) data.get("moduleId"));
+            if (data.containsKey("trainingId")) quiz.setTrainingId((String) data.get("trainingId"));
+            if (data.containsKey("passingScore")) quiz.setPassingScore(((Number) data.get("passingScore")).intValue());
+            if (data.containsKey("timeLimit")) quiz.setTimeLimit(((Number) data.get("timeLimit")).intValue());
+            if (data.containsKey("maxAttempts")) quiz.setMaxAttempts(((Number) data.get("maxAttempts")).intValue());
+            if (data.containsKey("questions")) {
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> questionsData = (List<Map<String, Object>>) data.get("questions");
+                List<ModuleQuiz.QuizQuestion> questions = questionsData.stream().map(qData -> {
+                    ModuleQuiz.QuizQuestion q = new ModuleQuiz.QuizQuestion();
+                    if (qData.containsKey("_id")) q.set_id((String) qData.get("_id"));
+                    if (qData.containsKey("id")) q.set_id((String) qData.get("id"));
+                    if (qData.containsKey("question")) q.setQuestion((String) qData.get("question"));
+                    if (qData.containsKey("text")) q.setQuestion((String) qData.get("text"));
+                    if (qData.containsKey("type")) q.setType((String) qData.get("type"));
+                    if (qData.containsKey("options")) q.setOptions((List<String>) qData.get("options"));
+                    if (qData.containsKey("correctAnswer")) q.setCorrectAnswer(qData.get("correctAnswer"));
+                    if (qData.containsKey("explanation")) q.setExplanation((String) qData.get("explanation"));
+                    if (qData.containsKey("points")) q.setPoints(((Number) qData.get("points")).intValue());
+                    if (qData.containsKey("orderIndex")) q.setOrderIndex(((Number) qData.get("orderIndex")).intValue());
+                    return q;
+                }).collect(java.util.stream.Collectors.toList());
+                quiz.setQuestions(questions);
+            }
+            if (data.containsKey("settings")) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> settingsData = (Map<String, Object>) data.get("settings");
+                ModuleQuiz.QuizSettings settings = new ModuleQuiz.QuizSettings();
+                if (settingsData.containsKey("shuffleQuestions")) settings.setShuffleQuestions((Boolean) settingsData.get("shuffleQuestions"));
+                if (settingsData.containsKey("shuffleOptions")) settings.setShuffleOptions((Boolean) settingsData.get("shuffleOptions"));
+                if (settingsData.containsKey("showCorrectAnswers")) settings.setShowCorrectAnswers((Boolean) settingsData.get("showCorrectAnswers"));
+                if (settingsData.containsKey("allowReview")) settings.setAllowReview((Boolean) settingsData.get("allowReview"));
+                if (settingsData.containsKey("showExplanations")) settings.setShowExplanations((Boolean) settingsData.get("showExplanations"));
+                quiz.setSettings(settings);
+            }
+            return quiz;
+        }
+    }
+    
+    /**
+     * Helper method to convert Map to ExamFinalQuiz
+     */
+    private ExamFinalQuiz convertMapToExamFinalQuiz(Map<String, Object> data) {
+        try {
+            return objectMapper.convertValue(data, ExamFinalQuiz.class);
+        } catch (Exception e) {
+            // Fallback manual conversion
+            ExamFinalQuiz exam = new ExamFinalQuiz();
+            if (data.containsKey("title")) exam.setTitle((String) data.get("title"));
+            if (data.containsKey("description")) exam.setDescription((String) data.get("description"));
+            if (data.containsKey("trainingId")) exam.setTrainingId((String) data.get("trainingId"));
+            if (data.containsKey("journeyId")) exam.setJourneyId((String) data.get("journeyId"));
+            if (data.containsKey("passingScore")) exam.setPassingScore(((Number) data.get("passingScore")).intValue());
+            if (data.containsKey("timeLimit")) exam.setTimeLimit(((Number) data.get("timeLimit")).intValue());
+            if (data.containsKey("maxAttempts")) exam.setMaxAttempts(((Number) data.get("maxAttempts")).intValue());
+            if (data.containsKey("questions")) {
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> questionsData = (List<Map<String, Object>>) data.get("questions");
+                List<ExamFinalQuiz.QuizQuestion> questions = questionsData.stream().map(qData -> {
+                    ExamFinalQuiz.QuizQuestion q = new ExamFinalQuiz.QuizQuestion();
+                    if (qData.containsKey("_id")) q.set_id((String) qData.get("_id"));
+                    if (qData.containsKey("id")) q.set_id((String) qData.get("id"));
+                    if (qData.containsKey("question")) q.setQuestion((String) qData.get("question"));
+                    if (qData.containsKey("text")) q.setQuestion((String) qData.get("text"));
+                    if (qData.containsKey("type")) q.setType((String) qData.get("type"));
+                    if (qData.containsKey("options")) q.setOptions((List<String>) qData.get("options"));
+                    if (qData.containsKey("correctAnswer")) q.setCorrectAnswer(qData.get("correctAnswer"));
+                    if (qData.containsKey("explanation")) q.setExplanation((String) qData.get("explanation"));
+                    if (qData.containsKey("points")) q.setPoints(((Number) qData.get("points")).intValue());
+                    if (qData.containsKey("orderIndex")) q.setOrderIndex(((Number) qData.get("orderIndex")).intValue());
+                    return q;
+                }).collect(java.util.stream.Collectors.toList());
+                exam.setQuestions(questions);
+            }
+            if (data.containsKey("settings")) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> settingsData = (Map<String, Object>) data.get("settings");
+                ExamFinalQuiz.QuizSettings settings = new ExamFinalQuiz.QuizSettings();
+                if (settingsData.containsKey("shuffleQuestions")) settings.setShuffleQuestions((Boolean) settingsData.get("shuffleQuestions"));
+                if (settingsData.containsKey("shuffleOptions")) settings.setShuffleOptions((Boolean) settingsData.get("shuffleOptions"));
+                if (settingsData.containsKey("showCorrectAnswers")) settings.setShowCorrectAnswers((Boolean) settingsData.get("showCorrectAnswers"));
+                if (settingsData.containsKey("allowReview")) settings.setAllowReview((Boolean) settingsData.get("allowReview"));
+                if (settingsData.containsKey("showExplanations")) settings.setShowExplanations((Boolean) settingsData.get("showExplanations"));
+                exam.setSettings(settings);
+            }
+            return exam;
         }
     }
 }
