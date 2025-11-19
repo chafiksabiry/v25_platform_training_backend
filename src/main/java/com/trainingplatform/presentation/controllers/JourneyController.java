@@ -24,6 +24,7 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/training_journeys")
+@CrossOrigin(origins = "*")
 public class JourneyController {
     
     @Autowired

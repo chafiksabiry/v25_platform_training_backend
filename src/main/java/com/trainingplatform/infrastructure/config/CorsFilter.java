@@ -26,19 +26,16 @@ public class CorsFilter implements Filter {
 
         // ✅ Headers CORS permissifs pour le développement et production
         String origin = request.getHeader("Origin");
-        // Accepter localhost:5190, harx.ai domains et IPs
-        if (origin != null && (origin.equals("http://localhost:5190") || 
-                               origin.equals("http://38.242.208.242:5190") ||
-                               origin.equals("https://training.harx.ai") ||
-                               origin.equals("https://v25.harx.ai") ||
-                               origin.equals("https://api-training.harx.ai") ||
-                               origin.startsWith("http://localhost:") ||
-                               origin.endsWith(".harx.ai"))) {
+        
+        // Toujours autoriser toutes les origines pour le développement
+        if (origin != null) {
             response.setHeader("Access-Control-Allow-Origin", origin);
+            response.setHeader("Access-Control-Allow-Credentials", "true");
         } else {
+            // Si pas d'origine spécifiée, autoriser toutes (sans credentials)
             response.setHeader("Access-Control-Allow-Origin", "*");
+            response.setHeader("Access-Control-Allow-Credentials", "false");
         }
-        response.setHeader("Access-Control-Allow-Credentials", "true");
         response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
         response.setHeader("Access-Control-Max-Age", "3600");
         response.setHeader("Access-Control-Allow-Headers", 

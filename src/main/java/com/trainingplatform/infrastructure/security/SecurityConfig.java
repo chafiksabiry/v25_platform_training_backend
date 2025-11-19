@@ -42,21 +42,12 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        // ✅ Permet localhost:5190 (dev) et harx.ai (production)
-        configuration.setAllowedOriginPatterns(Arrays.asList(
-            "http://localhost:5190", 
-            "http://38.242.208.242:5190", 
-            "https://training.harx.ai",
-            "https://v25.harx.ai",
-            "https://api-training.harx.ai",
-            "http://localhost:*", 
-            "https://*.harx.ai",
-            "*"
-        ));
+        // ✅ Permet toutes les origines pour le développement
+        configuration.setAllowedOriginPatterns(Arrays.asList("*"));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         configuration.setAllowedHeaders(Arrays.asList("*"));
-        configuration.setExposedHeaders(Arrays.asList("Authorization", "Content-Type"));
-        configuration.setAllowCredentials(true);
+        configuration.setExposedHeaders(Arrays.asList("Authorization", "Content-Type", "X-Total-Count"));
+        configuration.setAllowCredentials(false); // Must be false when using wildcard origin
         configuration.setMaxAge(3600L);  // Cache preflight requests for 1 hour
         
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
