@@ -1,5 +1,6 @@
 package com.trainingplatform.infrastructure.security;
 
+import com.trainingplatform.infrastructure.config.CorsFilter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -7,7 +8,6 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
@@ -21,6 +21,9 @@ import java.util.Arrays;
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
+
+    @Autowired
+    private CorsFilter corsFilter;
 
     // ❌ DÉSACTIVÉ pour le développement
     // @Autowired
@@ -64,6 +67,9 @@ public class SecurityConfig {
             .authorizeHttpRequests(authz -> authz
                 .anyRequest().permitAll()  // ✅ TOUT EST PUBLIC
             );
+
+        // ✅ Ajouter le filtre CORS en premier pour gérer les requêtes OPTIONS
+        http.addFilterBefore(corsFilter, UsernamePasswordAuthenticationFilter.class);
 
         // ❌ JWT Filter désactivé pour le dev
         // http.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

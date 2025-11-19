@@ -51,6 +51,7 @@ public class CorsFilter implements Filter {
         if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
             response.setStatus(HttpServletResponse.SC_OK);
             response.setContentLength(0);
+            response.flushBuffer();
             return;
         }
 
