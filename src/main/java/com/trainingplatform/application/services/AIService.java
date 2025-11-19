@@ -215,7 +215,7 @@ public class AIService {
                         // Calculate dynamic number of questions (5-15)
                         int numberOfQuestions = calculateQuestionsForModule(module);
                         
-                        Map<String, Object> quizData = generateQuiz(moduleContent, numberOfQuestions, "medium", questionTypes);
+                        Map<String, Object> quizData = generateQuiz(moduleContent, numberOfQuestions, "medium", questionTypes, null);
                     
                     // Create the quiz
                     @SuppressWarnings("unchecked")
@@ -789,7 +789,8 @@ public class AIService {
     public Map<String, Object> generateQuiz(Map<String, Object> moduleContent, 
                                              int numberOfQuestions,
                                              String difficulty,
-                                             Map<String, Boolean> questionTypes) throws Exception {
+                                             Map<String, Boolean> questionTypes,
+                                             Map<String, Object> questionDistribution) throws Exception {
         if (!checkAIAvailability()) {
             throw new RuntimeException("AI service is not available");
         }
@@ -821,19 +822,41 @@ public class AIService {
         prompt.append("\n=== QUIZ REQUIREMENTS ===\n");
         prompt.append("Number of Questions: ").append(numberOfQuestions).append("\n");
         prompt.append("Difficulty Level: ").append(difficulty).append("\n");
-        prompt.append("Allowed Question Types:\n");
-        if (questionTypes.get("multipleChoice")) {
-            prompt.append("- multiple-choice (4 options)\n");
-        }
-        if (questionTypes.get("trueFalse")) {
-            prompt.append("- true-false\n");
-        }
-        if (questionTypes.get("shortAnswer")) {
-            prompt.append("- short-answer\n");
+        
+        // Add question distribution if provided
+        if (questionDistribution != null && !questionDistribution.isEmpty()) {
+            prompt.append("\n=== QUESTION DISTRIBUTION (MANDATORY) ===\n");
+            Object mcCount = questionDistribution.get("multipleChoice");
+            Object tfCount = questionDistribution.get("trueFalse");
+            Object mcaCount = questionDistribution.get("multipleCorrect");
+            
+            if (mcCount != null) {
+                prompt.append("Multiple Choice Questions: ").append(mcCount).append("\n");
+            }
+            if (tfCount != null) {
+                prompt.append("True/False Questions: ").append(tfCount).append("\n");
+            }
+            if (mcaCount != null) {
+                prompt.append("Multiple Correct Answer Questions: ").append(mcaCount).append("\n");
+            }
+            prompt.append("CRITICAL: You MUST follow this exact distribution. The total must equal ").append(numberOfQuestions).append(".\n");
+        } else {
+            prompt.append("Allowed Question Types:\n");
+            if (questionTypes.get("multipleChoice")) {
+                prompt.append("- multiple-choice (4 options)\n");
+            }
+            if (questionTypes.get("trueFalse")) {
+                prompt.append("- true-false\n");
+            }
+            if (questionTypes.get("shortAnswer")) {
+                prompt.append("- short-answer\n");
+            }
         }
         
         prompt.append("\n=== YOUR TASK ===\n");
-        prompt.append("Create ").append(numberOfQuestions).append(" high-quality quiz questions.\n\n");
+        prompt.append("Create EXACTLY ").append(numberOfQuestions).append(" high-quality quiz questions.\n");
+        prompt.append("CRITICAL: You MUST generate exactly ").append(numberOfQuestions).append(" questions. No more, no less.\n");
+        prompt.append("If question distribution is specified, you MUST follow it exactly.\n\n");
         
         prompt.append("REQUIREMENTS:\n");
         prompt.append("1. Questions must be DIRECTLY related to module content\n");

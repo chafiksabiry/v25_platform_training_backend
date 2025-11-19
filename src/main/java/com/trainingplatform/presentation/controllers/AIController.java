@@ -253,13 +253,31 @@ public class AIController {
         
         try {
             log.info("Generating quiz with {} questions for module", request.getNumberOfQuestions());
+            if (request.getQuestionDistribution() != null) {
+                log.info("Question distribution: {} QCM, {} True/False, {} Multiple Correct", 
+                    request.getQuestionDistribution().get("multipleChoice"),
+                    request.getQuestionDistribution().get("trueFalse"),
+                    request.getQuestionDistribution().get("multipleCorrect"));
+            }
             
             Map<String, Object> result = aiService.generateQuiz(
                     request.getModuleContent(),
                     request.getNumberOfQuestions(),
                     request.getDifficulty(),
-                    request.getQuestionTypes()
+                    request.getQuestionTypes(),
+                    request.getQuestionDistribution()
             );
+            
+            // Verify number of questions returned
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> questions = (List<Map<String, Object>>) result.get("questions");
+            if (questions != null) {
+                log.info("Generated {} questions (requested: {})", questions.size(), request.getNumberOfQuestions());
+                if (questions.size() != request.getNumberOfQuestions()) {
+                    log.warn("⚠️ Mismatch: Requested {} questions but generated {}", 
+                        request.getNumberOfQuestions(), questions.size());
+                }
+            }
             
             response.put("success", true);
             response.put("data", result);
@@ -304,6 +322,7 @@ public class AIController {
         private int numberOfQuestions;
         private String difficulty;
         private Map<String, Boolean> questionTypes;
+        private Map<String, Object> questionDistribution;
         private String moduleId;
         private String trainingId;
 
@@ -318,6 +337,9 @@ public class AIController {
 
         public Map<String, Boolean> getQuestionTypes() { return questionTypes; }
         public void setQuestionTypes(Map<String, Boolean> questionTypes) { this.questionTypes = questionTypes; }
+
+        public Map<String, Object> getQuestionDistribution() { return questionDistribution; }
+        public void setQuestionDistribution(Map<String, Object> questionDistribution) { this.questionDistribution = questionDistribution; }
 
         public String getModuleId() { return moduleId; }
         public void setModuleId(String moduleId) { this.moduleId = moduleId; }

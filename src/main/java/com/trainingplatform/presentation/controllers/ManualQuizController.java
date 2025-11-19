@@ -299,7 +299,8 @@ public class ManualQuizController {
                     moduleContent,
                     request.getNumberOfQuestions(),
                     request.getDifficulty(),
-                    request.getQuestionTypes()
+                    request.getQuestionTypes(),
+                    null // No question distribution for manual quiz generation
             );
             
             response.put("success", true);
