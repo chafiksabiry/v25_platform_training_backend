@@ -506,13 +506,29 @@ public class JourneyController {
      * POST /training_journeys/modules/{moduleId}/quizzes
      * Create a module quiz in module_quizzes collection
      */
+    /**
+     * POST /training_journeys/modules/{moduleId}/quizzes
+     * Create a module quiz in module_quizzes collection
+     * Note: moduleId in the path is ignored; the actual moduleId stored will be the trainingId (ObjectId of training journey)
+     */
     @PostMapping("/modules/{moduleId}/quizzes")
     public ResponseEntity<Map<String, Object>> createModuleQuiz(
             @PathVariable String moduleId,
             @RequestBody Map<String, Object> quizData) {
         try {
             ModuleQuiz quiz = convertMapToModuleQuiz(quizData);
-            quiz.setModuleId(moduleId);
+            // Use trainingId as moduleId (ObjectId reference to training journey)
+            // This allows moduleId to be stored as MongoDB ObjectId instead of string like "module-3"
+            String trainingId = quiz.getTrainingId();
+            if (trainingId != null && !trainingId.isEmpty()) {
+                // Store trainingId (ObjectId) as moduleId - this is the _id of the training journey
+                quiz.setModuleId(trainingId);
+                System.out.println("[JourneyController] Setting moduleId to trainingId (ObjectId): " + trainingId);
+            } else {
+                // Fallback to moduleId from path if trainingId not provided (should not happen)
+                System.out.println("[JourneyController] Warning: trainingId not provided, using moduleId from path: " + moduleId);
+                quiz.setModuleId(moduleId);
+            }
             
             ModuleQuiz created = moduleQuizService.createQuiz(quiz);
             
@@ -565,10 +581,12 @@ public class JourneyController {
     /**
      * GET /training_journeys/modules/{moduleId}/quizzes
      * Get all quizzes for a module
+     * Note: moduleId is actually the trainingId (ObjectId of the training journey)
      */
     @GetMapping("/modules/{moduleId}/quizzes")
     public ResponseEntity<Map<String, Object>> getModuleQuizzes(@PathVariable String moduleId) {
         try {
+            // moduleId is actually trainingId (ObjectId reference to training journey)
             List<ModuleQuiz> quizzes = moduleQuizService.getQuizzesByModule(moduleId);
             
             Map<String, Object> response = new HashMap<>();
