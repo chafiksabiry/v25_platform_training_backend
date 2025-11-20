@@ -470,7 +470,29 @@ public class JourneyController {
     private TrainingJourneyEntity convertToEntity(Map<String, Object> data) {
         try {
             // ✅ Utiliser Jackson pour une conversion complète de TOUS les champs
-            return objectMapper.convertValue(data, TrainingJourneyEntity.class);
+            TrainingJourneyEntity entity = objectMapper.convertValue(data, TrainingJourneyEntity.class);
+            
+            // Explicitly handle moduleIds and finalExamId (new structure)
+            if (data.containsKey("moduleIds")) {
+                @SuppressWarnings("unchecked")
+                List<String> moduleIds = (List<String>) data.get("moduleIds");
+                entity.setModuleIds(moduleIds);
+                System.out.println("[JourneyController] Set moduleIds: " + moduleIds.size() + " modules");
+            }
+            if (data.containsKey("finalExamId")) {
+                entity.setFinalExamId((String) data.get("finalExamId"));
+                System.out.println("[JourneyController] Set finalExamId: " + entity.getFinalExamId());
+            }
+            
+            // IMPORTANT: If modules array is present (old structure), IGNORE IT
+            // We only use moduleIds now - modules should be stored in separate collection
+            if (data.containsKey("modules")) {
+                System.out.println("[JourneyController] Warning: Ignoring embedded 'modules' field - using moduleIds instead");
+                // Explicitly ensure modules field is NOT set
+                // (Jackson might try to set it if there's a setter, but we don't have one)
+            }
+            
+            return entity;
         } catch (Exception e) {
             // Fallback : conversion manuelle basique
             TrainingJourneyEntity entity = new TrainingJourneyEntity();
@@ -495,6 +517,14 @@ public class JourneyController {
             }
             if (data.containsKey("gigId")) {
                 entity.setGigId((String) data.get("gigId"));
+            }
+            if (data.containsKey("moduleIds")) {
+                @SuppressWarnings("unchecked")
+                List<String> moduleIds = (List<String>) data.get("moduleIds");
+                entity.setModuleIds(moduleIds);
+            }
+            if (data.containsKey("finalExamId")) {
+                entity.setFinalExamId((String) data.get("finalExamId"));
             }
             
             System.err.println("⚠️ Conversion partielle - certains champs peuvent manquer: " + e.getMessage());
