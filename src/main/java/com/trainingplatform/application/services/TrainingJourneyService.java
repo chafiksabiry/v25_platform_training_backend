@@ -6,8 +6,6 @@ import com.trainingplatform.domain.repositories.TrainingJourneyRepository;
 import com.trainingplatform.domain.repositories.GigRepository;
 import com.trainingplatform.core.entities.RepProgress;
 import com.trainingplatform.core.entities.Rep;
-import com.trainingplatform.core.entities.TrainingModule;
-import com.trainingplatform.application.services.TrainingModuleService;
 import com.trainingplatform.infrastructure.repositories.RepProgressRepository;
 import com.trainingplatform.infrastructure.repositories.RepRepository;
 import java.util.Optional;
@@ -35,8 +33,7 @@ public class TrainingJourneyService {
     @Autowired
     private RepRepository repRepository;
     
-    @Autowired
-    private TrainingModuleService moduleService;
+    // TrainingModuleService no longer needed - modules are embedded in journey
     
     /**
      * Create or update a training journey
@@ -394,8 +391,9 @@ public class TrainingJourneyService {
             Rep firstRep = repMap.get(firstRepId);
             
             for (TrainingJourneyEntity journey : journeys) {
-                if (journey.getModuleIds() != null && !journey.getModuleIds().isEmpty() && firstRep != null) {
-                    List<TrainingModule> modules = moduleService.getModulesByTrainingJourney(journey.getId());
+                // Use embedded modules from journey.getModules()
+                List<TrainingJourneyEntity.TrainingModuleEntity> modules = journey.getModules();
+                if (modules != null && !modules.isEmpty() && firstRep != null) {
                     for (int i = 0; i < Math.min(modules.size(), 3); i++) {
                         TrainerDashboardDTO.DeadlineInfo deadline = new TrainerDashboardDTO.DeadlineInfo();
                         deadline.setTraineeId(firstRepId);
