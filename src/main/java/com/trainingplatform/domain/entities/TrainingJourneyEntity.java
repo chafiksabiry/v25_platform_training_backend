@@ -22,8 +22,8 @@ public class TrainingJourneyEntity {
     
     private CompanyInfo company;
     private TrainingVision vision;
-    private List<String> moduleIds; // References to TrainingModule documents (ObjectIds)
-    private String finalExamId; // Reference to ExamFinalQuiz document (ObjectId) - 0 or 1
+    private List<TrainingModuleEntity> modules; // Embedded modules with sections and quizzes
+    private FinalExamEntity finalExam; // Embedded final exam (0 or 1)
     private List<String> enrolledRepIds;
     
     private LocalDateTime createdAt;
@@ -107,20 +107,20 @@ public class TrainingJourneyEntity {
         this.vision = vision;
     }
     
-    public List<String> getModuleIds() {
-        return moduleIds;
+    public List<TrainingModuleEntity> getModules() {
+        return modules;
     }
     
-    public void setModuleIds(List<String> moduleIds) {
-        this.moduleIds = moduleIds;
+    public void setModules(List<TrainingModuleEntity> modules) {
+        this.modules = modules;
     }
     
-    public String getFinalExamId() {
-        return finalExamId;
+    public FinalExamEntity getFinalExam() {
+        return finalExam;
     }
     
-    public void setFinalExamId(String finalExamId) {
-        this.finalExamId = finalExamId;
+    public void setFinalExam(FinalExamEntity finalExam) {
+        this.finalExam = finalExam;
     }
     
     public List<String> getEnrolledRepIds() {
@@ -309,6 +309,221 @@ public class TrainingJourneyEntity {
         public void setFeedback(List<String> feedback) {
             this.feedback = feedback;
         }
+    }
+    
+    // Embedded Module Entity
+    public static class TrainingModuleEntity {
+        private String _id; // Auto-generated ObjectId
+        private String title;
+        private String description;
+        private Integer duration; // in minutes
+        private String difficulty; // beginner, intermediate, advanced
+        private List<String> learningObjectives = new java.util.ArrayList<>();
+        private List<String> prerequisites = new java.util.ArrayList<>();
+        private List<String> topics = new java.util.ArrayList<>();
+        private List<SectionEntity> sections = new java.util.ArrayList<>();
+        private List<QuizEntity> quizzes = new java.util.ArrayList<>();
+        private Integer order; // Order within the training journey
+        
+        // Getters and Setters
+        public String get_id() { return _id; }
+        public void set_id(String _id) { this._id = _id; }
+        public String getTitle() { return title; }
+        public void setTitle(String title) { this.title = title; }
+        public String getDescription() { return description; }
+        public void setDescription(String description) { this.description = description; }
+        public Integer getDuration() { return duration; }
+        public void setDuration(Integer duration) { this.duration = duration; }
+        public String getDifficulty() { return difficulty; }
+        public void setDifficulty(String difficulty) { this.difficulty = difficulty; }
+        public List<String> getLearningObjectives() { return learningObjectives; }
+        public void setLearningObjectives(List<String> learningObjectives) { this.learningObjectives = learningObjectives; }
+        public List<String> getPrerequisites() { return prerequisites; }
+        public void setPrerequisites(List<String> prerequisites) { this.prerequisites = prerequisites; }
+        public List<String> getTopics() { return topics; }
+        public void setTopics(List<String> topics) { this.topics = topics; }
+        public List<SectionEntity> getSections() { return sections; }
+        public void setSections(List<SectionEntity> sections) { this.sections = sections; }
+        public List<QuizEntity> getQuizzes() { return quizzes; }
+        public void setQuizzes(List<QuizEntity> quizzes) { this.quizzes = quizzes; }
+        public Integer getOrder() { return order; }
+        public void setOrder(Integer order) { this.order = order; }
+    }
+    
+    // Embedded Section Entity
+    public static class SectionEntity {
+        private String _id; // Auto-generated ObjectId
+        private String title;
+        private String type; // document, video, text, etc.
+        private Integer order; // Order within the module
+        private SectionContent content;
+        private Integer duration; // in minutes
+        
+        // Getters and Setters
+        public String get_id() { return _id; }
+        public void set_id(String _id) { this._id = _id; }
+        public String getTitle() { return title; }
+        public void setTitle(String title) { this.title = title; }
+        public String getType() { return type; }
+        public void setType(String type) { this.type = type; }
+        public Integer getOrder() { return order; }
+        public void setOrder(Integer order) { this.order = order; }
+        public SectionContent getContent() { return content; }
+        public void setContent(SectionContent content) { this.content = content; }
+        public Integer getDuration() { return duration; }
+        public void setDuration(Integer duration) { this.duration = duration; }
+    }
+    
+    // Section Content
+    public static class SectionContent {
+        private String text;
+        private SectionFile file;
+        private String youtubeUrl;
+        
+        public String getText() { return text; }
+        public void setText(String text) { this.text = text; }
+        public SectionFile getFile() { return file; }
+        public void setFile(SectionFile file) { this.file = file; }
+        public String getYoutubeUrl() { return youtubeUrl; }
+        public void setYoutubeUrl(String youtubeUrl) { this.youtubeUrl = youtubeUrl; }
+    }
+    
+    // Section File
+    public static class SectionFile {
+        private String id;
+        private String name;
+        private String type; // pdf, mp4, docx, etc.
+        private String url;
+        private String publicId;
+        private Long size;
+        private String mimeType;
+        
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+        public String getType() { return type; }
+        public void setType(String type) { this.type = type; }
+        public String getUrl() { return url; }
+        public void setUrl(String url) { this.url = url; }
+        public String getPublicId() { return publicId; }
+        public void setPublicId(String publicId) { this.publicId = publicId; }
+        public Long getSize() { return size; }
+        public void setSize(Long size) { this.size = size; }
+        public String getMimeType() { return mimeType; }
+        public void setMimeType(String mimeType) { this.mimeType = mimeType; }
+    }
+    
+    // Embedded Quiz Entity (for module quizzes)
+    public static class QuizEntity {
+        private String _id; // Auto-generated ObjectId
+        private String title;
+        private String description;
+        private List<QuizQuestion> questions = new java.util.ArrayList<>();
+        private Integer passingScore; // percentage
+        private Integer timeLimit; // in minutes, null for unlimited
+        private Integer maxAttempts;
+        private QuizSettings settings;
+        
+        // Getters and Setters
+        public String get_id() { return _id; }
+        public void set_id(String _id) { this._id = _id; }
+        public String getTitle() { return title; }
+        public void setTitle(String title) { this.title = title; }
+        public String getDescription() { return description; }
+        public void setDescription(String description) { this.description = description; }
+        public List<QuizQuestion> getQuestions() { return questions; }
+        public void setQuestions(List<QuizQuestion> questions) { this.questions = questions; }
+        public Integer getPassingScore() { return passingScore; }
+        public void setPassingScore(Integer passingScore) { this.passingScore = passingScore; }
+        public Integer getTimeLimit() { return timeLimit; }
+        public void setTimeLimit(Integer timeLimit) { this.timeLimit = timeLimit; }
+        public Integer getMaxAttempts() { return maxAttempts; }
+        public void setMaxAttempts(Integer maxAttempts) { this.maxAttempts = maxAttempts; }
+        public QuizSettings getSettings() { return settings; }
+        public void setSettings(QuizSettings settings) { this.settings = settings; }
+    }
+    
+    // Final Exam Entity
+    public static class FinalExamEntity {
+        private String _id; // Auto-generated ObjectId
+        private String title;
+        private String description;
+        private List<QuizQuestion> questions = new java.util.ArrayList<>();
+        private Integer passingScore; // percentage
+        private Integer timeLimit; // in minutes, null for unlimited
+        private Integer maxAttempts;
+        private QuizSettings settings;
+        
+        // Getters and Setters
+        public String get_id() { return _id; }
+        public void set_id(String _id) { this._id = _id; }
+        public String getTitle() { return title; }
+        public void setTitle(String title) { this.title = title; }
+        public String getDescription() { return description; }
+        public void setDescription(String description) { this.description = description; }
+        public List<QuizQuestion> getQuestions() { return questions; }
+        public void setQuestions(List<QuizQuestion> questions) { this.questions = questions; }
+        public Integer getPassingScore() { return passingScore; }
+        public void setPassingScore(Integer passingScore) { this.passingScore = passingScore; }
+        public Integer getTimeLimit() { return timeLimit; }
+        public void setTimeLimit(Integer timeLimit) { this.timeLimit = timeLimit; }
+        public Integer getMaxAttempts() { return maxAttempts; }
+        public void setMaxAttempts(Integer maxAttempts) { this.maxAttempts = maxAttempts; }
+        public QuizSettings getSettings() { return settings; }
+        public void setSettings(QuizSettings settings) { this.settings = settings; }
+    }
+    
+    // Quiz Question (shared by QuizEntity and FinalExamEntity)
+    public static class QuizQuestion {
+        private String _id;
+        private String question;
+        private String type; // multiple-choice, true-false, short-answer, essay
+        private List<String> options;
+        private Object correctAnswer; // Can be String, Integer, Boolean, or List<Integer>
+        private String explanation;
+        private Integer points;
+        private Integer orderIndex;
+        private String imageUrl;
+        
+        public String get_id() { return _id; }
+        public void set_id(String _id) { this._id = _id; }
+        public String getQuestion() { return question; }
+        public void setQuestion(String question) { this.question = question; }
+        public String getType() { return type; }
+        public void setType(String type) { this.type = type; }
+        public List<String> getOptions() { return options; }
+        public void setOptions(List<String> options) { this.options = options; }
+        public Object getCorrectAnswer() { return correctAnswer; }
+        public void setCorrectAnswer(Object correctAnswer) { this.correctAnswer = correctAnswer; }
+        public String getExplanation() { return explanation; }
+        public void setExplanation(String explanation) { this.explanation = explanation; }
+        public Integer getPoints() { return points; }
+        public void setPoints(Integer points) { this.points = points; }
+        public Integer getOrderIndex() { return orderIndex; }
+        public void setOrderIndex(Integer orderIndex) { this.orderIndex = orderIndex; }
+        public String getImageUrl() { return imageUrl; }
+        public void setImageUrl(String imageUrl) { this.imageUrl = imageUrl; }
+    }
+    
+    // Quiz Settings (shared by QuizEntity and FinalExamEntity)
+    public static class QuizSettings {
+        private Boolean shuffleQuestions;
+        private Boolean shuffleOptions;
+        private Boolean showCorrectAnswers;
+        private Boolean allowReview;
+        private Boolean showExplanations;
+        
+        public Boolean getShuffleQuestions() { return shuffleQuestions; }
+        public void setShuffleQuestions(Boolean shuffleQuestions) { this.shuffleQuestions = shuffleQuestions; }
+        public Boolean getShuffleOptions() { return shuffleOptions; }
+        public void setShuffleOptions(Boolean shuffleOptions) { this.shuffleOptions = shuffleOptions; }
+        public Boolean getShowCorrectAnswers() { return showCorrectAnswers; }
+        public void setShowCorrectAnswers(Boolean showCorrectAnswers) { this.showCorrectAnswers = showCorrectAnswers; }
+        public Boolean getAllowReview() { return allowReview; }
+        public void setAllowReview(Boolean allowReview) { this.allowReview = allowReview; }
+        public Boolean getShowExplanations() { return showExplanations; }
+        public void setShowExplanations(Boolean showExplanations) { this.showExplanations = showExplanations; }
     }
 }
 
