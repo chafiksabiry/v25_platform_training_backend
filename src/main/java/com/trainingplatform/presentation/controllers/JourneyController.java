@@ -178,20 +178,69 @@ public class JourneyController {
             System.out.println("[JourneyController] Launch journey - title: " + journeyData.get("title"));
             System.out.println("[JourneyController] Launch journey - industry: " + journeyData.get("industry"));
             
-            // Convert journeyData to TrainingJourneyEntity
-            TrainingJourneyEntity journey = convertToEntity(journeyData);
+            // Check if journey has an ID (for update) or needs to be created
+            String journeyId = null;
+            if (journeyData.containsKey("id")) {
+                journeyId = (String) journeyData.get("id");
+            } else if (journeyData.containsKey("_id")) {
+                Object idObj = journeyData.get("_id");
+                if (idObj instanceof String) {
+                    journeyId = (String) idObj;
+                }
+            }
             
-            // Ensure title and industry are set (they might be missing from the conversion)
+            TrainingJourneyEntity journey;
+            boolean isUpdate = false;
+            
+            if (journeyId != null && !journeyId.isEmpty()) {
+                // Try to get existing journey
+                Optional<TrainingJourneyEntity> existingJourneyOpt = journeyService.getJourneyById(journeyId);
+                if (existingJourneyOpt.isPresent()) {
+                    journey = existingJourneyOpt.get();
+                    isUpdate = true;
+                    System.out.println("[JourneyController] Updating existing journey for launch: " + journeyId);
+                    
+                    // Update fields from request
+                    if (journeyData.containsKey("title")) {
+                        journey.setTitle((String) journeyData.get("title"));
+                    }
+                    if (journeyData.containsKey("description")) {
+                        journey.setDescription((String) journeyData.get("description"));
+                    }
+                    if (journeyData.containsKey("moduleIds")) {
+                        @SuppressWarnings("unchecked")
+                        List<String> moduleIds = (List<String>) journeyData.get("moduleIds");
+                        journey.setModuleIds(moduleIds);
+                    }
+                    if (journeyData.containsKey("finalExamId")) {
+                        journey.setFinalExamId((String) journeyData.get("finalExamId"));
+                    }
+                    if (journeyData.containsKey("launchSettings")) {
+                        // Update launch settings if needed
+                    }
+                    if (journeyData.containsKey("rehearsalData")) {
+                        // Update rehearsal data if needed
+                    }
+                } else {
+                    // Journey not found, create new one
+                    journey = convertToEntity(journeyData);
+                    System.out.println("[JourneyController] Journey ID provided but not found, creating new journey");
+                }
+            } else {
+                // No ID provided, create new journey
+                journey = convertToEntity(journeyData);
+                System.out.println("[JourneyController] No journey ID provided, creating new journey");
+            }
+            
+            // Ensure title and industry are set
             if (journeyData.containsKey("title") && journey.getTitle() == null) {
                 journey.setTitle((String) journeyData.get("title"));
             }
             if (journeyData.containsKey("industry") && journey.getIndustry() == null) {
                 Object industryObj = journeyData.get("industry");
-                // Handle both String and ObjectId cases
                 if (industryObj instanceof String) {
                     journey.setIndustry((String) industryObj);
                 } else if (industryObj instanceof Map) {
-                    // If it's an object with _id, extract the _id
                     Map<String, Object> industryMap = (Map<String, Object>) industryObj;
                     if (industryMap.containsKey("$oid")) {
                         journey.setIndustry((String) industryMap.get("$oid"));
@@ -209,6 +258,7 @@ public class JourneyController {
             
             System.out.println("[JourneyController] After conversion - title: " + journey.getTitle());
             System.out.println("[JourneyController] After conversion - industry: " + journey.getIndustry());
+            System.out.println("[JourneyController] Is update: " + isUpdate);
             
             // Launch the journey
             TrainingJourneyEntity launchedJourney = journeyService.launchJourney(journey, enrolledRepIds);
@@ -219,8 +269,8 @@ public class JourneyController {
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
             response.put("journey", launchedJourney);
-            response.put("message", "Journey launched successfully!");
-            response.put("enrolledCount", enrolledRepIds.size());
+            response.put("message", isUpdate ? "Journey updated and launched successfully!" : "Journey launched successfully!");
+            response.put("enrolledCount", enrolledRepIds != null ? enrolledRepIds.size() : 0);
             
             return ResponseEntity.ok(response);
         } catch (Exception e) {

@@ -8,7 +8,6 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.UUID;
 
 @Service
 @Slf4j
@@ -19,9 +18,14 @@ public class TrainingSectionService {
     
     /**
      * Create a new training section
+     * MongoDB will automatically generate an ObjectId if _id is null
      */
     public TrainingSection createSection(TrainingSection section) {
-        section.set_id(UUID.randomUUID().toString());
+        // Don't set _id - let MongoDB generate ObjectId automatically
+        // Only set _id if it's already set (for updates)
+        if (section.get_id() == null || section.get_id().isEmpty()) {
+            section.set_id(null); // Let MongoDB generate ObjectId
+        }
         section.setCreatedAt(LocalDateTime.now());
         section.setUpdatedAt(LocalDateTime.now());
         

@@ -8,7 +8,6 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.UUID;
 
 @Service
 @Slf4j
@@ -19,9 +18,14 @@ public class TrainingModuleService {
     
     /**
      * Create a new training module
+     * MongoDB will automatically generate an ObjectId if _id is null
      */
     public TrainingModule createModule(TrainingModule module) {
-        module.set_id(UUID.randomUUID().toString());
+        // Don't set _id - let MongoDB generate ObjectId automatically
+        // Only set _id if it's already set (for updates)
+        if (module.get_id() == null || module.get_id().isEmpty()) {
+            module.set_id(null); // Let MongoDB generate ObjectId
+        }
         module.setCreatedAt(LocalDateTime.now());
         module.setUpdatedAt(LocalDateTime.now());
         
