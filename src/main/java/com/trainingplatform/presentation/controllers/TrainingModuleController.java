@@ -10,6 +10,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,8 +36,11 @@ public class TrainingModuleController {
     @PostMapping
     public ResponseEntity<Map<String, Object>> createModule(@RequestBody Map<String, Object> moduleData) {
         try {
+            System.out.println("[TrainingModuleController] Creating module with data: " + moduleData);
             TrainingModule module = convertMapToModule(moduleData);
+            System.out.println("[TrainingModuleController] Converted module: title=" + module.getTitle() + ", trainingJourneyId=" + module.getTrainingJourneyId());
             TrainingModule created = moduleService.createModule(module);
+            System.out.println("[TrainingModuleController] Created module: _id=" + created.get_id() + ", title=" + created.getTitle());
             
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
@@ -304,21 +308,68 @@ public class TrainingModuleController {
      */
     private TrainingModule convertMapToModule(Map<String, Object> data) {
         try {
-            return objectMapper.convertValue(data, TrainingModule.class);
+            System.out.println("[TrainingModuleController] Converting Map to TrainingModule: " + data);
+            TrainingModule module = objectMapper.convertValue(data, TrainingModule.class);
+            System.out.println("[TrainingModuleController] Converted module: title=" + module.getTitle() + ", trainingJourneyId=" + module.getTrainingJourneyId());
+            return module;
         } catch (Exception e) {
+            System.err.println("[TrainingModuleController] Error converting with ObjectMapper, using fallback: " + e.getMessage());
             // Fallback manual conversion
             TrainingModule module = new TrainingModule();
-            if (data.containsKey("title")) module.setTitle((String) data.get("title"));
-            if (data.containsKey("description")) module.setDescription((String) data.get("description"));
-            if (data.containsKey("trainingJourneyId")) module.setTrainingJourneyId((String) data.get("trainingJourneyId"));
-            if (data.containsKey("duration")) module.setDuration(((Number) data.get("duration")).intValue());
-            if (data.containsKey("difficulty")) module.setDifficulty((String) data.get("difficulty"));
-            if (data.containsKey("learningObjectives")) module.setLearningObjectives((List<String>) data.get("learningObjectives"));
-            if (data.containsKey("prerequisites")) module.setPrerequisites((List<String>) data.get("prerequisites"));
-            if (data.containsKey("topics")) module.setTopics((List<String>) data.get("topics"));
-            if (data.containsKey("sectionIds")) module.setSectionIds((List<String>) data.get("sectionIds"));
-            if (data.containsKey("quizIds")) module.setQuizIds((List<String>) data.get("quizIds"));
-            if (data.containsKey("order")) module.setOrder(((Number) data.get("order")).intValue());
+            if (data.containsKey("title")) {
+                Object titleObj = data.get("title");
+                module.setTitle(titleObj != null ? titleObj.toString() : null);
+            }
+            if (data.containsKey("description")) {
+                Object descObj = data.get("description");
+                module.setDescription(descObj != null ? descObj.toString() : null);
+            }
+            if (data.containsKey("trainingJourneyId")) {
+                Object journeyIdObj = data.get("trainingJourneyId");
+                module.setTrainingJourneyId(journeyIdObj != null ? journeyIdObj.toString() : null);
+            }
+            if (data.containsKey("duration")) {
+                Object durationObj = data.get("duration");
+                if (durationObj instanceof Number) {
+                    module.setDuration(((Number) durationObj).intValue());
+                }
+            }
+            if (data.containsKey("difficulty")) {
+                Object diffObj = data.get("difficulty");
+                module.setDifficulty(diffObj != null ? diffObj.toString() : null);
+            }
+            if (data.containsKey("learningObjectives")) {
+                @SuppressWarnings("unchecked")
+                List<String> objectives = (List<String>) data.get("learningObjectives");
+                module.setLearningObjectives(objectives != null ? objectives : new ArrayList<>());
+            }
+            if (data.containsKey("prerequisites")) {
+                @SuppressWarnings("unchecked")
+                List<String> prereqs = (List<String>) data.get("prerequisites");
+                module.setPrerequisites(prereqs != null ? prereqs : new ArrayList<>());
+            }
+            if (data.containsKey("topics")) {
+                @SuppressWarnings("unchecked")
+                List<String> topics = (List<String>) data.get("topics");
+                module.setTopics(topics != null ? topics : new ArrayList<>());
+            }
+            if (data.containsKey("sectionIds")) {
+                @SuppressWarnings("unchecked")
+                List<String> sectionIds = (List<String>) data.get("sectionIds");
+                module.setSectionIds(sectionIds != null ? sectionIds : new ArrayList<>());
+            }
+            if (data.containsKey("quizIds")) {
+                @SuppressWarnings("unchecked")
+                List<String> quizIds = (List<String>) data.get("quizIds");
+                module.setQuizIds(quizIds != null ? quizIds : new ArrayList<>());
+            }
+            if (data.containsKey("order")) {
+                Object orderObj = data.get("order");
+                if (orderObj instanceof Number) {
+                    module.setOrder(((Number) orderObj).intValue());
+                }
+            }
+            System.out.println("[TrainingModuleController] Fallback conversion result: title=" + module.getTitle() + ", trainingJourneyId=" + module.getTrainingJourneyId());
             return module;
         }
     }
