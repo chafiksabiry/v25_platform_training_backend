@@ -17,6 +17,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
+import org.bson.types.ObjectId;
 
 @Service
 public class TrainingJourneyService {
@@ -37,8 +38,12 @@ public class TrainingJourneyService {
     
     /**
      * Create or update a training journey
+     * Ensures all modules, sections, quizzes, and questions have MongoDB ObjectIds
      */
     public TrainingJourneyEntity saveJourney(TrainingJourneyEntity journey) {
+        // Ensure all ObjectIds are generated before saving
+        ensureObjectIdsForJourney(journey);
+        
         if (journey.getId() == null) {
             journey.setCreatedAt(LocalDateTime.now());
         }
@@ -48,9 +53,89 @@ public class TrainingJourneyService {
     }
     
     /**
+     * Ensure all modules, sections, quizzes, and questions have MongoDB ObjectIds
+     */
+    private void ensureObjectIdsForJourney(TrainingJourneyEntity journey) {
+        if (journey.getModules() == null) return;
+        
+        for (TrainingJourneyEntity.TrainingModuleEntity module : journey.getModules()) {
+            // Ensure module has _id
+            String moduleId = module.get_id();
+            if (moduleId == null || moduleId.isEmpty() || !ObjectId.isValid(moduleId)) {
+                moduleId = new ObjectId().toHexString();
+                module.set_id(moduleId);
+                System.out.println("[TrainingJourneyService] Generated MongoDB ObjectId for module: " + moduleId);
+            }
+            
+            // Ensure sections have _id
+            if (module.getSections() != null) {
+                for (TrainingJourneyEntity.SectionEntity section : module.getSections()) {
+                    String sectionId = section.get_id();
+                    if (sectionId == null || sectionId.isEmpty() || !ObjectId.isValid(sectionId)) {
+                        sectionId = new ObjectId().toHexString();
+                        section.set_id(sectionId);
+                        System.out.println("[TrainingJourneyService] Generated MongoDB ObjectId for section: " + sectionId);
+                    }
+                }
+            }
+            
+            // Ensure quizzes have _id
+            if (module.getQuizzes() != null) {
+                for (TrainingJourneyEntity.QuizEntity quiz : module.getQuizzes()) {
+                    String quizId = quiz.get_id();
+                    if (quizId == null || quizId.isEmpty() || !ObjectId.isValid(quizId)) {
+                        quizId = new ObjectId().toHexString();
+                        quiz.set_id(quizId);
+                        System.out.println("[TrainingJourneyService] Generated MongoDB ObjectId for quiz: " + quizId);
+                    }
+                    
+                    // Ensure quiz questions have _id
+                    if (quiz.getQuestions() != null) {
+                        for (TrainingJourneyEntity.QuizQuestion question : quiz.getQuestions()) {
+                            String questionId = question.get_id();
+                            if (questionId == null || questionId.isEmpty() || !ObjectId.isValid(questionId)) {
+                                questionId = new ObjectId().toHexString();
+                                question.set_id(questionId);
+                                System.out.println("[TrainingJourneyService] Generated MongoDB ObjectId for question: " + questionId);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Ensure final exam has _id
+        if (journey.getFinalExam() != null) {
+            TrainingJourneyEntity.FinalExamEntity finalExam = journey.getFinalExam();
+            String finalExamId = finalExam.get_id();
+            if (finalExamId == null || finalExamId.isEmpty() || !ObjectId.isValid(finalExamId)) {
+                finalExamId = new ObjectId().toHexString();
+                finalExam.set_id(finalExamId);
+                System.out.println("[TrainingJourneyService] Generated MongoDB ObjectId for final exam: " + finalExamId);
+            }
+            
+            // Ensure final exam questions have _id
+            if (finalExam.getQuestions() != null) {
+                for (TrainingJourneyEntity.QuizQuestion question : finalExam.getQuestions()) {
+                    String questionId = question.get_id();
+                    if (questionId == null || questionId.isEmpty() || !ObjectId.isValid(questionId)) {
+                        questionId = new ObjectId().toHexString();
+                        question.set_id(questionId);
+                        System.out.println("[TrainingJourneyService] Generated MongoDB ObjectId for final exam question: " + questionId);
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
      * Launch a training journey
+     * Ensures all modules, sections, quizzes, and questions have MongoDB ObjectIds
      */
     public TrainingJourneyEntity launchJourney(TrainingJourneyEntity journey, List<String> enrolledRepIds) {
+        // Ensure all ObjectIds are generated before launching
+        ensureObjectIdsForJourney(journey);
+        
         journey.setStatus("active");
         journey.setEnrolledRepIds(enrolledRepIds);
         journey.setLaunchDate(LocalDateTime.now());

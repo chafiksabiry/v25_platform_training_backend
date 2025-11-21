@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import org.bson.types.ObjectId;
 
 @RestController
 @RequestMapping("/training_journeys")
@@ -796,32 +797,20 @@ public class JourneyController {
                 TrainingJourneyEntity.TrainingModuleEntity module = modules.get(i);
                 System.out.println("[JourneyController] Processing module " + (i + 1) + "/" + modules.size() + ": " + module.getTitle());
                 
-                // TrainingModuleEntity uses _id, not id
+                // TrainingModuleEntity uses _id (MongoDB ObjectId)
                 String moduleId = module.get_id();
-                System.out.println("[JourneyController] Module _id: " + moduleId);
                 
-                // If module has no _id, generate one based on journeyId and module index
-                String generatedModuleId = null;
-                if (moduleId == null || moduleId.isEmpty()) {
-                    generatedModuleId = journeyId + "_module_" + i;
-                    System.out.println("[JourneyController] Generated moduleId: " + generatedModuleId + " (module had no _id)");
-                    moduleId = generatedModuleId;
+                // If module has no _id, generate a MongoDB ObjectId
+                if (moduleId == null || moduleId.isEmpty() || !ObjectId.isValid(moduleId)) {
+                    moduleId = new ObjectId().toHexString();
+                    module.set_id(moduleId);
+                    System.out.println("[JourneyController] Generated MongoDB ObjectId for module: " + moduleId);
+                } else {
+                    System.out.println("[JourneyController] Module _id (MongoDB ObjectId): " + moduleId);
                 }
                 
-                // Check if module progress already exists by real _id or generated ID
-                boolean moduleExists = false;
-                if (moduleId != null && !moduleId.isEmpty()) {
-                    // First check by the current moduleId
-                    if (modulesMap.containsKey(moduleId)) {
-                        moduleExists = true;
-                    } else if (generatedModuleId != null && !generatedModuleId.equals(moduleId)) {
-                        // Also check by generated ID if different
-                        if (modulesMap.containsKey(generatedModuleId)) {
-                            moduleExists = true;
-                            moduleId = generatedModuleId; // Use the existing ID
-                        }
-                    }
-                }
+                // Check if module progress already exists by _id
+                boolean moduleExists = modulesMap.containsKey(moduleId);
                 
                 // Initialize module progress if it doesn't exist
                 if (!moduleExists) {
@@ -834,8 +823,10 @@ public class JourneyController {
                     if (module.getSections() != null) {
                         for (TrainingJourneyEntity.SectionEntity section : module.getSections()) {
                             String sectionId = section.get_id();
-                            if (sectionId == null || sectionId.isEmpty()) {
-                                sectionId = moduleId + "_section_" + section.getOrder();
+                            // If section has no _id, generate a MongoDB ObjectId
+                            if (sectionId == null || sectionId.isEmpty() || !ObjectId.isValid(sectionId)) {
+                                sectionId = new ObjectId().toHexString();
+                                section.set_id(sectionId);
                             }
                             RepProgress.SectionProgress sectionProgress = new RepProgress.SectionProgress(false);
                             sectionProgress.setProgress(0);
@@ -924,44 +915,50 @@ public class JourneyController {
                 modulesMap = new java.util.HashMap<>();
             }
             
-            // Try to find module by the provided moduleId first
+            // Validate that moduleId is a valid MongoDB ObjectId
+            if (!ObjectId.isValid(moduleId)) {
+                Map<String, Object> errorResponse = new HashMap<>();
+                errorResponse.put("success", false);
+                errorResponse.put("error", "moduleId must be a valid MongoDB ObjectId: " + moduleId);
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
+            }
+            
+            // Try to find module by the provided moduleId (MongoDB ObjectId)
             RepProgress.ModuleProgress moduleProgress = modulesMap.get(moduleId);
             
-            // If not found, try to find by matching with journey modules to get the real _id
+            // If not found, verify the module exists in the journey and create progress
             if (moduleProgress == null) {
                 Optional<TrainingJourneyEntity> journeyOpt = journeyService.getJourneyById(journeyId);
+                boolean moduleExistsInJourney = false;
+                
                 if (journeyOpt.isPresent()) {
                     TrainingJourneyEntity journey = journeyOpt.get();
                     List<TrainingJourneyEntity.TrainingModuleEntity> journeyModules = journey.getModules();
                     
                     if (journeyModules != null) {
-                        // Try to find the module by matching the provided moduleId with module _id or generated ID
-                        for (int i = 0; i < journeyModules.size(); i++) {
-                            TrainingJourneyEntity.TrainingModuleEntity journeyModule = journeyModules.get(i);
+                        // Verify the module exists in the journey by _id
+                        for (TrainingJourneyEntity.TrainingModuleEntity journeyModule : journeyModules) {
                             String journeyModuleId = journeyModule.get_id();
-                            String generatedId = journeyId + "_module_" + i;
                             
-                            // Check if the provided moduleId matches either the real _id or generated ID
-                            if (moduleId.equals(journeyModuleId) || moduleId.equals(generatedId)) {
-                                // Use the real _id if it exists, otherwise use generated ID
-                                String actualModuleId = (journeyModuleId != null && !journeyModuleId.isEmpty()) 
-                                    ? journeyModuleId 
-                                    : generatedId;
-                                
-                                // Check if progress exists with the actual ID
-                                moduleProgress = modulesMap.get(actualModuleId);
-                                if (moduleProgress != null) {
-                                    // Found existing progress, update moduleId to use the actual one
-                                    if (!actualModuleId.equals(moduleId)) {
-                                        modulesMap.remove(moduleId);
-                                        modulesMap.put(actualModuleId, moduleProgress);
-                                    }
-                                    moduleId = actualModuleId; // Update moduleId to the actual one
-                                    break;
-                                }
+                            // Ensure journey module has a valid ObjectId
+                            if (journeyModuleId == null || journeyModuleId.isEmpty() || !ObjectId.isValid(journeyModuleId)) {
+                                journeyModuleId = new ObjectId().toHexString();
+                                journeyModule.set_id(journeyModuleId);
+                            }
+                            
+                            if (moduleId.equals(journeyModuleId)) {
+                                moduleExistsInJourney = true;
+                                break;
                             }
                         }
                     }
+                }
+                
+                if (!moduleExistsInJourney) {
+                    Map<String, Object> errorResponse = new HashMap<>();
+                    errorResponse.put("success", false);
+                    errorResponse.put("error", "Module with _id " + moduleId + " not found in journey " + journeyId);
+                    return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
                 }
             }
             
@@ -970,9 +967,9 @@ public class JourneyController {
                 moduleProgress = new RepProgress.ModuleProgress("not-started");
                 moduleProgress.setSections(new java.util.HashMap<>());
                 modulesMap.put(moduleId, moduleProgress);
-                System.out.println("[JourneyController] Created new module progress with ID: " + moduleId);
+                System.out.println("[JourneyController] Created new module progress with MongoDB ObjectId: " + moduleId);
             } else {
-                System.out.println("[JourneyController] Found existing module progress with ID: " + moduleId);
+                System.out.println("[JourneyController] Found existing module progress with MongoDB ObjectId: " + moduleId);
             }
             
             // Update module progress if sectionId is not provided
@@ -1409,17 +1406,25 @@ public class JourneyController {
             TrainingJourneyEntity.TrainingModuleEntity module = new TrainingJourneyEntity.TrainingModuleEntity();
             
             // Extract _id if present (Extended JSON format)
+            String moduleId = null;
             if (moduleData.containsKey("_id")) {
                 Object idObj = moduleData.get("_id");
                 if (idObj instanceof Map) {
                     Map<String, Object> idMap = (Map<String, Object>) idObj;
                     if (idMap.containsKey("$oid")) {
-                        module.set_id((String) idMap.get("$oid"));
+                        moduleId = (String) idMap.get("$oid");
                     }
                 } else {
-                    module.set_id(idObj != null ? idObj.toString() : null);
+                    moduleId = idObj != null ? idObj.toString() : null;
                 }
             }
+            
+            // If module has no _id or invalid ObjectId, generate a MongoDB ObjectId
+            if (moduleId == null || moduleId.isEmpty() || !ObjectId.isValid(moduleId)) {
+                moduleId = new ObjectId().toHexString();
+                System.out.println("[JourneyController] Generated MongoDB ObjectId for module: " + moduleId);
+            }
+            module.set_id(moduleId);
             
             if (moduleData.containsKey("title")) {
                 module.setTitle(moduleData.get("title") != null ? moduleData.get("title").toString() : null);
@@ -1488,18 +1493,26 @@ public class JourneyController {
         for (Map<String, Object> sectionData : sectionsData) {
             TrainingJourneyEntity.SectionEntity section = new TrainingJourneyEntity.SectionEntity();
             
-            // Extract _id if present
+            // Extract _id if present (Extended JSON format)
+            String sectionId = null;
             if (sectionData.containsKey("_id")) {
                 Object idObj = sectionData.get("_id");
                 if (idObj instanceof Map) {
                     Map<String, Object> idMap = (Map<String, Object>) idObj;
                     if (idMap.containsKey("$oid")) {
-                        section.set_id((String) idMap.get("$oid"));
+                        sectionId = (String) idMap.get("$oid");
                     }
                 } else {
-                    section.set_id(idObj != null ? idObj.toString() : null);
+                    sectionId = idObj != null ? idObj.toString() : null;
                 }
             }
+            
+            // If section has no _id or invalid ObjectId, generate a MongoDB ObjectId
+            if (sectionId == null || sectionId.isEmpty() || !ObjectId.isValid(sectionId)) {
+                sectionId = new ObjectId().toHexString();
+                System.out.println("[JourneyController] Generated MongoDB ObjectId for section: " + sectionId);
+            }
+            section.set_id(sectionId);
             
             if (sectionData.containsKey("title")) {
                 section.setTitle(sectionData.get("title") != null ? sectionData.get("title").toString() : null);
@@ -1596,18 +1609,26 @@ public class JourneyController {
         for (Map<String, Object> quizData : quizzesData) {
             TrainingJourneyEntity.QuizEntity quiz = new TrainingJourneyEntity.QuizEntity();
             
-            // Extract _id if present
+            // Extract _id if present (Extended JSON format)
+            String quizId = null;
             if (quizData.containsKey("_id")) {
                 Object idObj = quizData.get("_id");
                 if (idObj instanceof Map) {
                     Map<String, Object> idMap = (Map<String, Object>) idObj;
                     if (idMap.containsKey("$oid")) {
-                        quiz.set_id((String) idMap.get("$oid"));
+                        quizId = (String) idMap.get("$oid");
                     }
                 } else {
-                    quiz.set_id(idObj != null ? idObj.toString() : null);
+                    quizId = idObj != null ? idObj.toString() : null;
                 }
             }
+            
+            // If quiz has no _id or invalid ObjectId, generate a MongoDB ObjectId
+            if (quizId == null || quizId.isEmpty() || !ObjectId.isValid(quizId)) {
+                quizId = new ObjectId().toHexString();
+                System.out.println("[JourneyController] Generated MongoDB ObjectId for quiz: " + quizId);
+            }
+            quiz.set_id(quizId);
             
             if (quizData.containsKey("title")) {
                 quiz.setTitle(quizData.get("title") != null ? quizData.get("title").toString() : null);
@@ -1660,17 +1681,26 @@ public class JourneyController {
         for (Map<String, Object> questionData : questionsData) {
             TrainingJourneyEntity.QuizQuestion question = new TrainingJourneyEntity.QuizQuestion();
             
+            // Extract _id if present (Extended JSON format)
+            String questionId = null;
             if (questionData.containsKey("_id")) {
                 Object idObj = questionData.get("_id");
                 if (idObj instanceof Map) {
                     Map<String, Object> idMap = (Map<String, Object>) idObj;
                     if (idMap.containsKey("$oid")) {
-                        question.set_id((String) idMap.get("$oid"));
+                        questionId = (String) idMap.get("$oid");
                     }
                 } else {
-                    question.set_id(idObj != null ? idObj.toString() : null);
+                    questionId = idObj != null ? idObj.toString() : null;
                 }
             }
+            
+            // If question has no _id or invalid ObjectId, generate a MongoDB ObjectId
+            if (questionId == null || questionId.isEmpty() || !ObjectId.isValid(questionId)) {
+                questionId = new ObjectId().toHexString();
+                System.out.println("[JourneyController] Generated MongoDB ObjectId for question: " + questionId);
+            }
+            question.set_id(questionId);
             
             if (questionData.containsKey("question")) {
                 question.setQuestion(questionData.get("question") != null ? questionData.get("question").toString() : null);
@@ -1757,18 +1787,26 @@ public class JourneyController {
         
         TrainingJourneyEntity.FinalExamEntity finalExam = new TrainingJourneyEntity.FinalExamEntity();
         
-        // Extract _id if present
+        // Extract _id if present (Extended JSON format)
+        String finalExamId = null;
         if (finalExamData.containsKey("_id")) {
             Object idObj = finalExamData.get("_id");
             if (idObj instanceof Map) {
                 Map<String, Object> idMap = (Map<String, Object>) idObj;
                 if (idMap.containsKey("$oid")) {
-                    finalExam.set_id((String) idMap.get("$oid"));
+                    finalExamId = (String) idMap.get("$oid");
                 }
             } else {
-                finalExam.set_id(idObj != null ? idObj.toString() : null);
+                finalExamId = idObj != null ? idObj.toString() : null;
             }
         }
+        
+        // If final exam has no _id or invalid ObjectId, generate a MongoDB ObjectId
+        if (finalExamId == null || finalExamId.isEmpty() || !ObjectId.isValid(finalExamId)) {
+            finalExamId = new ObjectId().toHexString();
+            System.out.println("[JourneyController] Generated MongoDB ObjectId for final exam: " + finalExamId);
+        }
+        finalExam.set_id(finalExamId);
         
         if (finalExamData.containsKey("title")) {
             finalExam.setTitle(finalExamData.get("title") != null ? finalExamData.get("title").toString() : null);
@@ -2072,4 +2110,9 @@ public class JourneyController {
         }
     }
 }
+
+
+
+
+
 
