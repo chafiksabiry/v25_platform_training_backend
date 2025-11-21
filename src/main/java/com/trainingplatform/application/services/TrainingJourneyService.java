@@ -283,8 +283,10 @@ public class TrainingJourneyService {
             // Get progress for all journeys
             List<RepProgress> progressList = new ArrayList<>();
             for (TrainingJourneyEntity journey : journeys) {
-                List<RepProgress> journeyProgress = repProgressRepository.findByRepIdAndJourneyId(repId, journey.getId());
-                progressList.addAll(journeyProgress);
+                Optional<RepProgress> journeyProgressOpt = repProgressRepository.findByRepIdAndJourneyId(repId, journey.getId());
+                if (journeyProgressOpt.isPresent()) {
+                    progressList.add(journeyProgressOpt.get());
+                }
             }
             repProgressMap.put(repId, progressList);
             
@@ -293,23 +295,58 @@ public class TrainingJourneyService {
             double avgEngagement = 0;
             boolean isActive = false;
             boolean isCompleted = false;
+            LocalDateTime lastAccessTime = null;
             
             if (!progressList.isEmpty()) {
-                avgProgress = progressList.stream()
-                    .mapToInt(RepProgress::getProgress)
-                    .average()
-                    .orElse(0.0);
+                // Calculate average progress from all modules in all journeys
+                List<Integer> allModuleProgresses = new ArrayList<>();
+                List<Integer> allEngagementScores = new ArrayList<>();
                 
-                avgEngagement = progressList.stream()
-                    .mapToInt(RepProgress::getEngagementScore)
-                    .average()
-                    .orElse(0.0);
+                for (RepProgress repProgress : progressList) {
+                    // Get progress from modules
+                    Map<String, RepProgress.ModuleProgress> modules = repProgress.getModules();
+                    if (modules != null && !modules.isEmpty()) {
+                        for (RepProgress.ModuleProgress moduleProgress : modules.values()) {
+                            allModuleProgresses.add(moduleProgress.getProgress());
+                        }
+                    }
+                    
+                    // Get engagement score
+                    allEngagementScores.add(repProgress.getEngagementScore());
+                    
+                    // Check if active (has modules in progress)
+                    if (repProgress.getModuleInProgress() > 0) {
+                        isActive = true;
+                    }
+                    
+                    // Check if completed (all modules finished)
+                    if (repProgress.getModuleTotal() > 0 && 
+                        repProgress.getModuleFinished() == repProgress.getModuleTotal()) {
+                        isCompleted = true;
+                    }
+                    
+                    // Track last accessed time
+                    if (repProgress.getLastAccessed() != null) {
+                        if (lastAccessTime == null || repProgress.getLastAccessed().isAfter(lastAccessTime)) {
+                            lastAccessTime = repProgress.getLastAccessed();
+                        }
+                    }
+                }
                 
-                isActive = progressList.stream()
-                    .anyMatch(p -> "in-progress".equals(p.getStatus()));
+                // Calculate averages
+                if (!allModuleProgresses.isEmpty()) {
+                    avgProgress = allModuleProgresses.stream()
+                        .mapToInt(Integer::intValue)
+                        .average()
+                        .orElse(0.0);
+                }
                 
-                isCompleted = progressList.stream()
-                    .allMatch(p -> "completed".equals(p.getStatus()) || p.getProgress() >= 100);
+                if (!allEngagementScores.isEmpty()) {
+                    avgEngagement = allEngagementScores.stream()
+                        .mapToInt(Integer::intValue)
+                        .average()
+                        .orElse(0.0);
+                }
             }
             
             if (isActive) activeCount++;
@@ -327,13 +364,8 @@ public class TrainingJourneyService {
             traineeInfo.setEngagement(avgEngagement);
             
             // Get last active time
-            Optional<RepProgress> lastActive = progressList.stream()
-                .filter(p -> p.getLastAccessed() != null)
-                .max(Comparator.comparing(RepProgress::getLastAccessed));
-            
-            if (lastActive.isPresent()) {
-                LocalDateTime lastAccess = lastActive.get().getLastAccessed();
-                long hoursAgo = java.time.Duration.between(lastAccess, LocalDateTime.now()).toHours();
+            if (lastAccessTime != null) {
+                long hoursAgo = java.time.Duration.between(lastAccessTime, LocalDateTime.now()).toHours();
                 traineeInfo.setLastActive(hoursAgo + " hours ago");
             } else {
                 traineeInfo.setLastActive("Never");
