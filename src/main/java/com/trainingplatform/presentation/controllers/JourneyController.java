@@ -724,22 +724,36 @@ public class JourneyController {
             TrainingJourneyEntity journey = journeyOpt.get();
             List<TrainingJourneyEntity.TrainingModuleEntity> modules = journey.getModules();
             
+            System.out.println("[JourneyController] Journey found: " + journey.getTitle());
+            System.out.println("[JourneyController] Number of modules: " + (modules != null ? modules.size() : 0));
+            
             if (modules == null || modules.isEmpty()) {
+                System.out.println("[JourneyController] WARNING: Journey has no modules!");
                 Map<String, Object> errorResponse = new HashMap<>();
                 errorResponse.put("success", false);
                 errorResponse.put("error", "Journey has no modules");
+                errorResponse.put("journeyId", journeyId);
+                errorResponse.put("journeyTitle", journey.getTitle());
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
             }
             
             // Create initial progress records for all modules
             List<RepProgress> createdProgress = new ArrayList<>();
-            for (TrainingJourneyEntity.TrainingModuleEntity module : modules) {
+            int skippedCount = 0;
+            
+            for (int i = 0; i < modules.size(); i++) {
+                TrainingJourneyEntity.TrainingModuleEntity module = modules.get(i);
+                System.out.println("[JourneyController] Processing module " + (i + 1) + "/" + modules.size() + ": " + module.getTitle());
+                
                 // TrainingModuleEntity uses _id, not id
                 String moduleId = module.get_id();
+                System.out.println("[JourneyController] Module _id: " + moduleId);
                 
+                // If module has no _id, generate one based on journeyId and module index
                 if (moduleId == null || moduleId.isEmpty()) {
-                    System.out.println("[JourneyController] Warning: Module has no _id, skipping. Module title: " + module.getTitle());
-                    continue;
+                    // Generate a unique ID based on journeyId and module index
+                    moduleId = journeyId + "_module_" + i;
+                    System.out.println("[JourneyController] Generated moduleId: " + moduleId + " (module had no _id)");
                 }
                 
                 // Check if progress already exists
@@ -747,15 +761,20 @@ public class JourneyController {
                 
                 if (!existingProgress.isPresent()) {
                     // Create new progress record
-                    RepProgress progress = new RepProgress(repId, journeyId, moduleId);
-                    progress.setStatus("not-started");
-                    progress.setProgress(0);
-                    progress.setTimeSpent(0);
-                    progress.setEngagementScore(0);
-                    
-                    RepProgress savedProgress = repProgressRepository.save(progress);
-                    createdProgress.add(savedProgress);
-                    System.out.println("[JourneyController] Created progress for module: " + moduleId);
+                    try {
+                        RepProgress progress = new RepProgress(repId, journeyId, moduleId);
+                        progress.setStatus("not-started");
+                        progress.setProgress(0);
+                        progress.setTimeSpent(0);
+                        progress.setEngagementScore(0);
+                        
+                        RepProgress savedProgress = repProgressRepository.save(progress);
+                        createdProgress.add(savedProgress);
+                        System.out.println("[JourneyController] ✅ Created progress for module: " + moduleId + " (ID: " + savedProgress.getId() + ")");
+                    } catch (Exception e) {
+                        System.err.println("[JourneyController] ❌ Error creating progress for module " + moduleId + ": " + e.getMessage());
+                        e.printStackTrace();
+                    }
                 } else {
                     // Update existing progress to "in-progress" if it's still "not-started"
                     RepProgress existing = existingProgress.get();
@@ -764,10 +783,10 @@ public class JourneyController {
                         existing.setLastAccessed(java.time.LocalDateTime.now());
                         repProgressRepository.save(existing);
                         createdProgress.add(existing);
-                        System.out.println("[JourneyController] Updated progress to in-progress for module: " + moduleId);
+                        System.out.println("[JourneyController] ✅ Updated progress to in-progress for module: " + moduleId);
                     } else {
                         createdProgress.add(existing);
-                        System.out.println("[JourneyController] Progress already exists for module: " + moduleId);
+                        System.out.println("[JourneyController] ℹ️ Progress already exists for module: " + moduleId + " (status: " + existing.getStatus() + ")");
                     }
                 }
             }
@@ -777,8 +796,15 @@ public class JourneyController {
             response.put("message", "Training progress initialized");
             response.put("data", createdProgress);
             response.put("count", createdProgress.size());
+            response.put("skipped", skippedCount);
+            response.put("totalModules", modules.size());
             
             System.out.println("[JourneyController] Initialized " + createdProgress.size() + " progress records for repId: " + repId + ", journeyId: " + journeyId);
+            System.out.println("[JourneyController] Skipped " + skippedCount + " modules (no _id)");
+            
+            if (createdProgress.isEmpty() && skippedCount > 0) {
+                System.out.println("[JourneyController] ERROR: No progress created because all modules lack _id!");
+            }
             
             return ResponseEntity.ok(response);
         } catch (Exception e) {
