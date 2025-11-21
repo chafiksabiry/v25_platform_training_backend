@@ -164,6 +164,75 @@ public class JourneyController {
     }
     
     /**
+     * GET /training_journeys/gig/{gigId}
+     * Get all training journeys for a specific gig
+     * Returns all active and completed journeys associated with the gig
+     */
+    @GetMapping("/gig/{gigId}")
+    public ResponseEntity<?> getTrainingsByGig(@PathVariable String gigId) {
+        try {
+            System.out.println("[JourneyController] getTrainingsByGig called with gigId: " + gigId);
+            
+            List<TrainingJourneyEntity> journeys = journeyService.getJourneysByGigId(gigId);
+            
+            // Filter only active and completed journeys
+            List<TrainingJourneyEntity> filteredJourneys = journeys.stream()
+                .filter(journey -> {
+                    String status = journey.getStatus();
+                    return status == null || status.equals("active") || status.equals("completed");
+                })
+                .collect(Collectors.toList());
+            
+            // Populate gig titles and industry titles
+            List<Map<String, Object>> journeysWithPopulated = filteredJourneys.stream().map(journey -> {
+                Map<String, Object> journeyMap = objectMapper.convertValue(journey, Map.class);
+                
+                // Populate gig title
+                if (journey.getGigId() != null && !journey.getGigId().isEmpty()) {
+                    Optional<GigEntity> gigOpt = gigRepository.findById(journey.getGigId());
+                    if (gigOpt.isPresent()) {
+                        journeyMap.put("gigTitle", gigOpt.get().getTitle());
+                    } else {
+                        journeyMap.put("gigTitle", null);
+                    }
+                } else {
+                    journeyMap.put("gigTitle", null);
+                }
+                
+                // Populate industry title
+                if (journey.getIndustry() != null && !journey.getIndustry().isEmpty()) {
+                    Optional<IndustryEntity> industryOpt = industryRepository.findById(journey.getIndustry());
+                    if (industryOpt.isPresent()) {
+                        journeyMap.put("industryTitle", industryOpt.get().getName());
+                    } else {
+                        journeyMap.put("industryTitle", null);
+                    }
+                } else {
+                    journeyMap.put("industryTitle", null);
+                }
+                
+                return journeyMap;
+            }).collect(Collectors.toList());
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("data", journeysWithPopulated);
+            response.put("count", filteredJourneys.size());
+            
+            System.out.println("[JourneyController] Found " + filteredJourneys.size() + " trainings for gigId: " + gigId);
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            System.err.println("[JourneyController] Error in getTrainingsByGig: " + e.getMessage());
+            e.printStackTrace();
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+    
+    /**
      * GET /training_journeys/rep-progress?repId={repId}&journeyId={journeyId}
      * Get progress for a specific rep and journey
      */
