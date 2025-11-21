@@ -110,16 +110,6 @@ public class TrainingJourneyService {
     }
     
     /**
-     * Get journeys by gig ID
-     */
-    public List<TrainingJourneyEntity> getJourneysByGigId(String gigId) {
-        System.out.println("[TrainingJourneyService] getJourneysByGigId called with gigId: " + gigId);
-        List<TrainingJourneyEntity> journeys = journeyRepository.findByGigId(gigId);
-        System.out.println("[TrainingJourneyService] Found " + journeys.size() + " journeys for gigId: " + gigId);
-        return journeys;
-    }
-    
-    /**
      * Delete a journey
      */
     public void deleteJourney(String id) {
