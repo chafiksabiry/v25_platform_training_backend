@@ -801,13 +801,30 @@ public class JourneyController {
                 System.out.println("[JourneyController] Module _id: " + moduleId);
                 
                 // If module has no _id, generate one based on journeyId and module index
+                String generatedModuleId = null;
                 if (moduleId == null || moduleId.isEmpty()) {
-                    moduleId = journeyId + "_module_" + i;
-                    System.out.println("[JourneyController] Generated moduleId: " + moduleId + " (module had no _id)");
+                    generatedModuleId = journeyId + "_module_" + i;
+                    System.out.println("[JourneyController] Generated moduleId: " + generatedModuleId + " (module had no _id)");
+                    moduleId = generatedModuleId;
+                }
+                
+                // Check if module progress already exists by real _id or generated ID
+                boolean moduleExists = false;
+                if (moduleId != null && !moduleId.isEmpty()) {
+                    // First check by the current moduleId
+                    if (modulesMap.containsKey(moduleId)) {
+                        moduleExists = true;
+                    } else if (generatedModuleId != null && !generatedModuleId.equals(moduleId)) {
+                        // Also check by generated ID if different
+                        if (modulesMap.containsKey(generatedModuleId)) {
+                            moduleExists = true;
+                            moduleId = generatedModuleId; // Use the existing ID
+                        }
+                    }
                 }
                 
                 // Initialize module progress if it doesn't exist
-                if (!modulesMap.containsKey(moduleId)) {
+                if (!moduleExists) {
                     RepProgress.ModuleProgress moduleProgress = new RepProgress.ModuleProgress("not-started");
                     moduleProgress.setProgress(0);
                     moduleProgress.setTimeSpent(0);
@@ -907,11 +924,55 @@ public class JourneyController {
                 modulesMap = new java.util.HashMap<>();
             }
             
+            // Try to find module by the provided moduleId first
             RepProgress.ModuleProgress moduleProgress = modulesMap.get(moduleId);
+            
+            // If not found, try to find by matching with journey modules to get the real _id
+            if (moduleProgress == null) {
+                Optional<TrainingJourneyEntity> journeyOpt = journeyService.getJourneyById(journeyId);
+                if (journeyOpt.isPresent()) {
+                    TrainingJourneyEntity journey = journeyOpt.get();
+                    List<TrainingJourneyEntity.TrainingModuleEntity> journeyModules = journey.getModules();
+                    
+                    if (journeyModules != null) {
+                        // Try to find the module by matching the provided moduleId with module _id or generated ID
+                        for (int i = 0; i < journeyModules.size(); i++) {
+                            TrainingJourneyEntity.TrainingModuleEntity journeyModule = journeyModules.get(i);
+                            String journeyModuleId = journeyModule.get_id();
+                            String generatedId = journeyId + "_module_" + i;
+                            
+                            // Check if the provided moduleId matches either the real _id or generated ID
+                            if (moduleId.equals(journeyModuleId) || moduleId.equals(generatedId)) {
+                                // Use the real _id if it exists, otherwise use generated ID
+                                String actualModuleId = (journeyModuleId != null && !journeyModuleId.isEmpty()) 
+                                    ? journeyModuleId 
+                                    : generatedId;
+                                
+                                // Check if progress exists with the actual ID
+                                moduleProgress = modulesMap.get(actualModuleId);
+                                if (moduleProgress != null) {
+                                    // Found existing progress, update moduleId to use the actual one
+                                    if (!actualModuleId.equals(moduleId)) {
+                                        modulesMap.remove(moduleId);
+                                        modulesMap.put(actualModuleId, moduleProgress);
+                                    }
+                                    moduleId = actualModuleId; // Update moduleId to the actual one
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // If still not found, create new module progress
             if (moduleProgress == null) {
                 moduleProgress = new RepProgress.ModuleProgress("not-started");
                 moduleProgress.setSections(new java.util.HashMap<>());
                 modulesMap.put(moduleId, moduleProgress);
+                System.out.println("[JourneyController] Created new module progress with ID: " + moduleId);
+            } else {
+                System.out.println("[JourneyController] Found existing module progress with ID: " + moduleId);
             }
             
             // Update module progress if sectionId is not provided
