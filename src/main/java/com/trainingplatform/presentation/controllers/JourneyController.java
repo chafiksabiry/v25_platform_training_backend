@@ -694,6 +694,104 @@ public class JourneyController {
     }
     
     /**
+     * POST /training_journeys/rep-progress/start
+     * Initialize progress when a rep starts a training journey
+     */
+    @PostMapping("/rep-progress/start")
+    public ResponseEntity<?> startTrainingProgress(@RequestBody Map<String, Object> requestData) {
+        try {
+            System.out.println("[JourneyController] startTrainingProgress called with data: " + requestData);
+            
+            String repId = (String) requestData.get("repId");
+            String journeyId = (String) requestData.get("journeyId");
+            
+            if (repId == null || journeyId == null) {
+                Map<String, Object> errorResponse = new HashMap<>();
+                errorResponse.put("success", false);
+                errorResponse.put("error", "repId and journeyId are required");
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
+            }
+            
+            // Get the journey to find all modules
+            Optional<TrainingJourneyEntity> journeyOpt = journeyService.getJourneyById(journeyId);
+            if (!journeyOpt.isPresent()) {
+                Map<String, Object> errorResponse = new HashMap<>();
+                errorResponse.put("success", false);
+                errorResponse.put("error", "Journey not found");
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(errorResponse);
+            }
+            
+            TrainingJourneyEntity journey = journeyOpt.get();
+            List<TrainingJourneyEntity.TrainingModuleEntity> modules = journey.getModules();
+            
+            if (modules == null || modules.isEmpty()) {
+                Map<String, Object> errorResponse = new HashMap<>();
+                errorResponse.put("success", false);
+                errorResponse.put("error", "Journey has no modules");
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
+            }
+            
+            // Create initial progress records for all modules
+            List<RepProgress> createdProgress = new ArrayList<>();
+            for (TrainingJourneyEntity.TrainingModuleEntity module : modules) {
+                // TrainingModuleEntity uses _id, not id
+                String moduleId = module.get_id();
+                
+                if (moduleId == null || moduleId.isEmpty()) {
+                    System.out.println("[JourneyController] Warning: Module has no _id, skipping. Module title: " + module.getTitle());
+                    continue;
+                }
+                
+                // Check if progress already exists
+                Optional<RepProgress> existingProgress = repProgressRepository.findByRepIdAndJourneyIdAndModuleId(repId, journeyId, moduleId);
+                
+                if (!existingProgress.isPresent()) {
+                    // Create new progress record
+                    RepProgress progress = new RepProgress(repId, journeyId, moduleId);
+                    progress.setStatus("not-started");
+                    progress.setProgress(0);
+                    progress.setTimeSpent(0);
+                    progress.setEngagementScore(0);
+                    
+                    RepProgress savedProgress = repProgressRepository.save(progress);
+                    createdProgress.add(savedProgress);
+                    System.out.println("[JourneyController] Created progress for module: " + moduleId);
+                } else {
+                    // Update existing progress to "in-progress" if it's still "not-started"
+                    RepProgress existing = existingProgress.get();
+                    if ("not-started".equals(existing.getStatus())) {
+                        existing.setStatus("in-progress");
+                        existing.setLastAccessed(java.time.LocalDateTime.now());
+                        repProgressRepository.save(existing);
+                        createdProgress.add(existing);
+                        System.out.println("[JourneyController] Updated progress to in-progress for module: " + moduleId);
+                    } else {
+                        createdProgress.add(existing);
+                        System.out.println("[JourneyController] Progress already exists for module: " + moduleId);
+                    }
+                }
+            }
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "Training progress initialized");
+            response.put("data", createdProgress);
+            response.put("count", createdProgress.size());
+            
+            System.out.println("[JourneyController] Initialized " + createdProgress.size() + " progress records for repId: " + repId + ", journeyId: " + journeyId);
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            System.err.println("[JourneyController] Error in startTrainingProgress: " + e.getMessage());
+            e.printStackTrace();
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+    
+    /**
      * POST /training_journeys/rep-progress/update
      * Update or create progress for a rep
      */
