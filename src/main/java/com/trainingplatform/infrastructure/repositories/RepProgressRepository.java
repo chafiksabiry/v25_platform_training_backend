@@ -11,8 +11,5 @@ import java.util.Optional;
 public interface RepProgressRepository extends MongoRepository<RepProgress, String> {
     List<RepProgress> findByRepId(String repId);
     List<RepProgress> findByJourneyId(String journeyId);
-    List<RepProgress> findByModuleId(String moduleId);
-    List<RepProgress> findByRepIdAndJourneyId(String repId, String journeyId);
-    Optional<RepProgress> findByRepIdAndJourneyIdAndModuleId(String repId, String journeyId, String moduleId);
-    List<RepProgress> findByStatus(String status);
+    Optional<RepProgress> findByRepIdAndJourneyId(String repId, String journeyId);
 }

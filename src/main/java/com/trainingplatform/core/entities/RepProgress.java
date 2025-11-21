@@ -9,6 +9,8 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
 
 @Document(collection = "rep_progress")
 public class RepProgress {
@@ -17,19 +19,18 @@ public class RepProgress {
     
     private String repId;
     private String journeyId;
-    private String moduleId;
     
-    @Min(value = 0, message = "Progress cannot be negative")
-    @Max(value = 100, message = "Progress cannot exceed 100")
-    private int progress = 0;
+    private int moduleTotal = 0;
     
-    private String status = "not-started"; // not-started, in-progress, completed
+    // Map of moduleId -> ModuleProgress
+    private Map<String, ModuleProgress> modules = new HashMap<>();
     
-    @Min(value = 0, message = "Score cannot be negative")
-    @Max(value = 100, message = "Score cannot exceed 100")
-    private Integer score;
+    // Counters
+    private int moduleFinished = 0;
+    private int moduleNotStarted = 0;
+    private int moduleInProgress = 0;
     
-    private int timeSpent = 0; // in minutes
+    private int timeSpent = 0; // Total time spent in minutes
     
     @Min(value = 0, message = "Engagement score cannot be negative")
     @Max(value = 100, message = "Engagement score cannot exceed 100")
@@ -46,11 +47,28 @@ public class RepProgress {
     // Constructors
     public RepProgress() {}
 
-    public RepProgress(String repId, String journeyId, String moduleId) {
+    public RepProgress(String repId, String journeyId) {
         this.repId = repId;
         this.journeyId = journeyId;
-        this.moduleId = moduleId;
         this.lastAccessed = LocalDateTime.now();
+    }
+
+    // Helper method to update counters
+    public void updateCounters() {
+        moduleFinished = 0;
+        moduleNotStarted = 0;
+        moduleInProgress = 0;
+        
+        for (ModuleProgress moduleProgress : modules.values()) {
+            String status = moduleProgress.getStatus();
+            if ("completed".equals(status) || "finished".equals(status)) {
+                moduleFinished++;
+            } else if ("in-progress".equals(status)) {
+                moduleInProgress++;
+            } else {
+                moduleNotStarted++;
+            }
+        }
     }
 
     // Getters and Setters
@@ -63,17 +81,23 @@ public class RepProgress {
     public String getJourneyId() { return journeyId; }
     public void setJourneyId(String journeyId) { this.journeyId = journeyId; }
 
-    public String getModuleId() { return moduleId; }
-    public void setModuleId(String moduleId) { this.moduleId = moduleId; }
+    public int getModuleTotal() { return moduleTotal; }
+    public void setModuleTotal(int moduleTotal) { this.moduleTotal = moduleTotal; }
 
-    public int getProgress() { return progress; }
-    public void setProgress(int progress) { this.progress = progress; }
+    public Map<String, ModuleProgress> getModules() { return modules; }
+    public void setModules(Map<String, ModuleProgress> modules) { 
+        this.modules = modules != null ? modules : new HashMap<>();
+        updateCounters();
+    }
 
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
+    public int getModuleFinished() { return moduleFinished; }
+    public void setModuleFinished(int moduleFinished) { this.moduleFinished = moduleFinished; }
 
-    public Integer getScore() { return score; }
-    public void setScore(Integer score) { this.score = score; }
+    public int getModuleNotStarted() { return moduleNotStarted; }
+    public void setModuleNotStarted(int moduleNotStarted) { this.moduleNotStarted = moduleNotStarted; }
+
+    public int getModuleInProgress() { return moduleInProgress; }
+    public void setModuleInProgress(int moduleInProgress) { this.moduleInProgress = moduleInProgress; }
 
     public int getTimeSpent() { return timeSpent; }
     public void setTimeSpent(int timeSpent) { this.timeSpent = timeSpent; }
@@ -89,4 +113,87 @@ public class RepProgress {
 
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+
+    // Inner class for Module Progress
+    public static class ModuleProgress {
+        private String status = "not-started"; // not-started, in-progress, completed/finished
+        
+        @Min(value = 0, message = "Progress cannot be negative")
+        @Max(value = 100, message = "Progress cannot exceed 100")
+        private int progress = 0; // 0-100
+        
+        @Min(value = 0, message = "Score cannot be negative")
+        @Max(value = 100, message = "Score cannot exceed 100")
+        private Integer score; // Quiz score
+        
+        private int timeSpent = 0; // Time spent on this module in minutes
+        
+        // Map of sectionId -> SectionProgress
+        private Map<String, SectionProgress> sections = new HashMap<>();
+        
+        private LocalDateTime lastAccessed;
+
+        // Constructors
+        public ModuleProgress() {}
+
+        public ModuleProgress(String status) {
+            this.status = status;
+            this.lastAccessed = LocalDateTime.now();
+        }
+
+        // Getters and Setters
+        public String getStatus() { return status; }
+        public void setStatus(String status) { this.status = status; }
+
+        public int getProgress() { return progress; }
+        public void setProgress(int progress) { this.progress = progress; }
+
+        public Integer getScore() { return score; }
+        public void setScore(Integer score) { this.score = score; }
+
+        public int getTimeSpent() { return timeSpent; }
+        public void setTimeSpent(int timeSpent) { this.timeSpent = timeSpent; }
+
+        public Map<String, SectionProgress> getSections() { return sections; }
+        public void setSections(Map<String, SectionProgress> sections) { 
+            this.sections = sections != null ? sections : new HashMap<>();
+        }
+
+        public LocalDateTime getLastAccessed() { return lastAccessed; }
+        public void setLastAccessed(LocalDateTime lastAccessed) { this.lastAccessed = lastAccessed; }
+    }
+
+    // Inner class for Section Progress
+    public static class SectionProgress {
+        private boolean completed = false;
+        
+        @Min(value = 0, message = "Progress cannot be negative")
+        @Max(value = 100, message = "Progress cannot exceed 100")
+        private int progress = 0; // 0-100
+        
+        private int timeSpent = 0; // Time spent on this section in minutes
+        
+        private LocalDateTime lastAccessed;
+
+        // Constructors
+        public SectionProgress() {}
+
+        public SectionProgress(boolean completed) {
+            this.completed = completed;
+            this.lastAccessed = LocalDateTime.now();
+        }
+
+        // Getters and Setters
+        public boolean isCompleted() { return completed; }
+        public void setCompleted(boolean completed) { this.completed = completed; }
+
+        public int getProgress() { return progress; }
+        public void setProgress(int progress) { this.progress = progress; }
+
+        public int getTimeSpent() { return timeSpent; }
+        public void setTimeSpent(int timeSpent) { this.timeSpent = timeSpent; }
+
+        public LocalDateTime getLastAccessed() { return lastAccessed; }
+        public void setLastAccessed(LocalDateTime lastAccessed) { this.lastAccessed = lastAccessed; }
+    }
 }

@@ -177,7 +177,8 @@ public class JourneyController {
             
             List<RepProgress> progressList;
             if (journeyId != null && !journeyId.isEmpty()) {
-                progressList = repProgressRepository.findByRepIdAndJourneyId(repId, journeyId);
+                Optional<RepProgress> progressOpt = repProgressRepository.findByRepIdAndJourneyId(repId, journeyId);
+                progressList = progressOpt.map(List::of).orElse(new ArrayList<>());
             } else {
                 progressList = repProgressRepository.findByRepId(repId);
             }
@@ -186,7 +187,7 @@ public class JourneyController {
             
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
-            response.put("data", progressList);
+            response.put("data", progressList.isEmpty() ? null : (progressList.size() == 1 ? progressList.get(0) : progressList));
             response.put("count", progressList.size());
             
             return ResponseEntity.ok(response);
@@ -227,9 +228,9 @@ public class JourneyController {
             Map<String, Object> trainingsProgress = new HashMap<>();
             
             for (TrainingJourneyEntity journey : journeys) {
-                List<RepProgress> journeyProgress = repProgressRepository.findByRepIdAndJourneyId(repId, journey.getId());
+                Optional<RepProgress> journeyProgressOpt = repProgressRepository.findByRepIdAndJourneyId(repId, journey.getId());
                 
-                if (journeyProgress.isEmpty()) {
+                if (!journeyProgressOpt.isPresent()) {
                     notStartedTrainings++;
                     trainingsProgress.put(journey.getId(), Map.of(
                         "journeyId", journey.getId(),
@@ -237,28 +238,31 @@ public class JourneyController {
                         "status", "not-started",
                         "progress", 0,
                         "engagementScore", 0,
-                        "timeSpent", 0
+                        "timeSpent", 0,
+                        "moduleTotal", 0,
+                        "moduleFinished", 0,
+                        "moduleInProgress", 0,
+                        "moduleNotStarted", 0
                     ));
                 } else {
-                    // Calculate average progress for this journey
-                    double journeyProgressAvg = journeyProgress.stream()
-                        .mapToInt(RepProgress::getProgress)
-                        .average()
-                        .orElse(0.0);
+                    RepProgress journeyProgress = journeyProgressOpt.get();
                     
-                    double journeyEngagementAvg = journeyProgress.stream()
-                        .mapToInt(RepProgress::getEngagementScore)
-                        .average()
-                        .orElse(0.0);
+                    // Calculate average progress from modules
+                    Map<String, RepProgress.ModuleProgress> modules = journeyProgress.getModules();
+                    double journeyProgressAvg = 0.0;
+                    if (modules != null && !modules.isEmpty()) {
+                        journeyProgressAvg = modules.values().stream()
+                            .mapToInt(RepProgress.ModuleProgress::getProgress)
+                            .average()
+                            .orElse(0.0);
+                    }
                     
-                    int journeyTimeSpent = journeyProgress.stream()
-                        .mapToInt(RepProgress::getTimeSpent)
-                        .sum();
+                    double journeyEngagementAvg = journeyProgress.getEngagementScore();
+                    int journeyTimeSpent = journeyProgress.getTimeSpent();
                     
-                    String status = journeyProgress.stream()
-                        .anyMatch(p -> "completed".equals(p.getStatus()) || p.getProgress() >= 100)
+                    String status = journeyProgress.getModuleFinished() == journeyProgress.getModuleTotal() && journeyProgress.getModuleTotal() > 0
                         ? "completed"
-                        : journeyProgress.stream().anyMatch(p -> "in-progress".equals(p.getStatus()))
+                        : journeyProgress.getModuleInProgress() > 0
                         ? "in-progress"
                         : "not-started";
                     
@@ -280,7 +284,11 @@ public class JourneyController {
                         "status", status,
                         "progress", Math.round(journeyProgressAvg),
                         "engagementScore", Math.round(journeyEngagementAvg),
-                        "timeSpent", journeyTimeSpent
+                        "timeSpent", journeyTimeSpent,
+                        "moduleTotal", journeyProgress.getModuleTotal(),
+                        "moduleFinished", journeyProgress.getModuleFinished(),
+                        "moduleInProgress", journeyProgress.getModuleInProgress(),
+                        "moduleNotStarted", journeyProgress.getModuleNotStarted()
                     ));
                 }
             }
@@ -344,32 +352,41 @@ public class JourneyController {
             List<Map<String, Object>> trainingsProgressList = new ArrayList<>();
             
             for (TrainingJourneyEntity journey : journeys) {
-                List<RepProgress> journeyProgress = repProgressRepository.findByRepIdAndJourneyId(repId, journey.getId());
+                Optional<RepProgress> journeyProgressOpt = repProgressRepository.findByRepIdAndJourneyId(repId, journey.getId());
                 
                 Map<String, Object> trainingProgress = new HashMap<>();
                 trainingProgress.put("journeyId", journey.getId());
                 trainingProgress.put("journeyTitle", journey.getTitle() != null ? journey.getTitle() : "Untitled");
                 trainingProgress.put("description", journey.getDescription());
                 
-                if (journeyProgress.isEmpty()) {
+                if (!journeyProgressOpt.isPresent()) {
                     notStartedTrainings++;
                     trainingProgress.put("status", "not-started");
                     trainingProgress.put("progress", 0);
                     trainingProgress.put("timeSpent", 0);
+                    trainingProgress.put("moduleTotal", 0);
+                    trainingProgress.put("moduleFinished", 0);
+                    trainingProgress.put("moduleInProgress", 0);
+                    trainingProgress.put("moduleNotStarted", 0);
+                    trainingProgress.put("modulesProgress", new ArrayList<>());
                 } else {
-                    double journeyProgressAvg = journeyProgress.stream()
-                        .mapToInt(RepProgress::getProgress)
-                        .average()
-                        .orElse(0.0);
+                    RepProgress journeyProgress = journeyProgressOpt.get();
                     
-                    int journeyTimeSpent = journeyProgress.stream()
-                        .mapToInt(RepProgress::getTimeSpent)
-                        .sum();
+                    // Calculate average progress from modules
+                    Map<String, RepProgress.ModuleProgress> modules = journeyProgress.getModules();
+                    double journeyProgressAvg = 0.0;
+                    if (modules != null && !modules.isEmpty()) {
+                        journeyProgressAvg = modules.values().stream()
+                            .mapToInt(RepProgress.ModuleProgress::getProgress)
+                            .average()
+                            .orElse(0.0);
+                    }
                     
-                    String status = journeyProgress.stream()
-                        .anyMatch(p -> "completed".equals(p.getStatus()) || p.getProgress() >= 100)
+                    int journeyTimeSpent = journeyProgress.getTimeSpent();
+                    
+                    String status = journeyProgress.getModuleFinished() == journeyProgress.getModuleTotal() && journeyProgress.getModuleTotal() > 0
                         ? "completed"
-                        : journeyProgress.stream().anyMatch(p -> "in-progress".equals(p.getStatus()))
+                        : journeyProgress.getModuleInProgress() > 0
                         ? "in-progress"
                         : "not-started";
                     
@@ -384,15 +401,29 @@ public class JourneyController {
                     overallProgress += journeyProgressAvg;
                     totalTimeSpent += journeyTimeSpent;
                     
+                    // Build modules progress list
+                    List<Map<String, Object>> modulesProgressList = new ArrayList<>();
+                    if (modules != null) {
+                        for (Map.Entry<String, RepProgress.ModuleProgress> entry : modules.entrySet()) {
+                            RepProgress.ModuleProgress moduleProg = entry.getValue();
+                            Map<String, Object> moduleProgMap = new HashMap<>();
+                            moduleProgMap.put("moduleId", entry.getKey());
+                            moduleProgMap.put("progress", moduleProg.getProgress());
+                            moduleProgMap.put("status", moduleProg.getStatus());
+                            moduleProgMap.put("timeSpent", moduleProg.getTimeSpent());
+                            moduleProgMap.put("score", moduleProg.getScore());
+                            modulesProgressList.add(moduleProgMap);
+                        }
+                    }
+                    
                     trainingProgress.put("status", status);
                     trainingProgress.put("progress", Math.round(journeyProgressAvg));
                     trainingProgress.put("timeSpent", journeyTimeSpent);
-                    trainingProgress.put("modulesProgress", journeyProgress.stream().map(p -> Map.of(
-                        "moduleId", p.getModuleId() != null ? p.getModuleId() : "",
-                        "progress", p.getProgress(),
-                        "status", p.getStatus(),
-                        "timeSpent", p.getTimeSpent()
-                    )).collect(Collectors.toList()));
+                    trainingProgress.put("moduleTotal", journeyProgress.getModuleTotal());
+                    trainingProgress.put("moduleFinished", journeyProgress.getModuleFinished());
+                    trainingProgress.put("moduleInProgress", journeyProgress.getModuleInProgress());
+                    trainingProgress.put("moduleNotStarted", journeyProgress.getModuleNotStarted());
+                    trainingProgress.put("modulesProgress", modulesProgressList);
                 }
                 
                 trainingsProgressList.add(trainingProgress);
@@ -737,9 +768,29 @@ public class JourneyController {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
             }
             
-            // Create initial progress records for all modules
-            List<RepProgress> createdProgress = new ArrayList<>();
-            int skippedCount = 0;
+            // Check if progress already exists for this rep/journey
+            Optional<RepProgress> existingProgressOpt = repProgressRepository.findByRepIdAndJourneyId(repId, journeyId);
+            
+            RepProgress repProgress;
+            boolean isNew = false;
+            
+            if (existingProgressOpt.isPresent()) {
+                repProgress = existingProgressOpt.get();
+                System.out.println("[JourneyController] Found existing progress for repId: " + repId + ", journeyId: " + journeyId);
+            } else {
+                // Create new progress document
+                repProgress = new RepProgress(repId, journeyId);
+                repProgress.setModuleTotal(modules.size());
+                repProgress.setModules(new java.util.HashMap<>());
+                isNew = true;
+                System.out.println("[JourneyController] Creating new progress document for repId: " + repId + ", journeyId: " + journeyId);
+            }
+            
+            // Initialize or update modules progress
+            Map<String, RepProgress.ModuleProgress> modulesMap = repProgress.getModules();
+            if (modulesMap == null) {
+                modulesMap = new java.util.HashMap<>();
+            }
             
             for (int i = 0; i < modules.size(); i++) {
                 TrainingJourneyEntity.TrainingModuleEntity module = modules.get(i);
@@ -751,60 +802,59 @@ public class JourneyController {
                 
                 // If module has no _id, generate one based on journeyId and module index
                 if (moduleId == null || moduleId.isEmpty()) {
-                    // Generate a unique ID based on journeyId and module index
                     moduleId = journeyId + "_module_" + i;
                     System.out.println("[JourneyController] Generated moduleId: " + moduleId + " (module had no _id)");
                 }
                 
-                // Check if progress already exists
-                Optional<RepProgress> existingProgress = repProgressRepository.findByRepIdAndJourneyIdAndModuleId(repId, journeyId, moduleId);
-                
-                if (!existingProgress.isPresent()) {
-                    // Create new progress record
-                    try {
-                        RepProgress progress = new RepProgress(repId, journeyId, moduleId);
-                        progress.setStatus("not-started");
-                        progress.setProgress(0);
-                        progress.setTimeSpent(0);
-                        progress.setEngagementScore(0);
-                        
-                        RepProgress savedProgress = repProgressRepository.save(progress);
-                        createdProgress.add(savedProgress);
-                        System.out.println("[JourneyController] ✅ Created progress for module: " + moduleId + " (ID: " + savedProgress.getId() + ")");
-                    } catch (Exception e) {
-                        System.err.println("[JourneyController] ❌ Error creating progress for module " + moduleId + ": " + e.getMessage());
-                        e.printStackTrace();
+                // Initialize module progress if it doesn't exist
+                if (!modulesMap.containsKey(moduleId)) {
+                    RepProgress.ModuleProgress moduleProgress = new RepProgress.ModuleProgress("not-started");
+                    moduleProgress.setProgress(0);
+                    moduleProgress.setTimeSpent(0);
+                    moduleProgress.setSections(new java.util.HashMap<>());
+                    
+                    // Initialize sections progress
+                    if (module.getSections() != null) {
+                        for (TrainingJourneyEntity.SectionEntity section : module.getSections()) {
+                            String sectionId = section.get_id();
+                            if (sectionId == null || sectionId.isEmpty()) {
+                                sectionId = moduleId + "_section_" + section.getOrder();
+                            }
+                            RepProgress.SectionProgress sectionProgress = new RepProgress.SectionProgress(false);
+                            sectionProgress.setProgress(0);
+                            sectionProgress.setTimeSpent(0);
+                            moduleProgress.getSections().put(sectionId, sectionProgress);
+                        }
                     }
+                    
+                    modulesMap.put(moduleId, moduleProgress);
+                    System.out.println("[JourneyController] ✅ Initialized progress for module: " + moduleId);
                 } else {
-                    // Update existing progress to "in-progress" if it's still "not-started"
-                    RepProgress existing = existingProgress.get();
-                    if ("not-started".equals(existing.getStatus())) {
-                        existing.setStatus("in-progress");
-                        existing.setLastAccessed(java.time.LocalDateTime.now());
-                        repProgressRepository.save(existing);
-                        createdProgress.add(existing);
-                        System.out.println("[JourneyController] ✅ Updated progress to in-progress for module: " + moduleId);
-                    } else {
-                        createdProgress.add(existing);
-                        System.out.println("[JourneyController] ℹ️ Progress already exists for module: " + moduleId + " (status: " + existing.getStatus() + ")");
-                    }
+                    System.out.println("[JourneyController] ℹ️ Module progress already exists: " + moduleId);
                 }
             }
             
+            repProgress.setModules(modulesMap);
+            repProgress.setModuleTotal(modules.size());
+            repProgress.setLastAccessed(java.time.LocalDateTime.now());
+            repProgress.updateCounters();
+            
+            RepProgress savedProgress = repProgressRepository.save(repProgress);
+            
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
-            response.put("message", "Training progress initialized");
-            response.put("data", createdProgress);
-            response.put("count", createdProgress.size());
-            response.put("skipped", skippedCount);
-            response.put("totalModules", modules.size());
+            response.put("message", isNew ? "Training progress initialized" : "Training progress updated");
+            response.put("data", savedProgress);
+            response.put("moduleTotal", savedProgress.getModuleTotal());
+            response.put("moduleFinished", savedProgress.getModuleFinished());
+            response.put("moduleNotStarted", savedProgress.getModuleNotStarted());
+            response.put("moduleInProgress", savedProgress.getModuleInProgress());
             
-            System.out.println("[JourneyController] Initialized " + createdProgress.size() + " progress records for repId: " + repId + ", journeyId: " + journeyId);
-            System.out.println("[JourneyController] Skipped " + skippedCount + " modules (no _id)");
-            
-            if (createdProgress.isEmpty() && skippedCount > 0) {
-                System.out.println("[JourneyController] ERROR: No progress created because all modules lack _id!");
-            }
+            System.out.println("[JourneyController] ✅ Saved progress for repId: " + repId + ", journeyId: " + journeyId);
+            System.out.println("[JourneyController] Module stats - Total: " + savedProgress.getModuleTotal() + 
+                             ", Finished: " + savedProgress.getModuleFinished() + 
+                             ", In Progress: " + savedProgress.getModuleInProgress() + 
+                             ", Not Started: " + savedProgress.getModuleNotStarted());
             
             return ResponseEntity.ok(response);
         } catch (Exception e) {
@@ -829,6 +879,7 @@ public class JourneyController {
             String repId = (String) progressData.get("repId");
             String journeyId = (String) progressData.get("journeyId");
             String moduleId = (String) progressData.get("moduleId");
+            String sectionId = (String) progressData.get("sectionId"); // Optional
             
             if (repId == null || journeyId == null || moduleId == null) {
                 Map<String, Object> errorResponse = new HashMap<>();
@@ -838,60 +889,129 @@ public class JourneyController {
             }
             
             // Get or create progress record
-            Optional<RepProgress> existingProgress = repProgressRepository.findByRepIdAndJourneyIdAndModuleId(repId, journeyId, moduleId);
-            RepProgress progress;
+            Optional<RepProgress> existingProgressOpt = repProgressRepository.findByRepIdAndJourneyId(repId, journeyId);
+            RepProgress repProgress;
             
-            if (existingProgress.isPresent()) {
-                progress = existingProgress.get();
+            if (existingProgressOpt.isPresent()) {
+                repProgress = existingProgressOpt.get();
             } else {
-                progress = new RepProgress(repId, journeyId, moduleId);
+                // If progress doesn't exist, initialize it first
+                repProgress = new RepProgress(repId, journeyId);
+                repProgress.setModules(new java.util.HashMap<>());
+                System.out.println("[JourneyController] Creating new progress document for update");
             }
             
-            // Update progress fields
-            if (progressData.containsKey("progress")) {
-                Object progressValue = progressData.get("progress");
-                if (progressValue instanceof Number) {
-                    progress.setProgress(((Number) progressValue).intValue());
+            // Get or create module progress
+            Map<String, RepProgress.ModuleProgress> modulesMap = repProgress.getModules();
+            if (modulesMap == null) {
+                modulesMap = new java.util.HashMap<>();
+            }
+            
+            RepProgress.ModuleProgress moduleProgress = modulesMap.get(moduleId);
+            if (moduleProgress == null) {
+                moduleProgress = new RepProgress.ModuleProgress("not-started");
+                moduleProgress.setSections(new java.util.HashMap<>());
+                modulesMap.put(moduleId, moduleProgress);
+            }
+            
+            // Update module progress if sectionId is not provided
+            if (sectionId == null || sectionId.isEmpty()) {
+                // Update module-level progress
+                if (progressData.containsKey("progress")) {
+                    Object progressValue = progressData.get("progress");
+                    if (progressValue instanceof Number) {
+                        moduleProgress.setProgress(((Number) progressValue).intValue());
+                    }
                 }
-            }
-            
-            if (progressData.containsKey("status")) {
-                progress.setStatus((String) progressData.get("status"));
-            }
-            
-            if (progressData.containsKey("score")) {
-                Object scoreValue = progressData.get("score");
-                if (scoreValue instanceof Number) {
-                    progress.setScore(((Number) scoreValue).intValue());
+                
+                if (progressData.containsKey("status")) {
+                    String status = (String) progressData.get("status");
+                    moduleProgress.setStatus(status);
                 }
-            }
-            
-            if (progressData.containsKey("timeSpent")) {
-                Object timeSpentValue = progressData.get("timeSpent");
-                if (timeSpentValue instanceof Number) {
-                    progress.setTimeSpent(((Number) timeSpentValue).intValue());
+                
+                if (progressData.containsKey("score")) {
+                    Object scoreValue = progressData.get("score");
+                    if (scoreValue != null && scoreValue instanceof Number) {
+                        moduleProgress.setScore(((Number) scoreValue).intValue());
+                    }
                 }
+                
+                if (progressData.containsKey("timeSpent")) {
+                    Object timeSpentValue = progressData.get("timeSpent");
+                    if (timeSpentValue instanceof Number) {
+                        moduleProgress.setTimeSpent(((Number) timeSpentValue).intValue());
+                    }
+                }
+                
+                moduleProgress.setLastAccessed(java.time.LocalDateTime.now());
+            } else {
+                // Update section-level progress
+                Map<String, RepProgress.SectionProgress> sectionsMap = moduleProgress.getSections();
+                if (sectionsMap == null) {
+                    sectionsMap = new java.util.HashMap<>();
+                    moduleProgress.setSections(sectionsMap);
+                }
+                
+                RepProgress.SectionProgress sectionProgress = sectionsMap.get(sectionId);
+                if (sectionProgress == null) {
+                    sectionProgress = new RepProgress.SectionProgress(false);
+                    sectionsMap.put(sectionId, sectionProgress);
+                }
+                
+                if (progressData.containsKey("progress")) {
+                    Object progressValue = progressData.get("progress");
+                    if (progressValue instanceof Number) {
+                        sectionProgress.setProgress(((Number) progressValue).intValue());
+                    }
+                }
+                
+                if (progressData.containsKey("completed")) {
+                    Object completedValue = progressData.get("completed");
+                    if (completedValue instanceof Boolean) {
+                        sectionProgress.setCompleted((Boolean) completedValue);
+                    }
+                }
+                
+                if (progressData.containsKey("timeSpent")) {
+                    Object timeSpentValue = progressData.get("timeSpent");
+                    if (timeSpentValue instanceof Number) {
+                        sectionProgress.setTimeSpent(((Number) timeSpentValue).intValue());
+                    }
+                }
+                
+                sectionProgress.setLastAccessed(java.time.LocalDateTime.now());
             }
             
+            // Update engagement score if provided
             if (progressData.containsKey("engagementScore")) {
                 Object engagementValue = progressData.get("engagementScore");
                 if (engagementValue instanceof Number) {
-                    progress.setEngagementScore(((Number) engagementValue).intValue());
+                    repProgress.setEngagementScore(((Number) engagementValue).intValue());
                 }
             }
             
-            // Update last accessed
-            progress.setLastAccessed(java.time.LocalDateTime.now());
+            // Update total time spent
+            if (progressData.containsKey("totalTimeSpent")) {
+                Object totalTimeSpentValue = progressData.get("totalTimeSpent");
+                if (totalTimeSpentValue instanceof Number) {
+                    repProgress.setTimeSpent(((Number) totalTimeSpentValue).intValue());
+                }
+            }
+            
+            repProgress.setModules(modulesMap);
+            repProgress.setLastAccessed(java.time.LocalDateTime.now());
+            repProgress.updateCounters();
             
             // Save progress
-            RepProgress savedProgress = repProgressRepository.save(progress);
+            RepProgress savedProgress = repProgressRepository.save(repProgress);
             
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
             response.put("data", savedProgress);
             response.put("message", "Progress updated successfully");
             
-            System.out.println("[JourneyController] Progress updated for repId: " + repId + ", journeyId: " + journeyId + ", moduleId: " + moduleId);
+            System.out.println("[JourneyController] Progress updated for repId: " + repId + ", journeyId: " + journeyId + ", moduleId: " + moduleId + 
+                             (sectionId != null ? ", sectionId: " + sectionId : ""));
             
             return ResponseEntity.ok(response);
         } catch (Exception e) {
