@@ -103,6 +103,62 @@ public class JourneyController {
     }
     
     /**
+     * GET /journeys/trainee/available
+     * Get all available training journeys for trainees (active and completed only)
+     * This endpoint returns all journeys that trainees can see, regardless of enrollment
+     */
+    @GetMapping("/trainee/available")
+    public ResponseEntity<?> getAllAvailableJourneysForTrainees() {
+        try {
+            List<TrainingJourneyEntity> journeys = journeyService.getAllAvailableJourneysForTrainees();
+            
+            // Populate gig titles if available
+            List<Map<String, Object>> journeysWithPopulated = journeys.stream().map(journey -> {
+                Map<String, Object> journeyMap = new HashMap<>();
+                try {
+                    journeyMap = objectMapper.convertValue(journey, Map.class);
+                    
+                    // Populate gig title if gigId exists
+                    if (journey.getGigId() != null && !journey.getGigId().isEmpty()) {
+                        Optional<GigEntity> gigOpt = gigRepository.findById(journey.getGigId());
+                        if (gigOpt.isPresent()) {
+                            journeyMap.put("gigTitle", gigOpt.get().getTitle());
+                        }
+                    }
+                    
+                    // Populate industry title if industry exists
+                    if (journey.getIndustry() != null && !journey.getIndustry().isEmpty()) {
+                        Optional<IndustryEntity> industryOpt = industryRepository.findById(journey.getIndustry());
+                        if (industryOpt.isPresent()) {
+                            journeyMap.put("industryTitle", industryOpt.get().getName());
+                        }
+                    }
+                } catch (Exception e) {
+                    System.err.println("[JourneyController] Error populating journey data: " + e.getMessage());
+                }
+                
+                return journeyMap;
+            }).collect(Collectors.toList());
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("data", journeysWithPopulated);
+            response.put("count", journeys.size());
+            
+            System.out.println("[JourneyController] Found " + journeys.size() + " available journeys for trainees");
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            System.err.println("[JourneyController] Error in getAllAvailableJourneysForTrainees: " + e.getMessage());
+            e.printStackTrace();
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+    
+    /**
      * POST /journeys
      * Create or update a training journey
      */

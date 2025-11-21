@@ -95,6 +95,21 @@ public class TrainingJourneyService {
     }
     
     /**
+     * Get all available journeys for trainees (active and completed only)
+     * This returns all journeys that trainees can see, regardless of enrollment
+     */
+    public List<TrainingJourneyEntity> getAllAvailableJourneysForTrainees() {
+        // Return only active and completed journeys (exclude draft and archived)
+        List<TrainingJourneyEntity> allJourneys = journeyRepository.findAll();
+        return allJourneys.stream()
+            .filter(journey -> {
+                String status = journey.getStatus();
+                return status != null && (status.equals("active") || status.equals("completed"));
+            })
+            .collect(Collectors.toList());
+    }
+    
+    /**
      * Delete a journey
      */
     public void deleteJourney(String id) {
