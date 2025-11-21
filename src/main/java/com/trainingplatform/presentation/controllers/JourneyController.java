@@ -18,6 +18,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -170,11 +171,16 @@ public class JourneyController {
     @GetMapping("/rep-progress")
     public ResponseEntity<?> getRepProgress(
             @RequestParam String repId,
-            @RequestParam String journeyId) {
+            @RequestParam(required = false) String journeyId) {
         try {
             System.out.println("[JourneyController] getRepProgress called with repId: " + repId + ", journeyId: " + journeyId);
             
-            List<RepProgress> progressList = repProgressRepository.findByRepIdAndJourneyId(repId, journeyId);
+            List<RepProgress> progressList;
+            if (journeyId != null && !journeyId.isEmpty()) {
+                progressList = repProgressRepository.findByRepIdAndJourneyId(repId, journeyId);
+            } else {
+                progressList = repProgressRepository.findByRepId(repId);
+            }
             
             System.out.println("[JourneyController] Found " + progressList.size() + " progress records");
             
@@ -186,6 +192,235 @@ public class JourneyController {
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             System.err.println("[JourneyController] Error in getRepProgress: " + e.getMessage());
+            e.printStackTrace();
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+    
+    /**
+     * GET /training_journeys/rep/{repId}/progress/overview
+     * Get overall progress overview for a rep (all trainings)
+     */
+    @GetMapping("/rep/{repId}/progress/overview")
+    public ResponseEntity<?> getRepProgressOverview(@PathVariable String repId) {
+        try {
+            System.out.println("[JourneyController] getRepProgressOverview called with repId: " + repId);
+            
+            // Get all progress records for this rep
+            List<RepProgress> allProgress = repProgressRepository.findByRepId(repId);
+            
+            // Get all journeys this rep is enrolled in
+            List<TrainingJourneyEntity> journeys = journeyService.getJourneysForRep(repId);
+            
+            // Calculate overall statistics
+            int totalTrainings = journeys.size();
+            int completedTrainings = 0;
+            int inProgressTrainings = 0;
+            int notStartedTrainings = 0;
+            double overallProgress = 0.0;
+            double overallEngagement = 0.0;
+            int totalTimeSpent = 0;
+            
+            Map<String, Object> trainingsProgress = new HashMap<>();
+            
+            for (TrainingJourneyEntity journey : journeys) {
+                List<RepProgress> journeyProgress = repProgressRepository.findByRepIdAndJourneyId(repId, journey.getId());
+                
+                if (journeyProgress.isEmpty()) {
+                    notStartedTrainings++;
+                    trainingsProgress.put(journey.getId(), Map.of(
+                        "journeyId", journey.getId(),
+                        "journeyTitle", journey.getTitle() != null ? journey.getTitle() : "Untitled",
+                        "status", "not-started",
+                        "progress", 0,
+                        "engagementScore", 0,
+                        "timeSpent", 0
+                    ));
+                } else {
+                    // Calculate average progress for this journey
+                    double journeyProgressAvg = journeyProgress.stream()
+                        .mapToInt(RepProgress::getProgress)
+                        .average()
+                        .orElse(0.0);
+                    
+                    double journeyEngagementAvg = journeyProgress.stream()
+                        .mapToInt(RepProgress::getEngagementScore)
+                        .average()
+                        .orElse(0.0);
+                    
+                    int journeyTimeSpent = journeyProgress.stream()
+                        .mapToInt(RepProgress::getTimeSpent)
+                        .sum();
+                    
+                    String status = journeyProgress.stream()
+                        .anyMatch(p -> "completed".equals(p.getStatus()) || p.getProgress() >= 100)
+                        ? "completed"
+                        : journeyProgress.stream().anyMatch(p -> "in-progress".equals(p.getStatus()))
+                        ? "in-progress"
+                        : "not-started";
+                    
+                    if ("completed".equals(status)) {
+                        completedTrainings++;
+                    } else if ("in-progress".equals(status)) {
+                        inProgressTrainings++;
+                    } else {
+                        notStartedTrainings++;
+                    }
+                    
+                    overallProgress += journeyProgressAvg;
+                    overallEngagement += journeyEngagementAvg;
+                    totalTimeSpent += journeyTimeSpent;
+                    
+                    trainingsProgress.put(journey.getId(), Map.of(
+                        "journeyId", journey.getId(),
+                        "journeyTitle", journey.getTitle() != null ? journey.getTitle() : "Untitled",
+                        "status", status,
+                        "progress", Math.round(journeyProgressAvg),
+                        "engagementScore", Math.round(journeyEngagementAvg),
+                        "timeSpent", journeyTimeSpent
+                    ));
+                }
+            }
+            
+            if (totalTrainings > 0) {
+                overallProgress = overallProgress / totalTrainings;
+                overallEngagement = overallEngagement / totalTrainings;
+            }
+            
+            Map<String, Object> overview = new HashMap<>();
+            overview.put("repId", repId);
+            overview.put("totalTrainings", totalTrainings);
+            overview.put("completedTrainings", completedTrainings);
+            overview.put("inProgressTrainings", inProgressTrainings);
+            overview.put("notStartedTrainings", notStartedTrainings);
+            overview.put("overallProgress", Math.round(overallProgress));
+            overview.put("overallEngagement", Math.round(overallEngagement));
+            overview.put("totalTimeSpent", totalTimeSpent);
+            overview.put("trainingsProgress", trainingsProgress);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("data", overview);
+            
+            System.out.println("[JourneyController] Progress overview: " + completedTrainings + "/" + totalTrainings + " completed");
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            System.err.println("[JourneyController] Error in getRepProgressOverview: " + e.getMessage());
+            e.printStackTrace();
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+    
+    /**
+     * GET /training_journeys/rep/{repId}/progress/gig/{gigId}
+     * Get progress for a rep filtered by gigId
+     */
+    @GetMapping("/rep/{repId}/progress/gig/{gigId}")
+    public ResponseEntity<?> getRepProgressByGig(
+            @PathVariable String repId,
+            @PathVariable String gigId) {
+        try {
+            System.out.println("[JourneyController] getRepProgressByGig called with repId: " + repId + ", gigId: " + gigId);
+            
+            // Get all journeys for this gig
+            List<TrainingJourneyEntity> journeys = journeyService.getJourneysByGigId(gigId);
+            
+            // Get progress for all journeys
+            Map<String, Object> gigProgress = new HashMap<>();
+            int totalTrainings = journeys.size();
+            int completedTrainings = 0;
+            int inProgressTrainings = 0;
+            int notStartedTrainings = 0;
+            double overallProgress = 0.0;
+            int totalTimeSpent = 0;
+            
+            List<Map<String, Object>> trainingsProgressList = new ArrayList<>();
+            
+            for (TrainingJourneyEntity journey : journeys) {
+                List<RepProgress> journeyProgress = repProgressRepository.findByRepIdAndJourneyId(repId, journey.getId());
+                
+                Map<String, Object> trainingProgress = new HashMap<>();
+                trainingProgress.put("journeyId", journey.getId());
+                trainingProgress.put("journeyTitle", journey.getTitle() != null ? journey.getTitle() : "Untitled");
+                trainingProgress.put("description", journey.getDescription());
+                
+                if (journeyProgress.isEmpty()) {
+                    notStartedTrainings++;
+                    trainingProgress.put("status", "not-started");
+                    trainingProgress.put("progress", 0);
+                    trainingProgress.put("timeSpent", 0);
+                } else {
+                    double journeyProgressAvg = journeyProgress.stream()
+                        .mapToInt(RepProgress::getProgress)
+                        .average()
+                        .orElse(0.0);
+                    
+                    int journeyTimeSpent = journeyProgress.stream()
+                        .mapToInt(RepProgress::getTimeSpent)
+                        .sum();
+                    
+                    String status = journeyProgress.stream()
+                        .anyMatch(p -> "completed".equals(p.getStatus()) || p.getProgress() >= 100)
+                        ? "completed"
+                        : journeyProgress.stream().anyMatch(p -> "in-progress".equals(p.getStatus()))
+                        ? "in-progress"
+                        : "not-started";
+                    
+                    if ("completed".equals(status)) {
+                        completedTrainings++;
+                    } else if ("in-progress".equals(status)) {
+                        inProgressTrainings++;
+                    } else {
+                        notStartedTrainings++;
+                    }
+                    
+                    overallProgress += journeyProgressAvg;
+                    totalTimeSpent += journeyTimeSpent;
+                    
+                    trainingProgress.put("status", status);
+                    trainingProgress.put("progress", Math.round(journeyProgressAvg));
+                    trainingProgress.put("timeSpent", journeyTimeSpent);
+                    trainingProgress.put("modulesProgress", journeyProgress.stream().map(p -> Map.of(
+                        "moduleId", p.getModuleId() != null ? p.getModuleId() : "",
+                        "progress", p.getProgress(),
+                        "status", p.getStatus(),
+                        "timeSpent", p.getTimeSpent()
+                    )).collect(Collectors.toList()));
+                }
+                
+                trainingsProgressList.add(trainingProgress);
+            }
+            
+            if (totalTrainings > 0) {
+                overallProgress = overallProgress / totalTrainings;
+            }
+            
+            gigProgress.put("repId", repId);
+            gigProgress.put("gigId", gigId);
+            gigProgress.put("totalTrainings", totalTrainings);
+            gigProgress.put("completedTrainings", completedTrainings);
+            gigProgress.put("inProgressTrainings", inProgressTrainings);
+            gigProgress.put("notStartedTrainings", notStartedTrainings);
+            gigProgress.put("overallProgress", Math.round(overallProgress));
+            gigProgress.put("totalTimeSpent", totalTimeSpent);
+            gigProgress.put("trainings", trainingsProgressList);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("data", gigProgress);
+            
+            System.out.println("[JourneyController] Gig progress: " + completedTrainings + "/" + totalTrainings + " completed");
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            System.err.println("[JourneyController] Error in getRepProgressByGig: " + e.getMessage());
             e.printStackTrace();
             Map<String, Object> errorResponse = new HashMap<>();
             errorResponse.put("success", false);
@@ -451,6 +686,93 @@ public class JourneyController {
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body(errorResponse);
             }
         } catch (Exception e) {
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+    
+    /**
+     * POST /training_journeys/rep-progress/update
+     * Update or create progress for a rep
+     */
+    @PostMapping("/rep-progress/update")
+    public ResponseEntity<?> updateRepProgress(@RequestBody Map<String, Object> progressData) {
+        try {
+            System.out.println("[JourneyController] updateRepProgress called with data: " + progressData);
+            
+            String repId = (String) progressData.get("repId");
+            String journeyId = (String) progressData.get("journeyId");
+            String moduleId = (String) progressData.get("moduleId");
+            
+            if (repId == null || journeyId == null || moduleId == null) {
+                Map<String, Object> errorResponse = new HashMap<>();
+                errorResponse.put("success", false);
+                errorResponse.put("error", "repId, journeyId, and moduleId are required");
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
+            }
+            
+            // Get or create progress record
+            Optional<RepProgress> existingProgress = repProgressRepository.findByRepIdAndJourneyIdAndModuleId(repId, journeyId, moduleId);
+            RepProgress progress;
+            
+            if (existingProgress.isPresent()) {
+                progress = existingProgress.get();
+            } else {
+                progress = new RepProgress(repId, journeyId, moduleId);
+            }
+            
+            // Update progress fields
+            if (progressData.containsKey("progress")) {
+                Object progressValue = progressData.get("progress");
+                if (progressValue instanceof Number) {
+                    progress.setProgress(((Number) progressValue).intValue());
+                }
+            }
+            
+            if (progressData.containsKey("status")) {
+                progress.setStatus((String) progressData.get("status"));
+            }
+            
+            if (progressData.containsKey("score")) {
+                Object scoreValue = progressData.get("score");
+                if (scoreValue instanceof Number) {
+                    progress.setScore(((Number) scoreValue).intValue());
+                }
+            }
+            
+            if (progressData.containsKey("timeSpent")) {
+                Object timeSpentValue = progressData.get("timeSpent");
+                if (timeSpentValue instanceof Number) {
+                    progress.setTimeSpent(((Number) timeSpentValue).intValue());
+                }
+            }
+            
+            if (progressData.containsKey("engagementScore")) {
+                Object engagementValue = progressData.get("engagementScore");
+                if (engagementValue instanceof Number) {
+                    progress.setEngagementScore(((Number) engagementValue).intValue());
+                }
+            }
+            
+            // Update last accessed
+            progress.setLastAccessed(java.time.LocalDateTime.now());
+            
+            // Save progress
+            RepProgress savedProgress = repProgressRepository.save(progress);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("data", savedProgress);
+            response.put("message", "Progress updated successfully");
+            
+            System.out.println("[JourneyController] Progress updated for repId: " + repId + ", journeyId: " + journeyId + ", moduleId: " + moduleId);
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            System.err.println("[JourneyController] Error in updateRepProgress: " + e.getMessage());
+            e.printStackTrace();
             Map<String, Object> errorResponse = new HashMap<>();
             errorResponse.put("success", false);
             errorResponse.put("error", e.getMessage());
