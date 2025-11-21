@@ -169,6 +169,16 @@ public class TrainingJourneyService {
     }
     
     /**
+     * Get journeys by gig ID
+     */
+    public List<TrainingJourneyEntity> getJourneysByGigId(String gigId) {
+        System.out.println("[TrainingJourneyService] getJourneysByGigId called with gigId: " + gigId);
+        List<TrainingJourneyEntity> journeys = journeyRepository.findByGigId(gigId);
+        System.out.println("[TrainingJourneyService] Found " + journeys.size() + " journeys for gigId: " + gigId);
+        return journeys;
+    }
+    
+    /**
      * Get trainer dashboard statistics
      */
     public TrainerDashboardDTO getTrainerDashboard(String companyId, String gigId) {
