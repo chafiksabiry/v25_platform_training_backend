@@ -10,6 +10,8 @@ import com.trainingplatform.domain.entities.GigEntity;
 import com.trainingplatform.domain.entities.IndustryEntity;
 import com.trainingplatform.domain.repositories.GigRepository;
 import com.trainingplatform.domain.repositories.IndustryRepository;
+import com.trainingplatform.infrastructure.repositories.RepProgressRepository;
+import com.trainingplatform.core.entities.RepProgress;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -44,6 +46,9 @@ public class JourneyController {
     
     @Autowired
     private ExamFinalQuizService examFinalQuizService;
+    
+    @Autowired
+    private RepProgressRepository repProgressRepository;
     
     /**
      * GET /journeys
@@ -150,6 +155,37 @@ public class JourneyController {
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             System.err.println("[JourneyController] Error in getAllAvailableJourneysForTrainees: " + e.getMessage());
+            e.printStackTrace();
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("error", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+        }
+    }
+    
+    /**
+     * GET /training_journeys/rep-progress?repId={repId}&journeyId={journeyId}
+     * Get progress for a specific rep and journey
+     */
+    @GetMapping("/rep-progress")
+    public ResponseEntity<?> getRepProgress(
+            @RequestParam String repId,
+            @RequestParam String journeyId) {
+        try {
+            System.out.println("[JourneyController] getRepProgress called with repId: " + repId + ", journeyId: " + journeyId);
+            
+            List<RepProgress> progressList = repProgressRepository.findByRepIdAndJourneyId(repId, journeyId);
+            
+            System.out.println("[JourneyController] Found " + progressList.size() + " progress records");
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("data", progressList);
+            response.put("count", progressList.size());
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            System.err.println("[JourneyController] Error in getRepProgress: " + e.getMessage());
             e.printStackTrace();
             Map<String, Object> errorResponse = new HashMap<>();
             errorResponse.put("success", false);
