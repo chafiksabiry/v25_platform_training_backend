@@ -1641,6 +1641,9 @@ public class JourneyController {
                 if (passingScoreObj instanceof Number) {
                     quiz.setPassingScore(((Number) passingScoreObj).intValue());
                 }
+            } else {
+                // Default passing score is always 70% (percentage)
+                quiz.setPassingScore(70);
             }
             if (quizData.containsKey("timeLimit")) {
                 Object timeLimitObj = quizData.get("timeLimit");
@@ -2023,7 +2026,12 @@ public class JourneyController {
             if (data.containsKey("description")) quiz.setDescription((String) data.get("description"));
             if (data.containsKey("moduleId")) quiz.setModuleId((String) data.get("moduleId"));
             if (data.containsKey("trainingId")) quiz.setTrainingId((String) data.get("trainingId"));
-            if (data.containsKey("passingScore")) quiz.setPassingScore(((Number) data.get("passingScore")).intValue());
+            if (data.containsKey("passingScore")) {
+                quiz.setPassingScore(((Number) data.get("passingScore")).intValue());
+            } else {
+                // Default passing score is always 70% (percentage)
+                quiz.setPassingScore(70);
+            }
             if (data.containsKey("timeLimit")) quiz.setTimeLimit(((Number) data.get("timeLimit")).intValue());
             if (data.containsKey("maxAttempts")) quiz.setMaxAttempts(((Number) data.get("maxAttempts")).intValue());
             if (data.containsKey("questions")) {
