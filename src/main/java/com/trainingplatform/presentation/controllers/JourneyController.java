@@ -184,6 +184,68 @@ public class JourneyController {
                 progressList = repProgressRepository.findByRepId(repId);
             }
             
+            // Verify and correct module completion status based on quiz results
+            for (RepProgress repProgress : progressList) {
+                String currentJourneyId = repProgress.getJourneyId();
+                Optional<TrainingJourneyEntity> journeyOpt = journeyService.getJourneyById(currentJourneyId);
+                
+                if (journeyOpt.isPresent()) {
+                    TrainingJourneyEntity journey = journeyOpt.get();
+                    Map<String, RepProgress.ModuleProgress> modulesMap = repProgress.getModules();
+                    
+                    if (modulesMap != null) {
+                        for (Map.Entry<String, RepProgress.ModuleProgress> entry : modulesMap.entrySet()) {
+                            String moduleId = entry.getKey();
+                            RepProgress.ModuleProgress moduleProgress = entry.getValue();
+                            
+                            // Check if module is marked as completed
+                            if ("completed".equals(moduleProgress.getStatus()) || "finished".equals(moduleProgress.getStatus())) {
+                                // Find the module in the journey
+                                if (journey.getModules() != null) {
+                                    for (TrainingJourneyEntity.TrainingModuleEntity journeyModule : journey.getModules()) {
+                                        String journeyModuleId = journeyModule.get_id();
+                                        if (moduleId.equals(journeyModuleId)) {
+                                            // Check if module has quizzes
+                                            if (journeyModule.getQuizzes() != null && !journeyModule.getQuizzes().isEmpty()) {
+                                                Map<String, RepProgress.QuizResult> quizzResults = moduleProgress.getQuizz();
+                                                if (quizzResults == null || quizzResults.isEmpty()) {
+                                                    // Module has quizzes but no results, cannot be completed
+                                                    System.out.println("[JourneyController] Module " + moduleId + " has quizzes but no quiz results, correcting status to in-progress");
+                                                    moduleProgress.setStatus("in-progress");
+                                                } else {
+                                                    // Check if all quizzes are passed
+                                                    boolean allQuizzesPassed = true;
+                                                    for (TrainingJourneyEntity.QuizEntity quiz : journeyModule.getQuizzes()) {
+                                                        String quizId = quiz.get_id();
+                                                        RepProgress.QuizResult quizResult = quizzResults.get(quizId);
+                                                        if (quizResult == null || quizResult.getPassed() == null || !quizResult.getPassed()) {
+                                                            allQuizzesPassed = false;
+                                                            System.out.println("[JourneyController] Quiz " + quizId + " not passed for module " + moduleId + ", correcting status to in-progress");
+                                                            break;
+                                                        }
+                                                    }
+                                                    
+                                                    if (!allQuizzesPassed) {
+                                                        // Not all quizzes passed, cannot be completed
+                                                        moduleProgress.setStatus("in-progress");
+                                                    }
+                                                }
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Update counters after correcting statuses
+                    repProgress.updateCounters();
+                    // Save corrected progress
+                    repProgressRepository.save(repProgress);
+                }
+            }
+            
             System.out.println("[JourneyController] Found " + progressList.size() + " progress records");
             
             Map<String, Object> response = new HashMap<>();
@@ -998,6 +1060,118 @@ public class JourneyController {
                     Object timeSpentValue = progressData.get("timeSpent");
                     if (timeSpentValue instanceof Number) {
                         moduleProgress.setTimeSpent(((Number) timeSpentValue).intValue());
+                    }
+                }
+                
+                // Update quiz results if provided
+                if (progressData.containsKey("quizz")) {
+                    Object quizzValue = progressData.get("quizz");
+                    if (quizzValue instanceof Map) {
+                        Map<String, Object> quizzMap = (Map<String, Object>) quizzValue;
+                        Map<String, RepProgress.QuizResult> quizzResults = moduleProgress.getQuizz();
+                        if (quizzResults == null) {
+                            quizzResults = new java.util.HashMap<>();
+                            moduleProgress.setQuizz(quizzResults);
+                        }
+                        
+                        // Process each quiz result
+                        for (Map.Entry<String, Object> entry : quizzMap.entrySet()) {
+                            String quizId = entry.getKey();
+                            Object quizData = entry.getValue();
+                            
+                            if (quizData instanceof Map) {
+                                Map<String, Object> quizDataMap = (Map<String, Object>) quizData;
+                                RepProgress.QuizResult quizResult = quizzResults.get(quizId);
+                                
+                                if (quizResult == null) {
+                                    quizResult = new RepProgress.QuizResult();
+                                    quizResult.setQuizId(quizId);
+                                    quizResult.setAttempts(1);
+                                } else {
+                                    // Increment attempts if quiz already exists
+                                    Integer currentAttempts = quizResult.getAttempts();
+                                    quizResult.setAttempts(currentAttempts != null ? currentAttempts + 1 : 1);
+                                }
+                                
+                                // Update quiz result fields
+                                if (quizDataMap.containsKey("score")) {
+                                    Object scoreValue = quizDataMap.get("score");
+                                    if (scoreValue instanceof Number) {
+                                        quizResult.setScore(((Number) scoreValue).intValue());
+                                    }
+                                }
+                                
+                                if (quizDataMap.containsKey("passed")) {
+                                    Object passedValue = quizDataMap.get("passed");
+                                    if (passedValue instanceof Boolean) {
+                                        quizResult.setPassed((Boolean) passedValue);
+                                    }
+                                }
+                                
+                                if (quizDataMap.containsKey("totalQuestions")) {
+                                    Object totalQuestionsValue = quizDataMap.get("totalQuestions");
+                                    if (totalQuestionsValue instanceof Number) {
+                                        quizResult.setTotalQuestions(((Number) totalQuestionsValue).intValue());
+                                    }
+                                }
+                                
+                                if (quizDataMap.containsKey("correctAnswers")) {
+                                    Object correctAnswersValue = quizDataMap.get("correctAnswers");
+                                    if (correctAnswersValue instanceof Number) {
+                                        quizResult.setCorrectAnswers(((Number) correctAnswersValue).intValue());
+                                    }
+                                }
+                                
+                                quizResult.setCompletedAt(java.time.LocalDateTime.now());
+                                quizzResults.put(quizId, quizResult);
+                            }
+                        }
+                    }
+                }
+                
+                // Verify that module can only be marked as completed if all quizzes are passed
+                if ("completed".equals(moduleProgress.getStatus()) || "finished".equals(moduleProgress.getStatus())) {
+                    // Check if module has quizzes that need to be passed
+                    Optional<TrainingJourneyEntity> journeyOpt = journeyService.getJourneyById(journeyId);
+                    if (journeyOpt.isPresent()) {
+                        TrainingJourneyEntity journey = journeyOpt.get();
+                        List<TrainingJourneyEntity.TrainingModuleEntity> journeyModules = journey.getModules();
+                        
+                        if (journeyModules != null) {
+                            for (TrainingJourneyEntity.TrainingModuleEntity journeyModule : journeyModules) {
+                                String journeyModuleId = journeyModule.get_id();
+                                if (moduleId.equals(journeyModuleId)) {
+                                    // Check if module has quizzes
+                                    if (journeyModule.getQuizzes() != null && !journeyModule.getQuizzes().isEmpty()) {
+                                        Map<String, RepProgress.QuizResult> quizzResults = moduleProgress.getQuizz();
+                                        if (quizzResults == null || quizzResults.isEmpty()) {
+                                            // Module has quizzes but no results, cannot be completed
+                                            System.out.println("[JourneyController] Module " + moduleId + " has quizzes but no quiz results, cannot be completed");
+                                            moduleProgress.setStatus("in-progress");
+                                        } else {
+                                            // Check if all quizzes are passed
+                                            boolean allQuizzesPassed = true;
+                                            for (TrainingJourneyEntity.QuizEntity quiz : journeyModule.getQuizzes()) {
+                                                String quizId = quiz.get_id();
+                                                RepProgress.QuizResult quizResult = quizzResults.get(quizId);
+                                                if (quizResult == null || quizResult.getPassed() == null || !quizResult.getPassed()) {
+                                                    allQuizzesPassed = false;
+                                                    System.out.println("[JourneyController] Quiz " + quizId + " not passed for module " + moduleId);
+                                                    break;
+                                                }
+                                            }
+                                            
+                                            if (!allQuizzesPassed) {
+                                                // Not all quizzes passed, cannot be completed
+                                                System.out.println("[JourneyController] Not all quizzes passed for module " + moduleId + ", cannot be completed");
+                                                moduleProgress.setStatus("in-progress");
+                                            }
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
                     }
                 }
                 
