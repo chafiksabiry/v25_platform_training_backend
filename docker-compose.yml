@@ -25,7 +25,7 @@ services:
       - "5190:5190"
     environment:
       VITE_API_URL: https://v25platformtrainingbackend-production.up.railway.app
-      NEXT_PUBLIC_API_URL: https://v25platformtrainingbackend-production.up.railway.app
+      NEXT_PUBLIC_API_URL: https://harxv25trainingplatformfrontend.netlify.app
     depends_on:
       - api
     networks:
