@@ -405,4 +405,68 @@ public class AIController {
             return ResponseEntity.badRequest().body(response);
         }
     }
+    
+    /**
+     * Generate curriculum structure from files
+     */
+    @PostMapping("/generate-curriculum")
+    public ResponseEntity<Map<String, Object>> generateCurriculum(@RequestBody GenerateCurriculumRequest request) {
+        Map<String, Object> response = new HashMap<>();
+        
+        try {
+            log.info("Generating curriculum for training with {} files", 
+                request.getFiles() != null ? request.getFiles().size() : 0);
+            
+            // Convert request files to AIService.FileInfo
+            List<AIService.FileInfo> files = request.getFiles() != null
+                ? request.getFiles().stream()
+                    .map(f -> new AIService.FileInfo(f.getName(), f.getType(), f.getUrl(), f.getPublicId()))
+                    .toList()
+                : List.of();
+            
+            // For now, return a simple curriculum structure
+            // In a real implementation, this would use AI to analyze files and create modules
+            Map<String, Object> curriculum = new HashMap<>();
+            curriculum.put("title", request.getTitle() != null ? request.getTitle() : "Training Curriculum");
+            curriculum.put("description", request.getDescription() != null ? request.getDescription() : "Generated curriculum");
+            curriculum.put("totalModules", files.size());
+            curriculum.put("estimatedDuration", files.size() * 60); // 60 minutes per file
+            
+            response.put("success", true);
+            response.put("curriculum", curriculum);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error generating curriculum: {}", e.getMessage(), e);
+            response.put("success", false);
+            response.put("error", "Error generating curriculum: " + e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+    
+    public static class GenerateCurriculumRequest {
+        private String title;
+        private String description;
+        private List<FileInfoRequest> files;
+        private String companyName;
+        private String industry;
+        private String gig;
+
+        public String getTitle() { return title; }
+        public void setTitle(String title) { this.title = title; }
+
+        public String getDescription() { return description; }
+        public void setDescription(String description) { this.description = description; }
+
+        public List<FileInfoRequest> getFiles() { return files; }
+        public void setFiles(List<FileInfoRequest> files) { this.files = files; }
+
+        public String getCompanyName() { return companyName; }
+        public void setCompanyName(String companyName) { this.companyName = companyName; }
+
+        public String getIndustry() { return industry; }
+        public void setIndustry(String industry) { this.industry = industry; }
+
+        public String getGig() { return gig; }
+        public void setGig(String gig) { this.gig = gig; }
+    }
 }
