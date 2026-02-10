@@ -42,13 +42,13 @@ app:
   # AI Services Configuration
   ai:
     openai:
-      api-key: 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
+      api-key: ${OPENAI_API_KEY}
       model: gpt-4
       temperature: 0.7
       max-tokens: 2000
     
     elevenlabs:
-      api-key: sk_ff1e58c1dae1951e36851d8a441ffaf0134a09775183c270
+      api-key: ${ELEVENLABS_API_KEY}
       voice-id: 21m00Tcm4TlvDq8ikWAM
       model: eleven_monolingual_v1
 
