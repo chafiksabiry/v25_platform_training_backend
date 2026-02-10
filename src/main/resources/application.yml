@@ -12,7 +12,7 @@ spring:
   
   data:
     mongodb:
-      uri: mongodb://harx:gcZ62rl8hoME@38.242.208.242:27018/V25_CompanySearchWizard
+      uri: mongodb://mongo:DiGaBWUZXCkIxlZMuntztBaFJcOlUJIg@maglev.proxy.rlwy.net:40270/harx?authSource=admin
       database: V25_CompanySearchWizard
   
   servlet:
