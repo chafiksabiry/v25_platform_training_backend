@@ -298,13 +298,26 @@ public class AIController {
         Map<String, Object> response = new HashMap<>();
         
         try {
-            log.info("Generating final exam with {} questions for training {}", 
-                request.getNumberOfQuestions(), request.getTrainingId());
+            log.info("Generating final exam with {} questions for training {}. Modules provided: {}, Title: {}", 
+                request.getNumberOfQuestions(), request.getTrainingId(), 
+                request.getModules() != null ? request.getModules().size() : 0,
+                request.getFormationTitle());
             
-            Map<String, Object> result = aiService.generateFinalExam(
+            Map<String, Object> result;
+            if (request.getModules() != null && !request.getModules().isEmpty()) {
+                // Generate exam from provided modules metadata
+                result = aiService.generateFinalExamFromModules(
+                    request.getModules(),
+                    request.getFormationTitle(),
+                    request.getNumberOfQuestions()
+                );
+            } else {
+                // Generate exam from trainingId
+                result = aiService.generateFinalExam(
                     request.getTrainingId(),
                     request.getNumberOfQuestions()
-            );
+                );
+            }
             
             response.put("success", true);
             response.put("data", result);
@@ -351,12 +364,20 @@ public class AIController {
     public static class GenerateFinalExamRequest {
         private String trainingId;
         private int numberOfQuestions;
+        private List<Map<String, Object>> modules;
+        private String formationTitle;
 
         public String getTrainingId() { return trainingId; }
         public void setTrainingId(String trainingId) { this.trainingId = trainingId; }
 
         public int getNumberOfQuestions() { return numberOfQuestions; }
         public void setNumberOfQuestions(int numberOfQuestions) { this.numberOfQuestions = numberOfQuestions; }
+
+        public List<Map<String, Object>> getModules() { return modules; }
+        public void setModules(List<Map<String, Object>> modules) { this.modules = modules; }
+
+        public String getFormationTitle() { return formationTitle; }
+        public void setFormationTitle(String formationTitle) { this.formationTitle = formationTitle; }
     }
     
     /**

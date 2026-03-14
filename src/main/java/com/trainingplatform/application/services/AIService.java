@@ -1009,6 +1009,63 @@ public class AIService {
         // With ~500 tokens for prompt, we can safely use 4000 tokens for completion
         return callOpenAI(prompt.toString(), 4000);
     }
+
+    /**
+     * Generate a final exam based on provided modules metadata (titles and descriptions)
+     */
+    public Map<String, Object> generateFinalExamFromModules(List<Map<String, Object>> modules, String formationTitle, int numberOfQuestions) throws Exception {
+        if (!checkAIAvailability()) {
+            throw new RuntimeException("AI service is not available");
+        }
+
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("Create a comprehensive final exam for a professional training. Be CONCISE in JSON.\n\n");
+        
+        prompt.append("TRAINING: ").append(formationTitle != null ? formationTitle : "Professional Training").append("\n\n");
+        
+        prompt.append("MODULES:\n");
+        for (int i = 0; i < modules.size(); i++) {
+            Map<String, Object> module = modules.get(i);
+            prompt.append(String.format("%d. %s\n", (i + 1), module.get("title")));
+            if (module.get("description") != null) {
+                prompt.append("   Desc: ").append(module.get("description")).append("\n");
+            }
+            @SuppressWarnings("unchecked")
+            List<String> objectives = (List<String>) module.get("learningObjectives");
+            if (objectives != null && !objectives.isEmpty()) {
+                prompt.append("   Obj: ").append(String.join(", ", objectives.subList(0, Math.min(objectives.size(), 3)))).append("\n");
+            }
+        }
+        
+        prompt.append("\nEXAM: ").append(numberOfQuestions).append(" questions\n");
+        prompt.append("- Mix types: multiple-choice (4 options), true-false\n");
+        prompt.append("- Difficulty: 30% easy, 50% medium, 20% hard\n");
+        prompt.append("- Distribute questions equally across all modules\n");
+        prompt.append("- Explanations: VERY SHORT (max 15 words)\n\n");
+        
+        prompt.append("JSON format (Return EXACTLY this structure):\n");
+        prompt.append("{\n");
+        prompt.append("  \"questionCount\": ").append(numberOfQuestions).append(",\n");
+        prompt.append("  \"totalPoints\": ").append(numberOfQuestions * 10).append(",\n");
+        prompt.append("  \"passingScore\": 70,\n");
+        prompt.append("  \"duration\": ").append(numberOfQuestions * 1.5).append(",\n");
+        prompt.append("  \"questions\": [\n");
+        prompt.append("    {\n");
+        prompt.append("      \"id\": \"q1\",\n");
+        prompt.append("      \"text\": \"Question text?\",\n");
+        prompt.append("      \"type\": \"multiple-choice\",\n");
+        prompt.append("      \"options\": [\"Opt1\", \"Opt2\", \"Opt3\", \"Opt4\"],\n");
+        prompt.append("      \"correctAnswer\": 0,\n");
+        prompt.append("      \"explanation\": \"Short reason.\",\n");
+        prompt.append("      \"points\": 10,\n");
+        prompt.append("      \"moduleTitle\": \"Module Name\"\n");
+        prompt.append("    }\n");
+        prompt.append("  ]\n");
+        prompt.append("}\n\n");
+        prompt.append("CRITICAL: Return ONLY JSON. Keep it concise to avoid truncation.\n");
+
+        return callOpenAI(prompt.toString(), 4000);
+    }
     
     /**
      * Analyze a document with AI to extract key topics, learning objectives, etc.
