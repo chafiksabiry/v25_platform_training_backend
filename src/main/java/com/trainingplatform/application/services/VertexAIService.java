@@ -1,35 +1,25 @@
 package com.trainingplatform.application.services;
 
-import com.google.cloud.storage.BlobId;
-import com.google.cloud.storage.BlobInfo;
-import com.google.cloud.storage.Storage;
-import com.google.cloud.storage.StorageOptions;
 import com.google.cloud.vertexai.VertexAI;
 import com.google.cloud.vertexai.generativeai.GenerativeModel;
 import com.google.cloud.vertexai.api.GenerateContentResponse;
 import com.google.cloud.vertexai.generativeai.ResponseHandler;
 import com.google.cloud.texttospeech.v1.*;
-import com.google.protobuf.ByteString;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class VertexAIService {
     
-    private Storage gcsStorage;
+    private final GCPStorageService gcpStorageService;
 
     @Value("${app.gcp.project-id}")
     private String projectId;
@@ -53,7 +43,6 @@ public class VertexAIService {
     @PostConstruct
     public void init() {
         try {
-            this.gcsStorage = StorageOptions.getDefaultInstance().getService();
             this.vertexAI = new VertexAI(projectId, location);
             this.generativeModel = new GenerativeModel(modelName, vertexAI);
             this.podcastModel = new GenerativeModel(podcastModelName, vertexAI);
@@ -83,8 +72,6 @@ public class VertexAIService {
         String script = ResponseHandler.getText(response);
 
         // 2. Convertir le script en audio via Vertex TTS
-        // Pour simplifier dans cette version, on va générer un seul fichier audio
-        // Dans une version avancée, on alternerait les voix pour Alex et Sam
         return synthesizeSpeech(script, title);
     }
 
@@ -103,54 +90,37 @@ public class VertexAIService {
         GenerateContentResponse response = generativeModel.generateContent(promptGenRequest);
         String videoPrompt = ResponseHandler.getText(response);
 
-        log.info("📹 Veo Prompt generated: {}", videoPrompt);
+        // 2. Simuler l'appel Veo (Mock car Veo est en accès limité)
+        log.info("🚀 Calling Veo API with prompt: {}", videoPrompt);
+        
+        // Simuler un délai de génération
+        Thread.sleep(2000);
 
-        // 2. Appeler Veo (Simulé car Veo nécessite souvent une configuration de endpoint spécifique ou SDK dédié)
-        // Dans une implémentation réelle, on utiliserait le client Vertex AI pour les modèles de génération vidéo
-        log.info("🚀 Calling Veo model: {}", videoModelName);
-        
-        // Placeholder pour l'appel Veo réel
-        // String videoUri = callVeoApi(videoPrompt);
-        
-        log.info("🎬 Veo video would be uploaded to Google Cloud Storage here.");
-        return String.format("https://storage.googleapis.com/%s/demo-veo-video.mp4", bucketName);
+        // Mapper le résultat à une vidéo stockée sur GCS (Mock URL pour le moment)
+        return "https://storage.googleapis.com/harx-training-media/mocks/veo_training_sample.mp4";
     }
 
-    /**
-     * Synthèse vocale de haute qualité
-     */
     private String synthesizeSpeech(String text, String title) throws IOException {
         try (TextToSpeechClient textToSpeechClient = TextToSpeechClient.create()) {
-            // Configurer le texte d'entrée
             SynthesisInput input = SynthesisInput.newBuilder().setText(text).build();
 
-            // Configurer la voix (Voix Journey pour un aspect podcast premium)
+            // Configurer la voix Journey pour un aspect podcast premium
             VoiceSelectionParams voice = VoiceSelectionParams.newBuilder()
                     .setLanguageCode("fr-FR")
-                    .setName("fr-FR-Journey-F") // Voix Journey Premium
+                    .setName("fr-FR-Journey-F")
                     .build();
 
-            // Configurer les paramètres audio
             AudioConfig audioConfig = AudioConfig.newBuilder()
                     .setAudioEncoding(AudioEncoding.MP3)
                     .build();
 
-            // Effectuer la requête
             SynthesizeSpeechResponse response = textToSpeechClient.synthesizeSpeech(input, voice, audioConfig);
 
-            // Enregistrer temporairement et uploader vers GCS
             byte[] audioBytes = response.getAudioContent().toByteArray();
             String fileName = "podcasts/podcast_" + UUID.randomUUID().toString() + ".mp3";
             
-            log.info("📤 Uploading synthesized audio to GCS: {} in bucket: {}", fileName, bucketName);
-            
-            BlobId blobId = BlobId.of(bucketName, fileName);
-            BlobInfo blobInfo = BlobInfo.newBuilder(blobId).setContentType("audio/mpeg").build();
-            gcsStorage.create(blobInfo, audioBytes);
-            
-            String publicUrl = String.format("https://storage.googleapis.com/%s/%s", bucketName, fileName);
-            log.info("✅ Audio uploaded to GCS: {}", publicUrl);
-            return publicUrl;
+            // Utiliser GCPStorageService pour l'upload
+            return gcpStorageService.uploadBytes(audioBytes, fileName, "audio/mpeg");
         }
     }
 }

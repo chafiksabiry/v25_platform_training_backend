@@ -24,7 +24,7 @@ public class ManualTrainingService {
     private final ManualTrainingRepository trainingRepository;
     private final ManualTrainingModuleRepository moduleRepository;
     private final ManualQuizRepository quizRepository;
-    private final CloudinaryService cloudinaryService;
+    private final GCPStorageService gcpStorageService;
     
     /**
      * Create a new manual training
@@ -83,12 +83,9 @@ public class ManualTrainingService {
     public ManualTraining uploadThumbnail(String id, MultipartFile file) throws IOException {
         ManualTraining training = getTrainingById(id);
         
-        CloudinaryService.CloudinaryUploadResult result = cloudinaryService.uploadImage(
-            file, 
-            "trainings/thumbnails"
-        );
+        String url = gcpStorageService.uploadFile(file, "trainings/thumbnails");
         
-        training.setThumbnail(result.getUrl());
+        training.setThumbnail(url);
         training.setUpdatedAt(LocalDateTime.now());
         
         log.info("Uploaded thumbnail for training: {}", id);

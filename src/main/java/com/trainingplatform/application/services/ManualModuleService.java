@@ -21,7 +21,7 @@ public class ManualModuleService {
     
     private final ManualTrainingModuleRepository moduleRepository;
     private final ManualQuizRepository quizRepository;
-    private final CloudinaryService cloudinaryService;
+    private final GCPStorageService gcpStorageService;
     
     /**
      * Create a new module
@@ -132,19 +132,19 @@ public class ManualModuleService {
      * Upload file for section
      */
     public ManualTrainingModule.ContentFile uploadFile(MultipartFile file, String fileType) throws IOException {
-        CloudinaryService.CloudinaryUploadResult result;
+        GCPStorageService.GCSUploadResult result;
         
         switch (fileType.toLowerCase()) {
             case "video":
-                result = cloudinaryService.uploadVideo(file, "trainings/videos");
+                result = gcpStorageService.uploadGeneric(file, "trainings/videos");
                 break;
             case "image":
-                result = cloudinaryService.uploadImage(file, "trainings/images");
+                result = gcpStorageService.uploadGeneric(file, "trainings/images");
                 break;
             case "document":
             case "pdf":
             case "word":
-                result = cloudinaryService.uploadDocument(file, "trainings/documents");
+                result = gcpStorageService.uploadGeneric(file, "trainings/documents");
                 break;
             default:
                 throw new IOException("Unsupported file type: " + fileType);
