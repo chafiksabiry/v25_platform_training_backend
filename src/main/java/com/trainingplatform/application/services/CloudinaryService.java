@@ -78,6 +78,47 @@ public class CloudinaryService {
         
         return uploadFile(file, params);
     }
+
+    /**
+     * Upload raw bytes to Cloudinary
+     */
+    public CloudinaryUploadResult uploadBytes(byte[] bytes, String fileName, String folder, String resourceType) throws IOException {
+        Map<String, Object> params = new HashMap<>();
+        params.put("folder", folder);
+        params.put("resource_type", resourceType);
+        if (resourceType.equals("video") || resourceType.equals("audio")) {
+            params.put("upload_preset", trainingContentPreset);
+        } else if (resourceType.equals("image")) {
+            params.put("upload_preset", trainingImagesPreset);
+        }
+
+        try {
+            String publicId = UUID.randomUUID().toString();
+            params.put("public_id", publicId);
+            
+            log.info("Uploading bytes to Cloudinary: {} (size: {} bytes)", fileName, bytes.length);
+            
+            Map uploadResult = cloudinary.uploader().upload(bytes, params);
+            
+            log.info("Bytes uploaded successfully: {}", uploadResult.get("secure_url"));
+            
+            return CloudinaryUploadResult.builder()
+                .publicId((String) uploadResult.get("public_id"))
+                .url((String) uploadResult.get("secure_url"))
+                .format((String) uploadResult.get("format"))
+                .resourceType((String) uploadResult.get("resource_type"))
+                .bytes(((Number) uploadResult.get("bytes")).longValue())
+                .width(uploadResult.get("width") != null ? ((Number) uploadResult.get("width")).intValue() : null)
+                .height(uploadResult.get("height") != null ? ((Number) uploadResult.get("height")).intValue() : null)
+                .duration(uploadResult.get("duration") != null ? ((Number) uploadResult.get("duration")).doubleValue() : null)
+                .thumbnailUrl(generateThumbnailUrl((String) uploadResult.get("public_id"), (String) uploadResult.get("resource_type")))
+                .build();
+                
+        } catch (IOException e) {
+            log.error("Error uploading bytes to Cloudinary: {}", e.getMessage(), e);
+            throw new IOException("Failed to upload bytes to Cloudinary: " + e.getMessage(), e);
+        }
+    }
     
     /**
      * Upload any file to Cloudinary

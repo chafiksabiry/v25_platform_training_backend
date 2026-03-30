@@ -8,6 +8,7 @@ import com.google.cloud.texttospeech.v1.*;
 import com.google.protobuf.ByteString;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -24,6 +25,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 @Slf4j
 public class VertexAIService {
+    
+    private final CloudinaryService cloudinaryService;
 
     @Value("${app.gcp.project-id}")
     private String projectId;
@@ -105,8 +108,9 @@ public class VertexAIService {
         // Placeholder pour l'appel Veo réel
         // String videoUri = callVeoApi(videoPrompt);
         
-        // Mock URL pour la démo
-        return "https://storage.googleapis.com/harx-public-assets/demo-veo-video.mp4";
+        // Mock URL ou upload vers Cloudinary si on avait des octets
+        log.info("🎬 Veo video would be uploaded to Cloudinary here.");
+        return "https://res.cloudinary.com/harx/video/upload/demo-veo-video.mp4";
     }
 
     /**
@@ -131,15 +135,20 @@ public class VertexAIService {
             // Effectuer la requête
             SynthesizeSpeechResponse response = textToSpeechClient.synthesizeSpeech(input, voice, audioConfig);
 
-            // Enregistrer temporairement (ou uploader vers GCS/Cloudinary)
-            ByteString audioContents = response.getAudioContent();
+            // Enregistrer temporairement et uploader vers Cloudinary
+            byte[] audioBytes = response.getAudioContent().toByteArray();
             String fileName = "podcast_" + UUID.randomUUID().toString() + ".mp3";
             
-            // Note: Normalement on uploaderait vers Cloudinary ici
-            log.info("✅ Audio synthesized successfully: {}", fileName);
+            log.info("📤 Uploading synthesized audio to Cloudinary: {}", fileName);
+            CloudinaryService.CloudinaryUploadResult uploadResult = cloudinaryService.uploadBytes(
+                audioBytes, 
+                fileName, 
+                "training/podcasts", 
+                "video" // Cloudinary traite l'audio comme "video" pour le type de ressource
+            );
             
-            // Simuler une URL publique
-            return "https://storage.googleapis.com/harx-training-media/" + fileName;
+            log.info("✅ Audio uploaded to Cloudinary: {}", uploadResult.getUrl());
+            return uploadResult.getUrl();
         }
     }
 }
