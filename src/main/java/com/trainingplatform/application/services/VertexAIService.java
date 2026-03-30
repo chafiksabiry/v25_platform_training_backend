@@ -1,5 +1,9 @@
 package com.trainingplatform.application.services;
 
+import com.google.cloud.storage.BlobId;
+import com.google.cloud.storage.BlobInfo;
+import com.google.cloud.storage.Storage;
+import com.google.cloud.storage.StorageOptions;
 import com.google.cloud.vertexai.VertexAI;
 import com.google.cloud.vertexai.generativeai.GenerativeModel;
 import com.google.cloud.vertexai.api.GenerateContentResponse;
@@ -22,11 +26,10 @@ import java.util.Map;
 import java.util.UUID;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class VertexAIService {
     
-    private final CloudinaryService cloudinaryService;
+    private Storage gcsStorage;
 
     @Value("${app.gcp.project-id}")
     private String projectId;
@@ -50,6 +53,7 @@ public class VertexAIService {
     @PostConstruct
     public void init() {
         try {
+            this.gcsStorage = StorageOptions.getDefaultInstance().getService();
             this.vertexAI = new VertexAI(projectId, location);
             this.generativeModel = new GenerativeModel(modelName, vertexAI);
             this.podcastModel = new GenerativeModel(podcastModelName, vertexAI);
@@ -108,9 +112,8 @@ public class VertexAIService {
         // Placeholder pour l'appel Veo réel
         // String videoUri = callVeoApi(videoPrompt);
         
-        // Mock URL ou upload vers Cloudinary si on avait des octets
-        log.info("🎬 Veo video would be uploaded to Cloudinary here.");
-        return "https://res.cloudinary.com/harx/video/upload/demo-veo-video.mp4";
+        log.info("🎬 Veo video would be uploaded to Google Cloud Storage here.");
+        return String.format("https://storage.googleapis.com/%s/demo-veo-video.mp4", bucketName);
     }
 
     /**
@@ -135,20 +138,19 @@ public class VertexAIService {
             // Effectuer la requête
             SynthesizeSpeechResponse response = textToSpeechClient.synthesizeSpeech(input, voice, audioConfig);
 
-            // Enregistrer temporairement et uploader vers Cloudinary
+            // Enregistrer temporairement et uploader vers GCS
             byte[] audioBytes = response.getAudioContent().toByteArray();
-            String fileName = "podcast_" + UUID.randomUUID().toString() + ".mp3";
+            String fileName = "podcasts/podcast_" + UUID.randomUUID().toString() + ".mp3";
             
-            log.info("📤 Uploading synthesized audio to Cloudinary: {}", fileName);
-            CloudinaryService.CloudinaryUploadResult uploadResult = cloudinaryService.uploadBytes(
-                audioBytes, 
-                fileName, 
-                "training/podcasts", 
-                "video" // Cloudinary traite l'audio comme "video" pour le type de ressource
-            );
+            log.info("📤 Uploading synthesized audio to GCS: {} in bucket: {}", fileName, bucketName);
             
-            log.info("✅ Audio uploaded to Cloudinary: {}", uploadResult.getUrl());
-            return uploadResult.getUrl();
+            BlobId blobId = BlobId.of(bucketName, fileName);
+            BlobInfo blobInfo = BlobInfo.newBuilder(blobId).setContentType("audio/mpeg").build();
+            gcsStorage.create(blobInfo, audioBytes);
+            
+            String publicUrl = String.format("https://storage.googleapis.com/%s/%s", bucketName, fileName);
+            log.info("✅ Audio uploaded to GCS: {}", publicUrl);
+            return publicUrl;
         }
     }
 }
