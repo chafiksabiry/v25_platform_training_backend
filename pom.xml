@@ -176,6 +176,23 @@
             <scope>runtime</scope>
             <optional>true</optional>
         </dependency>
+
+        <!-- Google Cloud Libraries -->
+        <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>google-cloud-vertexai</artifactId>
+            <version>1.4.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>google-cloud-texttospeech</artifactId>
+            <version>2.37.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>google-cloud-storage</artifactId>
+            <version>2.35.0</version>
+        </dependency>
     </dependencies>
 
     <build>

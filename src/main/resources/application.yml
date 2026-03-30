@@ -65,6 +65,18 @@ app:
       image-size-mb: ${CLOUDINARY_IMAGE_LIMIT_SIZE_MB:10}
       document-size-mb: ${CLOUDINARY_DOCUMENT_LIMIT_SIZE_MB:50}
       video-size-mb: ${CLOUDINARY_VIDEO_LIMIT_SIZE_MB:100}
+    
+  # Google Cloud Vertex AI & Veo Configuration
+  gcp:
+    project-id: ${GOOGLE_CLOUD_PROJECT:harx-technologies-inc}
+    location: ${GOOGLE_CLOUD_LOCATION:us-central1}
+    credentials-path: ${GOOGLE_APPLICATION_CREDENTIALS:./config/vertex-service-account.json}
+    vertex-ai:
+      model: ${VERTEX_AI_MODEL:gemini-1.5-flash}
+      video-model: ${VERTEX_AI_VIDEO_MODEL:veo-001}
+      podcast-model: ${VERTEX_AI_PODCAST_MODEL:gemini-1.5-pro}
+    storage:
+      bucket-name: ${GOOGLE_CLOUD_STORAGE_BUCKET:harx-training-media}
 
 logging:
   level:

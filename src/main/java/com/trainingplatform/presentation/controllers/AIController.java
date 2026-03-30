@@ -19,6 +19,7 @@ import java.util.Map;
 public class AIController {
     
     private final AIService aiService;
+    private final VertexAIService vertexAIService;
     
     @GetMapping("/check-availability")
     public ResponseEntity<Map<String, Object>> checkAIAvailability() {
@@ -489,5 +490,52 @@ public class AIController {
 
         public String getGig() { return gig; }
         public void setGig(String gig) { this.gig = gig; }
+    }
+    /**
+     * Generate a professional AI Podcast from resource content using Vertex AI
+     */
+    @PostMapping("/generate-podcast")
+    public ResponseEntity<Map<String, Object>> generatePodcast(@RequestBody Map<String, String> request) {
+        Map<String, Object> response = new HashMap<>();
+        try {
+            String title = request.get("title");
+            String content = request.get("content");
+            log.info("🎙️ Request for AI Podcast: {}", title);
+            
+            String audioUrl = vertexAIService.generatePodcast(title, content);
+            
+            response.put("success", true);
+            response.put("audioUrl", audioUrl);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("❌ Error generating AI Podcast: {}", e.getMessage());
+            response.put("success", false);
+            response.put("error", "Podcast generation failed: " + e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    /**
+     * Generate a high-quality video using Google Veo model
+     */
+    @PostMapping("/generate-veo-video")
+    public ResponseEntity<Map<String, Object>> generateVeoVideo(@RequestBody Map<String, String> request) {
+        Map<String, Object> response = new HashMap<>();
+        try {
+            String title = request.get("title");
+            String content = request.get("content");
+            log.info("🎬 Request for Veo Video: {}", title);
+            
+            String videoUrl = vertexAIService.generateVeoVideo(title, content);
+            
+            response.put("success", true);
+            response.put("videoUrl", videoUrl);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("❌ Error generating Veo Video: {}", e.getMessage());
+            response.put("success", false);
+            response.put("error", "Veo video generation failed: " + e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
     }
 }

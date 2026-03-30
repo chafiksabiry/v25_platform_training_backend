@@ -1064,7 +1064,23 @@ public class AIService {
         prompt.append("}\n\n");
         prompt.append("CRITICAL: Return ONLY JSON. Keep it concise to avoid truncation.\n");
 
-        return callOpenAI(prompt.toString(), 4000);
+        Map<String, Object> response = callOpenAI(prompt.toString(), 4000);
+        
+        // Robustness: ensure we have camelCase keys
+        Map<String, Object> normalized = new HashMap<>();
+        for (Map.Entry<String, Object> entry : response.entrySet()) {
+            String key = entry.getKey();
+            Object value = entry.getValue();
+            
+            // Normalize common keys: snake_case -> camelCase
+            if (key.equals("question_count")) key = "questionCount";
+            else if (key.equals("total_points")) key = "totalPoints";
+            else if (key.equals("passing_score")) key = "passingScore";
+            
+            normalized.put(key, value);
+        }
+        
+        return normalized;
     }
     
     /**
