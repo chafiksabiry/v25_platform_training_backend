@@ -81,6 +81,29 @@ public class GCPStorageService {
         return fileName.substring(fileName.lastIndexOf(".") + 1);
     }
 
+    /**
+     * Delete a file from GCS by its URL or publicId
+     */
+    public void deleteFile(String urlOrPublicId, String ignoredResourceType) {
+        try {
+            if (urlOrPublicId == null) return;
+            String objectName = urlOrPublicId;
+            // If it's a full URL, extract the path after the bucket name
+            if (urlOrPublicId.contains(bucketName)) {
+                objectName = urlOrPublicId.substring(urlOrPublicId.indexOf(bucketName) + bucketName.length() + 1);
+            }
+            BlobId blobId = BlobId.of(bucketName, objectName);
+            boolean deleted = storage.delete(blobId);
+            if (deleted) {
+                log.info("Deleted file from GCS: {}", objectName);
+            } else {
+                log.warn("File not found or couldn't be deleted in GCS: {}", objectName);
+            }
+        } catch (Exception e) {
+            log.error("Failed to delete file from GCS: {}", e.getMessage());
+        }
+    }
+
     @lombok.Builder
     @lombok.Getter
     public static class GCSUploadResult {

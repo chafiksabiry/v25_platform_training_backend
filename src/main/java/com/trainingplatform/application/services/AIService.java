@@ -686,7 +686,7 @@ public class AIService {
                 return String.format("[%s file - content analysis not applicable]", fileType.toUpperCase());
             }
             
-            // Download file from Cloudinary
+            // Download file from GCS
             ResponseEntity<byte[]> response = restTemplate.getForEntity(file.getUrl(), byte[].class);
             byte[] fileBytes = response.getBody();
             

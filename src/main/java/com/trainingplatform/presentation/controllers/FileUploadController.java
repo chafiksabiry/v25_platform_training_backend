@@ -1,6 +1,6 @@
 package com.trainingplatform.presentation.controllers;
 
-import com.trainingplatform.application.services.CloudinaryService;
+import com.trainingplatform.application.services.GCPStorageService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -15,14 +15,14 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class FileUploadController {
 
-    private final CloudinaryService cloudinaryService;
+    private final GCPStorageService gcpStorageService;
 
     @PostMapping("/image")
     public ResponseEntity<Map<String, Object>> uploadImage(
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "folder", defaultValue = "trainings/images") String folder) {
         try {
-            CloudinaryService.CloudinaryUploadResult result = cloudinaryService.uploadImage(file, folder);
+            GCPStorageService.GCSUploadResult result = gcpStorageService.uploadGeneric(file, folder);
             return ResponseEntity.ok(convertToMap(result));
         } catch (Exception e) {
             Map<String, Object> error = new HashMap<>();
@@ -36,7 +36,7 @@ public class FileUploadController {
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "folder", defaultValue = "trainings/videos") String folder) {
         try {
-            CloudinaryService.CloudinaryUploadResult result = cloudinaryService.uploadVideo(file, folder);
+            GCPStorageService.GCSUploadResult result = gcpStorageService.uploadGeneric(file, folder);
             return ResponseEntity.ok(convertToMap(result));
         } catch (Exception e) {
             Map<String, Object> error = new HashMap<>();
@@ -50,7 +50,7 @@ public class FileUploadController {
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "folder", defaultValue = "trainings/documents") String folder) {
         try {
-            CloudinaryService.CloudinaryUploadResult result = cloudinaryService.uploadDocument(file, folder);
+            GCPStorageService.GCSUploadResult result = gcpStorageService.uploadGeneric(file, folder);
             return ResponseEntity.ok(convertToMap(result));
         } catch (Exception e) {
             Map<String, Object> error = new HashMap<>();
@@ -64,7 +64,7 @@ public class FileUploadController {
             @PathVariable String publicId,
             @RequestParam String resourceType) {
         try {
-            cloudinaryService.deleteFile(publicId, resourceType);
+            gcpStorageService.deleteFile(publicId, resourceType);
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);
             response.put("message", "File deleted successfully");
@@ -76,18 +76,18 @@ public class FileUploadController {
         }
     }
 
-    private Map<String, Object> convertToMap(CloudinaryService.CloudinaryUploadResult result) {
+    private Map<String, Object> convertToMap(GCPStorageService.GCSUploadResult result) {
         Map<String, Object> map = new HashMap<>();
         map.put("publicId", result.getPublicId());
         map.put("url", result.getUrl());
         map.put("secureUrl", result.getUrl());
         map.put("format", result.getFormat());
-        map.put("resourceType", result.getResourceType());
+        map.put("resourceType", "auto");
         map.put("bytes", result.getBytes());
-        map.put("width", result.getWidth());
-        map.put("height", result.getHeight());
-        map.put("duration", result.getDuration());
-        map.put("thumbnailUrl", result.getThumbnailUrl());
+        map.put("width", result.getWidth() != null ? result.getWidth() : 0);
+        map.put("height", result.getHeight() != null ? result.getHeight() : 0);
+        map.put("duration", result.getDuration() != null ? result.getDuration() : 0.0);
+        map.put("thumbnailUrl", result.getThumbnailUrl() != null ? result.getThumbnailUrl() : result.getUrl());
         return map;
     }
 }

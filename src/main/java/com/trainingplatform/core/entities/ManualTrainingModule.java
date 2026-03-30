@@ -69,8 +69,8 @@ public class ManualTrainingModule {
         private String id;
         private String name;
         private String type; // video, pdf, word, image
-        private String url; // Cloudinary URL
-        private String publicId; // Cloudinary public ID
+        private String url; // GCS URL
+        private String publicId; // GCS public ID
         private String thumbnailUrl;
         private Long size; // in bytes
         private String mimeType;
