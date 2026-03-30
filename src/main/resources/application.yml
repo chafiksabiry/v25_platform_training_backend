@@ -76,7 +76,7 @@ app:
       video-model: ${VERTEX_AI_VIDEO_MODEL:veo-001}
       podcast-model: ${VERTEX_AI_PODCAST_MODEL:gemini-1.5-pro}
     storage:
-      bucket-name: ${GOOGLE_CLOUD_STORAGE_BUCKET:harx-training-media}
+      bucket-name: harx-training-media
 
 logging:
   level:
