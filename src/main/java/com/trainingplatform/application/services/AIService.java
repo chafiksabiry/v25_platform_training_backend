@@ -234,19 +234,17 @@ public class AIService {
             "=== INSTRUCTIONS ===\n" +
             "1. Divide the module into 3 to 6 logical learning sections based on the knowledge base.\n" +
             "2. For each section, provide a title and detailed, educational textual content incorporating concepts from the knowledge base.\n" +
-            "3. Format the response as a JSON array EXACTLY as below (do not include markdown codeblocks or the word json):\n" +
-            "[\n" +
-            "  {\n" +
-            "    \"title\": \"Section name\",\n" +
-            "    \"type\": \"text\",\n" +
-            "    \"content\": \"Comprehensive paragraph explaining the concepts...\",\n" +
-            "    \"duration\": 10\n" +
-            "  }\n" +
-            "]\n";
-
-        Map<String, Object> result = callOpenAI("{\"wrapper\": " + prompt + "}", 3000); // Wrapper trick to assure pure array? No, callOpenAI expects JSON object, not array.
-        // Wait, callOpenAI expects an object `{ ... }`. So I must enforce object wrapping.
-        prompt = prompt.replace("[\n  {\n", "{\n  \"sections\": [\n    {\n").replace("  }\n]\n", "    }\n  ]\n}\n");
+            "3. Format the response as a JSON object containing a 'sections' array EXACTLY as below (do not include markdown codeblocks or the word json):\n" +
+            "{\n" +
+            "  \"sections\": [\n" +
+            "    {\n" +
+            "      \"title\": \"Section name\",\n" +
+            "      \"type\": \"text\",\n" +
+            "      \"content\": \"Comprehensive paragraph explaining the concepts...\",\n" +
+            "      \"duration\": 10\n" +
+            "    }\n" +
+            "  ]\n" +
+            "}\n";
 
         Map<String, Object> response = callOpenAI(prompt, 3000);
         return (List<Map<String, Object>>) response.get("sections");

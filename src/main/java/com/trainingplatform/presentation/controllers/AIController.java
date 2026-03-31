@@ -488,32 +488,7 @@ public class AIController {
         }
     }
     
-    public static class GenerateCurriculumRequest {
-        private String title;
-        private String description;
-        private List<FileInfoRequest> files;
-        private String companyName;
-        private String industry;
-        private String gig;
 
-        public String getTitle() { return title; }
-        public void setTitle(String title) { this.title = title; }
-
-        public String getDescription() { return description; }
-        public void setDescription(String description) { this.description = description; }
-
-        public List<FileInfoRequest> getFiles() { return files; }
-        public void setFiles(List<FileInfoRequest> files) { this.files = files; }
-
-        public String getCompanyName() { return companyName; }
-        public void setCompanyName(String companyName) { this.companyName = companyName; }
-
-        public String getIndustry() { return industry; }
-        public void setIndustry(String industry) { this.industry = industry; }
-
-        public String getGig() { return gig; }
-        public void setGig(String gig) { this.gig = gig; }
-    }
     /**
      * Generate a professional AI Podcast from resource content using Vertex AI
      */
