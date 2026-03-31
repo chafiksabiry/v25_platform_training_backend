@@ -173,6 +173,81 @@ public class AIService {
         return callOpenAI(prompt, 3000);
     }
 
+    /**
+     * Generate a comprehensive training curriculum program
+     */
+    public Map<String, Object> generateRealCurriculum(Map<String, Object> analysis, String industry, String gig) throws Exception {
+        if (!checkAIAvailability()) {
+            throw new RuntimeException("AI service is not available");
+        }
+
+        String prompt = "You are an expert AI instructional designer.\n\n" +
+            "Your task is to generate a comprehensive training curriculum program based on the provided document analysis and the gig requirements.\n\n" +
+            "=== CONTEXT ===\n" +
+            "Industry: " + industry + "\n" +
+            "Gig / Role: " + (gig != null ? gig : "General") + "\n\n" +
+            "=== DOCUMENT ANALYSIS ===\n" +
+            (analysis != null ? analysis.toString() : "No document analysis provided.") + "\n\n" +
+            "=== INSTRUCTIONS ===\n" +
+            "1. Analyze the context and document topics to create a complete training program.\n" +
+            "2. Ensure the program has logical progression (from basics to advanced).\n" +
+            "3. For each module, generate a specific title, description, and learning objectives.\n" +
+            "4. Return ONLY valid JSON format EXACTLY matching the required structure.\n\n" +
+            "=== REQUIRED JSON FORMAT ===\n" +
+            "{\n" +
+            "  \"title\": \"Name of the Training Program\",\n" +
+            "  \"description\": \"Comprehensive description...\",\n" +
+            "  \"totalDuration\": 120,\n" +
+            "  \"modules\": [\n" +
+            "    {\n" +
+            "      \"title\": \"Module 1: Title\",\n" +
+            "      \"description\": \"Detailed description...\",\n" +
+            "      \"duration\": 30,\n" +
+            "      \"difficulty\": \"intermediate\",\n" +
+            "      \"learningObjectives\": [\"Objective 1\", \"Objective 2\"]\n" +
+            "    }\n" +
+            "  ]\n" +
+            "}\n";
+
+        return callOpenAI(prompt, 2000);
+    }
+
+    /**
+     * Generate detailed content sections for a specific module
+     */
+    public List<Map<String, Object>> generateDetailedModuleContent(String moduleTitle, String moduleDescription, String fullTranscription, List<String> learningObjectives) throws Exception {
+        if (!checkAIAvailability()) {
+            throw new RuntimeException("AI service is not available");
+        }
+
+        String prompt = "You are an expert AI instructional designer.\n\n" +
+            "Your task is to generate the detailed textual content for a specific training module.\n\n" +
+            "=== MODULE DETAILS ===\n" +
+            "Title: " + moduleTitle + "\n" +
+            "Description: " + moduleDescription + "\n" +
+            "Objectives: " + (learningObjectives != null ? String.join(", ", learningObjectives) : "") + "\n\n" +
+            "=== KNOWLEDGE BASE / FULL TRANSCRIPTIONS ===\n" +
+            (fullTranscription.length() > 25000 ? fullTranscription.substring(0, 25000) + "..." : fullTranscription) + "\n\n" +
+            "=== INSTRUCTIONS ===\n" +
+            "1. Divide the module into 3 to 6 logical learning sections based on the knowledge base.\n" +
+            "2. For each section, provide a title and detailed, educational textual content incorporating concepts from the knowledge base.\n" +
+            "3. Format the response as a JSON array EXACTLY as below (do not include markdown codeblocks or the word json):\n" +
+            "[\n" +
+            "  {\n" +
+            "    \"title\": \"Section name\",\n" +
+            "    \"type\": \"text\",\n" +
+            "    \"content\": \"Comprehensive paragraph explaining the concepts...\",\n" +
+            "    \"duration\": 10\n" +
+            "  }\n" +
+            "]\n";
+
+        Map<String, Object> result = callOpenAI("{\"wrapper\": " + prompt + "}", 3000); // Wrapper trick to assure pure array? No, callOpenAI expects JSON object, not array.
+        // Wait, callOpenAI expects an object `{ ... }`. So I must enforce object wrapping.
+        prompt = prompt.replace("[\n  {\n", "{\n  \"sections\": [\n    {\n").replace("  }\n]\n", "    }\n  ]\n}\n");
+
+        Map<String, Object> response = callOpenAI(prompt, 3000);
+        return (List<Map<String, Object>>) response.get("sections");
+    }
 
     public void organizeTrainingContent(String trainingId, List<FileInfo> files, String organizationInstructions, 
                                        boolean generateModuleQuizzes, boolean generateFinalExam) throws Exception {

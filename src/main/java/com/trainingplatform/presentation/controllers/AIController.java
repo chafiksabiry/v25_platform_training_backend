@@ -432,35 +432,58 @@ public class AIController {
      * Generate curriculum structure from files
      */
     @PostMapping("/generate-curriculum")
-    public ResponseEntity<Map<String, Object>> generateCurriculum(@RequestBody GenerateCurriculumRequest request) {
+    public ResponseEntity<Map<String, Object>> generateCurriculum(@RequestBody Map<String, Object> request) {
         Map<String, Object> response = new HashMap<>();
         
         try {
-            log.info("Generating curriculum for training with {} files", 
-                request.getFiles() != null ? request.getFiles().size() : 0);
+            log.info("Generating real curriculum using AI");
             
-            // Convert request files to AIService.FileInfo
-            List<AIService.FileInfo> files = request.getFiles() != null
-                ? request.getFiles().stream()
-                    .map(f -> new AIService.FileInfo(f.getName(), f.getType(), f.getUrl(), f.getPublicId()))
-                    .toList()
-                : List.of();
+            // Extract attributes matching frontend's DocumentAnalysis object
+            Map<String, Object> analysis = (Map<String, Object>) request.get("analysis");
+            String industry = (String) request.getOrDefault("industry", "General");
+            String gig = (String) request.get("gig");
             
-            // For now, return a simple curriculum structure
-            // In a real implementation, this would use AI to analyze files and create modules
-            Map<String, Object> curriculum = new HashMap<>();
-            curriculum.put("title", request.getTitle() != null ? request.getTitle() : "Training Curriculum");
-            curriculum.put("description", request.getDescription() != null ? request.getDescription() : "Generated curriculum");
-            curriculum.put("totalModules", files.size());
-            curriculum.put("estimatedDuration", files.size() * 60); // 60 minutes per file
+            Map<String, Object> curriculum = aiService.generateRealCurriculum(analysis, industry, gig);
             
             response.put("success", true);
-            response.put("curriculum", curriculum);
+            response.putAll(curriculum);
+            
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Error generating curriculum: {}", e.getMessage(), e);
             response.put("success", false);
             response.put("error", "Error generating curriculum: " + e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    /**
+     * Generate content sections for a module
+     */
+    @PostMapping("/generate-module-content")
+    public ResponseEntity<Map<String, Object>> generateModuleContent(@RequestBody Map<String, Object> request) {
+        Map<String, Object> response = new HashMap<>();
+        
+        try {
+            String moduleTitle = (String) request.get("moduleTitle");
+            String moduleDescription = (String) request.get("moduleDescription");
+            String fullTranscription = (String) request.get("fullTranscription");
+            List<String> learningObjectives = (List<String>) request.get("learningObjectives");
+            
+            log.info("Generating content for module: {}", moduleTitle);
+            
+            List<Map<String, Object>> sections = aiService.generateDetailedModuleContent(
+                moduleTitle, moduleDescription, fullTranscription, learningObjectives
+            );
+            
+            response.put("success", true);
+            response.put("sections", sections);
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error generating module content: {}", e.getMessage(), e);
+            response.put("success", false);
+            response.put("error", "Error generating module content: " + e.getMessage());
             return ResponseEntity.badRequest().body(response);
         }
     }
