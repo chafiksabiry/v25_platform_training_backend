@@ -538,4 +538,30 @@ public class AIController {
             return ResponseEntity.badRequest().body(response);
         }
     }
+
+    /**
+     * Generate complete training module based on Gig knowledge base documents
+     */
+    @PostMapping("/generate-gig-module")
+    public ResponseEntity<Map<String, Object>> generateGigModule(@RequestBody Map<String, String> request) {
+        Map<String, Object> response = new HashMap<>();
+        try {
+            String knowledgeBaseContent = request.get("knowledgeBaseContent");
+            String format = request.getOrDefault("format", "presentation");
+            
+            log.info("Generating gig training module for format: {}", format);
+            
+            // Calls the new method in AIService which builds the prompt and returns parsed JSON
+            Map<String, Object> result = aiService.generateGigTrainingModule(knowledgeBaseContent, format);
+            
+            response.put("success", true);
+            response.put("data", result);    // <-- Passing parsed JSON object directly to frontend
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error generating gig module: {}", e.getMessage(), e);
+            response.put("success", false);
+            response.put("error", "Error generating gig module: " + e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
 }

@@ -123,6 +123,57 @@ public class AIService {
         return metadata;
     }
 
+    /**
+     * Generate a complete training module based on Gig knowledge base documents
+     */
+    public Map<String, Object> generateGigTrainingModule(String knowledgeBaseContent, String format) throws Exception {
+        if (!checkAIAvailability()) {
+            throw new RuntimeException("AI service is not available");
+        }
+
+        String prompt = "You are an AI instructional designer integrated into an LMS platform.\n\n" +
+            "Your task is to generate a complete training module.\n\n" +
+            "Context:\n" +
+            "- The training must be based ONLY on the provided knowledge base documents (Gig knowledge base).\n" +
+            "- You must follow the 360° learning methodology (analysis, design, development, implementation, evaluation).\n" +
+            "- The user can choose the output format: Presentation or Video. (Selected Format: " + format + ")\n\n" +
+            "Knowledge Base Content:\n" +
+            knowledgeBaseContent + "\n\n" +
+            "Instructions:\n" +
+            "1. Analyze the provided documents: Extract key concepts, processes, and important insights. Identify learning objectives.\n" +
+            "2. Structure the training using the 360° methodology:\n" +
+            "   - Introduction (context + objectives)\n" +
+            "   - Core content (well-structured modules/sections)\n" +
+            "   - Practical examples or use cases\n" +
+            "   - Summary\n" +
+            "   - Evaluation (quiz or questions)\n" +
+            "3. Generate output based on user choice:\n" +
+            "   IF format = \"presentation\":\n" +
+            "   - Create a slide-by-slide structure\n" +
+            "   - Each slide must include: Title, Bullet points (clear and concise), Optional speaker notes\n" +
+            "   IF format = \"video\":\n" +
+            "   - Generate a detailed video script (10 minutes)\n" +
+            "   - Include: Narration text, Scene descriptions, Timing suggestions, Visual recommendations\n" +
+            "4. Ensure:\n" +
+            "   - Clear pedagogy (simple explanations)\n" +
+            "   - Logical flow\n" +
+            "   - Professional tone\n" +
+            "   - No hallucination: ONLY use knowledge base content\n" +
+            "   - Adapt the difficulty level to beginner/intermediate learners\n" +
+            "5. Output format must be structured JSON EXACTLY as below, do not add markdown backticks:\n\n" +
+            "{\n" +
+            "  \"title\": \"\",\n  \"objectives\": [],\n  \"format\": \"" + format + "\",\n  \"content\": [],\n  \"evaluation\": []\n}\n";
+
+        // Limit length to avoid blowing up the token context
+        if (prompt.length() > 30000) {
+            prompt = prompt.substring(0, 30000) + "... (content truncated to save context)";
+        }
+
+        // Use a slightly larger maxToken limit for detailed content
+        return callOpenAI(prompt, 3000);
+    }
+
+
     public void organizeTrainingContent(String trainingId, List<FileInfo> files, String organizationInstructions, 
                                        boolean generateModuleQuizzes, boolean generateFinalExam) throws Exception {
         ManualTraining training = manualTrainingRepository.findById(trainingId)
