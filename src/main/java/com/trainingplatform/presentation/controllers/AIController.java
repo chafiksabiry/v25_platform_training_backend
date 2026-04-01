@@ -1,6 +1,7 @@
 package com.trainingplatform.presentation.controllers;
 
 import com.trainingplatform.application.services.AIService;
+import com.trainingplatform.application.services.VertexAIService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
