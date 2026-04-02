@@ -25,6 +25,9 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
+
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -40,6 +43,8 @@ public class AIService {
     private final ManualTrainingModuleRepository manualTrainingModuleRepository;
     private final com.trainingplatform.infrastructure.repositories.ManualQuizRepository manualQuizRepository;
     private final RestTemplate restTemplate = new RestTemplate();
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
 
     @Value("${app.ai.openai.api-key:}")
     private String openaiApiKey;
@@ -523,198 +528,6 @@ public class AIService {
         return prompt.toString();
     }
 
-    private Map<String, Object> callAI(String prompt) throws Exception {
-        return callAI(prompt, 2000);
-    }
-    
-    private Map<String, Object> callAI(String prompt, int maxTokens) throws Exception {
-        if (anthropicApiKey != null && !anthropicApiKey.isEmpty()) {
-            return callAnthropic(prompt, maxTokens);
-        } else {
-            return callOpenAI(prompt, maxTokens);
-        }
-    }
-
-    private Map<String, Object> callAnthropic(String prompt, int maxTokens) throws Exception {
-        if (anthropicApiKey == null || anthropicApiKey.isEmpty()) {
-            throw new RuntimeException("Anthropic API key is not configured");
-        }
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("x-api-key", anthropicApiKey);
-        headers.set("anthropic-version", "2023-06-01");
-
-        Map<String, Object> requestBody = new HashMap<>();
-        requestBody.put("model", anthropicModel);
-        requestBody.put("max_tokens", maxTokens);
-        requestBody.put("temperature", 0.3);
-
-        List<Map<String, String>> messages = new ArrayList<>();
-        Map<String, String> userMessage = new HashMap<>();
-        userMessage.put("role", "user");
-        userMessage.put("content", prompt);
-        messages.add(userMessage);
-        
-        requestBody.put("messages", messages);
-
-        // System prompt as a separate field for Anthropic
-        requestBody.put("system", "You are a JSON-only API. Return ONLY valid JSON (start with {, end with }). Expert instructional designer creating specific content-based titles.");
-
-        HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
-
-        try {
-            Map<String, Object> response = restTemplate.postForObject(
-                    ANTHROPIC_API_URL,
-                    request,
-                    Map.class
-            );
-
-            if (response == null) {
-                throw new RuntimeException("Anthropic API returned null response");
-            }
-
-            // Extract the JSON response from Anthropic
-            List<Map<String, Object>> contentList = (List<Map<String, Object>>) response.get("content");
-            if (contentList == null || contentList.isEmpty()) {
-                throw new RuntimeException("Anthropic API returned no content");
-            }
-
-            Map<String, Object> contentMap = contentList.get(0);
-            String content = (String) contentMap.get("text");
-
-            log.info("Anthropic raw response length: {} chars", content.length());
-            
-            // Parse the JSON content
-            return parseAIResponse(content);
-        } catch (Exception e) {
-            log.error("Failed to call Anthropic API: {}", e.getMessage());
-            throw new RuntimeException("Failed to call Anthropic API: " + e.getMessage());
-        }
-    }
-
-    private Map<String, Object> callOpenAI(String prompt) throws Exception {
-        if (openaiApiKey == null || openaiApiKey.isEmpty()) {
-            throw new RuntimeException("OpenAI API key is not configured");
-        }
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.setBearerAuth(openaiApiKey);
-
-        Map<String, Object> requestBody = new HashMap<>();
-        requestBody.put("model", openaiModel);
-        requestBody.put("temperature", 0.3); // Lower temperature for better instruction following
-        requestBody.put("max_tokens", maxTokens);
-
-        List<Map<String, String>> messages = new ArrayList<>();
-        
-        // System message to set the AI's behavior
-        Map<String, String> systemMessage = new HashMap<>();
-        systemMessage.put("role", "system");
-        systemMessage.put("content", 
-            "You are a JSON-only API. Return ONLY valid JSON (start with {, end with }). " +
-            "Expert instructional designer creating specific content-based titles."
-        );
-        messages.add(systemMessage);
-        
-        // User message with the actual prompt
-        Map<String, String> userMessage = new HashMap<>();
-        userMessage.put("role", "user");
-        userMessage.put("content", prompt);
-        messages.add(userMessage);
-        
-        requestBody.put("messages", messages);
-
-        HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
-
-        try {
-            Map<String, Object> response = restTemplate.postForObject(
-                    OPENAI_API_URL,
-                    request,
-                    Map.class
-            );
-
-            if (response == null) {
-                throw new RuntimeException("OpenAI API returned null response");
-            }
-
-            // Extract the JSON response from OpenAI
-            List<Map<String, Object>> choices = (List<Map<String, Object>>) response.get("choices");
-            if (choices == null || choices.isEmpty()) {
-                throw new RuntimeException("OpenAI API returned no choices");
-            }
-
-            Map<String, Object> choice = choices.get(0);
-            
-            // Check if response was truncated
-            String finishReason = (String) choice.get("finish_reason");
-            if ("length".equals(finishReason)) {
-                log.warn("OpenAI response was truncated due to max_tokens limit. Current limit: {}", maxTokens);
-                throw new RuntimeException("Response was truncated. The content is too long. Please reduce the number of questions or module content.");
-            }
-            
-            Map<String, Object> messageObj = (Map<String, Object>) choice.get("message");
-            String content = (String) messageObj.get("content");
-
-            log.info("OpenAI raw response length: {} chars", content.length());
-            log.info("OpenAI response preview (first 500 chars): {}", content.substring(0, Math.min(500, content.length())));
-
-            // Parse the JSON content
-            return parseAIResponse(content);
-        } catch (Exception e) {
-            log.error("Failed to call OpenAI API: {}", e.getMessage());
-            
-            // Check if it's a context length error
-            if (e.getMessage() != null && e.getMessage().contains("context_length_exceeded")) {
-                throw new RuntimeException("Context length exceeded. The model's limit is 8192 tokens total. " +
-                    "Please reduce the number of questions (try 8-10 for final exam) or simplify module content.");
-            }
-            
-            throw new RuntimeException("Failed to call OpenAI API: " + e.getMessage());
-        }
-    }
-
-    private Map<String, Object> parseAIResponse(String content) {
-        try {
-            String cleanContent = content.trim();
-            
-            // Find JSON content between ```json and ``` or between { and }
-            int jsonStart = cleanContent.indexOf("```json");
-            if (jsonStart != -1) {
-                // Extract content after ```json
-                cleanContent = cleanContent.substring(jsonStart + 7);
-                int jsonEnd = cleanContent.indexOf("```");
-                if (jsonEnd != -1) {
-                    cleanContent = cleanContent.substring(0, jsonEnd);
-                    }
-                } else {
-                // Try to find JSON object boundaries { ... }
-                int firstBrace = cleanContent.indexOf('{');
-                int lastBrace = cleanContent.lastIndexOf('}');
-                
-                if (firstBrace != -1 && lastBrace != -1 && lastBrace > firstBrace) {
-                    cleanContent = cleanContent.substring(firstBrace, lastBrace + 1);
-                }
-            }
-            
-            cleanContent = cleanContent.trim();
-            
-            // Validate it's JSON-like (starts with { and ends with })
-            if (!cleanContent.startsWith("{") || !cleanContent.endsWith("}")) {
-                log.error("Content doesn't look like JSON: {}", cleanContent.substring(0, Math.min(100, cleanContent.length())));
-                throw new RuntimeException("Response doesn't contain valid JSON structure");
-            }
-
-            // Parse JSON
-            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            return mapper.readValue(cleanContent, Map.class);
-        } catch (Exception e) {
-            log.error("Failed to parse AI response: {}", e.getMessage());
-            log.error("Content preview: {}", content.substring(0, Math.min(200, content.length())));
-            throw new RuntimeException("Failed to parse AI response: " + e.getMessage());
-        }
-    }
 
     @SuppressWarnings("unchecked")
     private void createModulesFromAIResponse(ManualTraining training, Map<String, Object> aiResponse, List<FileInfo> files) {
@@ -1150,8 +963,8 @@ public class AIService {
         
         log.info("Generating quiz with {} questions, using {} max_tokens", numberOfQuestions, maxTokens);
         
-        // Call OpenAI with calculated token limit
-        return callOpenAI(prompt.toString(), maxTokens);
+        // Call AI with calculated token limit
+        return callAI(prompt.toString(), maxTokens);
     }
     
     /**
@@ -1196,10 +1009,8 @@ public class AIService {
         prompt.append("\"explanation\":\"Brief.\",\"points\":2,\"moduleReference\":\"Module 1\"}]}\n\n");
         prompt.append("CRITICAL: Return ONLY JSON starting with {\"questions\":[...]}. Keep explanations SHORT (max 20 words).\n");
         
-        // Call OpenAI with appropriate token limit
-        // gpt-4o-mini has 8192 total tokens, so we need: prompt_tokens + completion_tokens < 8192
-        // With ~500 tokens for prompt, we can safely use 4000 tokens for completion
-        return callOpenAI(prompt.toString(), 4000);
+        // Call AI with appropriate token limit
+        return callAI(prompt.toString(), 4000);
     }
 
     /**
@@ -1256,7 +1067,7 @@ public class AIService {
         prompt.append("}\n\n");
         prompt.append("CRITICAL: Return ONLY JSON. Keep it concise to avoid truncation.\n");
 
-        Map<String, Object> response = callOpenAI(prompt.toString(), 4000);
+        Map<String, Object> response = callAI(prompt.toString(), 4000);
         
         // Robustness: ensure we have camelCase keys
         Map<String, Object> normalized = new HashMap<>();
@@ -1320,8 +1131,8 @@ public class AIService {
         prompt.append("}\n\n");
         prompt.append("REMEMBER: Return ONLY the JSON object. No text before or after.\n");
         
-        // Call OpenAI
-        return callOpenAI(prompt.toString(), 2000);
+        // Call AI
+        return callAI(prompt.toString(), 2000);
     }
     
     /**
@@ -1360,8 +1171,8 @@ public class AIService {
         prompt.append("}\n\n");
         prompt.append("REMEMBER: Return ONLY the JSON object. No text before or after.\n");
         
-        // Call OpenAI
-        return callOpenAI(prompt.toString(), 2000);
+        // Call AI
+        return callAI(prompt.toString(), 2000);
     }
     
     /**
@@ -1477,8 +1288,140 @@ public class AIService {
             // Fallback: use a default suggestion
             organization = String.format("Create %d modules based on the uploaded files. Organize content logically by topic and difficulty level.", 
                 Math.max(2, Math.min(5, files.size() / 2)));
+        return organization.trim();
+    }
+
+    /**
+     * Unified entry point for AI calls. 
+     * Tries Anthropic Claude first, fallbacks to OpenAI GPT if Anthropic is not available.
+     */
+    private Map<String, Object> callAI(String prompt, int maxTokens) throws Exception {
+        if (anthropicApiKey != null && !anthropicApiKey.trim().isEmpty()) {
+            try {
+                return callAnthropic(prompt, maxTokens);
+            } catch (Exception e) {
+                log.error("Anthropic call failed, falling back to OpenAI: {}", e.getMessage());
+                if (openaiApiKey != null && !openaiApiKey.trim().isEmpty()) {
+                    return callOpenAI(prompt, maxTokens);
+                }
+                throw e;
+            }
+        } else if (openaiApiKey != null && !openaiApiKey.trim().isEmpty()) {
+            return callOpenAI(prompt, maxTokens);
+        } else {
+            throw new RuntimeException("No AI provider (Anthropic or OpenAI) is configured.");
+        }
+    }
+
+    /**
+     * Calls Anthropic Claude API
+     */
+    private Map<String, Object> callAnthropic(String prompt, int maxTokens) throws Exception {
+        log.info("Calling Anthropic Claude API (model: {})", anthropicModel);
+        
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("x-api-key", anthropicApiKey);
+        headers.set("anthropic-version", "2023-06-01");
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", anthropicModel);
+        body.put("max_tokens", maxTokens);
+        
+        List<Map<String, String>> messages = new ArrayList<>();
+        Map<String, String> message = new HashMap<>();
+        message.put("role", "user");
+        message.put("content", prompt);
+        messages.add(message);
+        body.put("messages", messages);
+
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
+        
+        ResponseEntity<String> response = restTemplate.postForEntity(ANTHROPIC_API_URL, entity, String.class);
+        
+        if (!response.getStatusCode().is2xxSuccessful()) {
+            throw new RuntimeException("Anthropic API call failed with status: " + response.getStatusCode());
+        }
+
+        Map<String, Object> responseMap = objectMapper.readValue(response.getBody(), new TypeReference<Map<String, Object>>() {});
+        List<Map<String, Object>> contentList = (List<Map<String, Object>>) responseMap.get("content");
+        
+        if (contentList != null && !contentList.isEmpty()) {
+            String text = (String) contentList.get(0).get("text");
+            return parseAIResponse(text);
         }
         
-        return organization.trim();
+        throw new RuntimeException("Empty response from Anthropic");
+    }
+
+    /**
+     * Calls OpenAI GPT API
+     */
+    private Map<String, Object> callOpenAI(String prompt, int maxTokens) throws Exception {
+        log.info("Calling OpenAI GPT API (model: {})", openaiModel);
+        
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth(openaiApiKey);
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", openaiModel);
+        
+        List<Map<String, String>> messages = new ArrayList<>();
+        Map<String, String> message = new HashMap<>();
+        message.put("role", "user");
+        message.put("content", prompt);
+        messages.add(message);
+        body.put("messages", messages);
+        body.put("max_tokens", maxTokens);
+        body.put("response_format", Map.of("type", "json_object"));
+
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
+        
+        ResponseEntity<String> response = restTemplate.postForEntity(OPENAI_API_URL, entity, String.class);
+        
+        if (!response.getStatusCode().is2xxSuccessful()) {
+            throw new RuntimeException("OpenAI API call failed with status: " + response.getStatusCode());
+        }
+
+        Map<String, Object> responseMap = objectMapper.readValue(response.getBody(), new TypeReference<Map<String, Object>>() {});
+        List<Map<String, Object>> choices = (List<Map<String, Object>>) responseMap.get("choices");
+        
+        if (choices != null && !choices.isEmpty()) {
+            Map<String, Object> choice = choices.get(0);
+            Map<String, Object> choiceMessage = (Map<String, Object>) choice.get("message");
+            String text = (String) choiceMessage.get("content");
+            return parseAIResponse(text);
+        }
+        
+        throw new RuntimeException("Empty response from OpenAI");
+    }
+
+    /**
+     * Helper to parse AI response string into a Map, handling markdown code blocks
+     */
+    private Map<String, Object> parseAIResponse(String text) {
+        if (text == null) return new HashMap<>();
+        
+        String jsonContent = text.trim();
+        
+        // Remove markdown backticks if present (e.g. ```json ... ```)
+        if (jsonContent.startsWith("```")) {
+            int firstBrace = jsonContent.indexOf("{");
+            int lastBrace = jsonContent.lastIndexOf("}");
+            if (firstBrace != -1 && lastBrace != -1 && lastBrace > firstBrace) {
+                jsonContent = jsonContent.substring(firstBrace, lastBrace + 1);
+            }
+        }
+        
+        try {
+            return objectMapper.readValue(jsonContent, new TypeReference<Map<String, Object>>() {});
+        } catch (Exception e) {
+            log.error("Failed to parse AI JSON response: {}. Raw text: {}", e.getMessage(), text);
+            // Fallback: return a map with the raw text
+            Map<String, Object> fallback = new HashMap<>();
+            fallback.put("text", text);
+            return fallback;
+        }
     }
 }

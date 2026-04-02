@@ -566,6 +566,8 @@ public class AIController {
             response.put("error", "Error generating gig module: " + e.getMessage());
             return ResponseEntity.badRequest().body(response);
         }
+    }
+
     /**
      * Exporte un curriculum en PowerPoint (.pptx)
      */
