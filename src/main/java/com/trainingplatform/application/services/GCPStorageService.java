@@ -1,5 +1,11 @@
 package com.trainingplatform.application.services;
 
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+
 import com.google.cloud.storage.BlobId;
 import com.google.cloud.storage.BlobInfo;
 import com.google.cloud.storage.Storage;
@@ -19,33 +25,62 @@ public class GCPStorageService {
 
     private Storage storage;
 
+    @Value("${app.upload.directory:uploads}")
+    private String localUploadDir;
+
     @Value("${app.gcp.storage.bucket-name:harx-training-media}")
     private String bucketName;
 
     @PostConstruct
     public void init() {
         try {
+            // Create local uploads directory if it doesn't exist
+            File directory = new File(localUploadDir);
+            if (!directory.exists()) {
+                directory.mkdirs();
+                log.info("📁 Created local upload directory: {}", localUploadDir);
+            }
+
             this.storage = StorageOptions.getDefaultInstance().getService();
             log.info("✅ GCP Storage Service initialized with bucket: {}", bucketName);
         } catch (Exception e) {
-            log.error("❌ Failed to initialize GCP Storage: {}", e.getMessage());
+            log.warn("⚠️ Failed to initialize GCP Storage (using local fallback): {}", e.getMessage());
         }
     }
 
-    /**
-     * Upload a MultipartFile to a specific folder in GCS
-     */
     public String uploadFile(MultipartFile file, String folder) throws IOException {
-        String fileName = folder + "/" + UUID.randomUUID().toString() + "_" + file.getOriginalFilename();
-        BlobId blobId = BlobId.of(bucketName, fileName);
-        BlobInfo blobInfo = BlobInfo.newBuilder(blobId)
-                .setContentType(file.getContentType())
-                .build();
+        String originalName = file.getOriginalFilename();
+        String uniqueName = UUID.randomUUID().toString() + "_" + originalName;
+        String fileName = folder + "/" + uniqueName;
 
-        storage.create(blobInfo, file.getBytes());
-        String publicUrl = String.format("https://storage.googleapis.com/%s/%s", bucketName, fileName);
-        log.info("Uploaded file to GCS: {}", publicUrl);
-        return publicUrl;
+        try {
+            if (storage != null) {
+                BlobId blobId = BlobId.of(bucketName, fileName);
+                BlobInfo blobInfo = BlobInfo.newBuilder(blobId)
+                        .setContentType(file.getContentType())
+                        .build();
+
+                storage.create(blobInfo, file.getBytes());
+                String publicUrl = String.format("https://storage.googleapis.com/%s/%s", bucketName, fileName);
+                log.info("✅ Uploaded file to GCS: {}", publicUrl);
+                return publicUrl;
+            }
+        } catch (Exception e) {
+            log.warn("⚠️ GCS upload failed, falling back to local: {}", e.getMessage());
+        }
+
+        // Local Fallback
+        return uploadLocal(file, uniqueName);
+    }
+
+    private String uploadLocal(MultipartFile file, String uniqueName) throws IOException {
+        Path path = Paths.get(localUploadDir, uniqueName);
+        Files.copy(file.getInputStream(), path, StandardCopyOption.REPLACE_EXISTING);
+        
+        // Relative URL that matches WebConfig resource handler
+        String localUrl = "/uploads/" + uniqueName;
+        log.info("📂 File saved locally: {}", localUrl);
+        return localUrl;
     }
 
     /**

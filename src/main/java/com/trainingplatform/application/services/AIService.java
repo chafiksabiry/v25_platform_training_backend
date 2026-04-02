@@ -58,6 +58,9 @@ public class AIService {
     @Value("${app.ai.anthropic.model:claude-3-5-sonnet-20240620}")
     private String anthropicModel;
 
+    @Value("${app.upload.directory:uploads}")
+    private String localUploadDir;
+
     private static final String OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
     private static final String ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 
@@ -691,9 +694,17 @@ public class AIService {
                 return String.format("[%s file - content analysis not applicable]", fileType.toUpperCase());
             }
             
-            // Download file from GCS
-            ResponseEntity<byte[]> response = restTemplate.getForEntity(file.getUrl(), byte[].class);
-            byte[] fileBytes = response.getBody();
+            // Download file from GCS or read from Local Storage
+            byte[] fileBytes;
+            if (file.getUrl().startsWith("/uploads/")) {
+                String fileName = file.getUrl().substring("/uploads/".length());
+                java.nio.file.Path path = java.nio.file.Paths.get(localUploadDir, fileName);
+                fileBytes = java.nio.file.Files.readAllBytes(path);
+                log.info("📂 Read file from local storage: {}", path);
+            } else {
+                ResponseEntity<byte[]> response = restTemplate.getForEntity(file.getUrl(), byte[].class);
+                fileBytes = response.getBody();
+            }
             
             if (fileBytes == null || fileBytes.length == 0) {
                 log.warn("Downloaded file is empty: {}", file.getName());
