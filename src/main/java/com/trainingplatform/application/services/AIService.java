@@ -1288,7 +1288,15 @@ public class AIService {
             // Fallback: use a default suggestion
             organization = String.format("Create %d modules based on the uploaded files. Organize content logically by topic and difficulty level.", 
                 Math.max(2, Math.min(5, files.size() / 2)));
+        }
         return organization.trim();
+    }
+
+    /**
+     * Unified entry point for AI calls with default max tokens (1500).
+     */
+    private Map<String, Object> callAI(String prompt) throws Exception {
+        return callAI(prompt, 1500);
     }
 
     /**
