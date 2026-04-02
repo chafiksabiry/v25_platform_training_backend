@@ -2,8 +2,11 @@ package com.trainingplatform.presentation.controllers;
 
 import com.trainingplatform.application.services.AIService;
 import com.trainingplatform.application.services.VertexAIService;
+import com.trainingplatform.application.services.PPTExportService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -21,6 +24,7 @@ public class AIController {
     
     private final AIService aiService;
     private final VertexAIService vertexAIService;
+    private final PPTExportService pptExportService;
     
     @GetMapping("/check-availability")
     public ResponseEntity<Map<String, Object>> checkAIAvailability() {
@@ -561,6 +565,33 @@ public class AIController {
             response.put("success", false);
             response.put("error", "Error generating gig module: " + e.getMessage());
             return ResponseEntity.badRequest().body(response);
+        }
+    /**
+     * Exporte un curriculum en PowerPoint (.pptx)
+     */
+    @PostMapping("/export-powerpoint")
+    public ResponseEntity<byte[]> exportPowerPoint(@RequestBody Map<String, Object> request) {
+        try {
+            Map<String, Object> curriculum = (Map<String, Object>) request.get("curriculum");
+            if (curriculum == null) {
+                // If not nested, use the whole request body
+                curriculum = request;
+            }
+            
+            log.info("Exporting curriculum to PowerPoint: {}", curriculum.get("title"));
+            
+            byte[] pptBytes = pptExportService.generatePowerPoint(curriculum);
+            
+            String fileName = (String) curriculum.getOrDefault("title", "formation");
+            fileName = fileName.replaceAll("[^a-zA-Z0-9.-]", "_") + ".pptx";
+            
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
+                    .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.presentationml.presentation"))
+                    .body(pptBytes);
+        } catch (Exception e) {
+            log.error("Error exporting PowerPoint: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
         }
     }
 }

@@ -47,26 +47,25 @@ public class AIService {
     @Value("${app.ai.openai.model:gpt-4o-mini}")
     private String openaiModel;
 
+    @Value("${app.ai.anthropic.api-key:}")
+    private String anthropicApiKey;
+
+    @Value("${app.ai.anthropic.model:claude-3-5-sonnet-20240620}")
+    private String anthropicModel;
+
     private static final String OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
+    private static final String ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 
     public boolean checkAIAvailability() {
-        if (openaiApiKey == null || openaiApiKey.isEmpty()) {
-            log.warn("OpenAI API key is not configured");
+        boolean openAiAvailable = openaiApiKey != null && !openaiApiKey.isEmpty();
+        boolean anthropicAvailable = anthropicApiKey != null && !anthropicApiKey.isEmpty();
+        
+        if (!openAiAvailable && !anthropicAvailable) {
+            log.warn("Neither OpenAI nor Anthropic API keys are configured");
             return false;
         }
 
-        try {
-            // Simple test to check if we can connect to OpenAI
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.setBearerAuth(openaiApiKey);
-
-            // We just check if the API key is valid
-            return true;
-        } catch (Exception e) {
-            log.error("Failed to connect to OpenAI: {}", e.getMessage());
-            return false;
-        }
+        return true;
     }
     
     /**
@@ -115,8 +114,8 @@ public class AIService {
         prompt.append("}\n\n");
         prompt.append("REMEMBER: Return ONLY the JSON object. No text before or after.\n");
         
-        // Call OpenAI
-        Map<String, Object> aiResponse = callOpenAI(prompt.toString());
+        // Call AI (prefer Anthropic if available)
+        Map<String, Object> aiResponse = callAI(prompt.toString(), 1500);
         
         // Parse response
         Map<String, String> metadata = new HashMap<>();
@@ -173,7 +172,7 @@ public class AIService {
         }
 
         // Use a slightly larger maxToken limit for detailed content
-        return callOpenAI(prompt, 3000);
+        return callAI(prompt, 3000);
     }
 
     /**
@@ -212,7 +211,7 @@ public class AIService {
             "  ]\n" +
             "}\n";
 
-        return callOpenAI(prompt, 2000);
+        return callAI(prompt, 2000);
     }
 
     /**
@@ -246,7 +245,7 @@ public class AIService {
             "  ]\n" +
             "}\n";
 
-        Map<String, Object> response = callOpenAI(prompt, 3000);
+        Map<String, Object> response = callAI(prompt, 3000);
         return (List<Map<String, Object>>) response.get("sections");
     }
 
@@ -272,8 +271,8 @@ public class AIService {
         // Build prompt for OpenAI
         String prompt = buildOrganizationPrompt(training, files, organizationInstructions);
 
-        // Call OpenAI API
-        Map<String, Object> aiResponse = callOpenAI(prompt);
+        // Call AI API
+        Map<String, Object> aiResponse = callAI(prompt);
 
         // Parse response and create modules/sections
         createModulesFromAIResponse(training, aiResponse, files);
@@ -524,11 +523,77 @@ public class AIService {
         return prompt.toString();
     }
 
-    private Map<String, Object> callOpenAI(String prompt) throws Exception {
-        return callOpenAI(prompt, 2000);
+    private Map<String, Object> callAI(String prompt) throws Exception {
+        return callAI(prompt, 2000);
     }
     
-    private Map<String, Object> callOpenAI(String prompt, int maxTokens) throws Exception {
+    private Map<String, Object> callAI(String prompt, int maxTokens) throws Exception {
+        if (anthropicApiKey != null && !anthropicApiKey.isEmpty()) {
+            return callAnthropic(prompt, maxTokens);
+        } else {
+            return callOpenAI(prompt, maxTokens);
+        }
+    }
+
+    private Map<String, Object> callAnthropic(String prompt, int maxTokens) throws Exception {
+        if (anthropicApiKey == null || anthropicApiKey.isEmpty()) {
+            throw new RuntimeException("Anthropic API key is not configured");
+        }
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("x-api-key", anthropicApiKey);
+        headers.set("anthropic-version", "2023-06-01");
+
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("model", anthropicModel);
+        requestBody.put("max_tokens", maxTokens);
+        requestBody.put("temperature", 0.3);
+
+        List<Map<String, String>> messages = new ArrayList<>();
+        Map<String, String> userMessage = new HashMap<>();
+        userMessage.put("role", "user");
+        userMessage.put("content", prompt);
+        messages.add(userMessage);
+        
+        requestBody.put("messages", messages);
+
+        // System prompt as a separate field for Anthropic
+        requestBody.put("system", "You are a JSON-only API. Return ONLY valid JSON (start with {, end with }). Expert instructional designer creating specific content-based titles.");
+
+        HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
+
+        try {
+            Map<String, Object> response = restTemplate.postForObject(
+                    ANTHROPIC_API_URL,
+                    request,
+                    Map.class
+            );
+
+            if (response == null) {
+                throw new RuntimeException("Anthropic API returned null response");
+            }
+
+            // Extract the JSON response from Anthropic
+            List<Map<String, Object>> contentList = (List<Map<String, Object>>) response.get("content");
+            if (contentList == null || contentList.isEmpty()) {
+                throw new RuntimeException("Anthropic API returned no content");
+            }
+
+            Map<String, Object> contentMap = contentList.get(0);
+            String content = (String) contentMap.get("text");
+
+            log.info("Anthropic raw response length: {} chars", content.length());
+            
+            // Parse the JSON content
+            return parseAIResponse(content);
+        } catch (Exception e) {
+            log.error("Failed to call Anthropic API: {}", e.getMessage());
+            throw new RuntimeException("Failed to call Anthropic API: " + e.getMessage());
+        }
+    }
+
+    private Map<String, Object> callOpenAI(String prompt) throws Exception {
         if (openaiApiKey == null || openaiApiKey.isEmpty()) {
             throw new RuntimeException("OpenAI API key is not configured");
         }
@@ -1387,7 +1452,7 @@ public class AIService {
         prompt.append("Just plain text describing the suggested organization structure.\n");
         prompt.append("Example format: \"Create 3 modules: Module 1 - Introduction (3-4 sections covering basics), Module 2 - Core Concepts (4-5 sections with practical examples), Module 3 - Advanced Topics (3-4 sections for advanced learners).\"\n");
         
-        Map<String, Object> response = callOpenAI(prompt.toString(), 500);
+        Map<String, Object> response = callAI(prompt.toString(), 500);
         
         // Extract the organization text from the response
         // The response might be a string directly or in a nested structure
