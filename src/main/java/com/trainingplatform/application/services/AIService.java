@@ -703,9 +703,9 @@ public class AIService {
             // Extract text content based on file type
             String content = extractTextFromBytes(fileBytes, file.getName());
             
-            // Limit content length to avoid token limits (max 800 characters per file)
-            if (content.length() > 800) {
-                content = content.substring(0, 800) + "\n[...content truncated...]";
+            // Limit content length to avoid token limits (max 10,000 characters per file)
+            if (content.length() > 10000) {
+                content = content.substring(0, 10000) + "\n[...content truncated...]";
             }
             
             log.info("Successfully extracted {} characters from {}", content.length(), file.getName());
@@ -1382,7 +1382,6 @@ public class AIService {
         messages.add(message);
         body.put("messages", messages);
         body.put("max_tokens", maxTokens);
-        body.put("response_format", Map.of("type", "json_object"));
 
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
         

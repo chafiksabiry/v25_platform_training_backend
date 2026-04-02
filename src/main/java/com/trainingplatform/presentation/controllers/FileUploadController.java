@@ -13,6 +13,7 @@ import java.util.Map;
 @RequestMapping("/api/upload")
 @CrossOrigin(origins = "*")
 @RequiredArgsConstructor
+@lombok.extern.slf4j.Slf4j
 public class FileUploadController {
 
     private final GCPStorageService gcpStorageService;
@@ -25,8 +26,9 @@ public class FileUploadController {
             GCPStorageService.GCSUploadResult result = gcpStorageService.uploadGeneric(file, folder);
             return ResponseEntity.ok(convertToMap(result));
         } catch (Exception e) {
+            log.error("Image upload failed: {}", e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
-            error.put("error", e.getMessage());
+            error.put("error", "Image upload failed: " + e.getMessage());
             return ResponseEntity.badRequest().body(error);
         }
     }
@@ -39,8 +41,9 @@ public class FileUploadController {
             GCPStorageService.GCSUploadResult result = gcpStorageService.uploadGeneric(file, folder);
             return ResponseEntity.ok(convertToMap(result));
         } catch (Exception e) {
+            log.error("Video upload failed: {}", e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
-            error.put("error", e.getMessage());
+            error.put("error", "Video upload failed: " + e.getMessage());
             return ResponseEntity.badRequest().body(error);
         }
     }
@@ -53,8 +56,9 @@ public class FileUploadController {
             GCPStorageService.GCSUploadResult result = gcpStorageService.uploadGeneric(file, folder);
             return ResponseEntity.ok(convertToMap(result));
         } catch (Exception e) {
+            log.error("Document upload failed: {}", e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
-            error.put("error", e.getMessage());
+            error.put("error", "Document upload failed: " + e.getMessage());
             return ResponseEntity.badRequest().body(error);
         }
     }
@@ -70,8 +74,9 @@ public class FileUploadController {
             response.put("message", "File deleted successfully");
             return ResponseEntity.ok(response);
         } catch (Exception e) {
+            log.error("Delete file failed: {}", e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
-            error.put("error", e.getMessage());
+            error.put("error", "Delete failed: " + e.getMessage());
             return ResponseEntity.badRequest().body(error);
         }
     }
