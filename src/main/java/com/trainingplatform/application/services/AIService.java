@@ -191,35 +191,188 @@ public class AIService {
             throw new RuntimeException("AI service is not available");
         }
 
-        String prompt = "You are an expert AI instructional designer.\n\n" +
-            "Your task is to generate a comprehensive training curriculum program based on the provided document analysis and the gig requirements.\n\n" +
-            "=== CONTEXT ===\n" +
-            "Industry: " + industry + "\n" +
-            "Gig / Role: " + (gig != null ? gig : "General") + "\n\n" +
-            "=== DOCUMENT ANALYSIS ===\n" +
-            (analysis != null ? analysis.toString() : "No document analysis provided.") + "\n\n" +
-            "=== INSTRUCTIONS ===\n" +
-            "1. Analyze the context and document topics to create a complete training program.\n" +
-            "2. Ensure the program has logical progression (from basics to advanced).\n" +
-            "3. For each module, generate a specific title, description, and learning objectives.\n" +
-            "4. Return ONLY valid JSON format EXACTLY matching the required structure.\n\n" +
-            "=== REQUIRED JSON FORMAT ===\n" +
-            "{\n" +
-            "  \"title\": \"Name of the Training Program\",\n" +
-            "  \"description\": \"Comprehensive description...\",\n" +
-            "  \"totalDuration\": 120,\n" +
-            "  \"modules\": [\n" +
-            "    {\n" +
-            "      \"title\": \"Module 1: Title\",\n" +
-            "      \"description\": \"Detailed description...\",\n" +
-            "      \"duration\": 30,\n" +
-            "      \"difficulty\": \"intermediate\",\n" +
-            "      \"learningObjectives\": [\"Objective 1\", \"Objective 2\"]\n" +
-            "    }\n" +
-            "  ]\n" +
-            "}\n";
+        String keyTopics = analysis != null && analysis.get("keyTopics") != null ? analysis.get("keyTopics").toString() : "";
+        String learningObjs = analysis != null && analysis.get("learningObjectives") != null ? analysis.get("learningObjectives").toString() : "";
+        String suggestedModules = analysis != null && analysis.get("suggestedModules") != null ? analysis.get("suggestedModules").toString() : "";
 
-        return callAI(prompt, 2000);
+        String baseContext = "Industrie: " + industry + "\n" +
+            "Rôle: " + (gig != null ? gig : "Général") + "\n" +
+            "Sujets clés: " + keyTopics + "\n" +
+            "Objectifs d'apprentissage suggérés: " + learningObjs + "\n" +
+            "Modules suggérés: " + suggestedModules;
+
+        // ── Call 1: Program metadata + module plan (no sessions yet) ──────────
+        String metaPrompt = "Tu es un expert en conception pédagogique.\n\n" +
+            baseContext + "\n\n" +
+            "Génère UNIQUEMENT les métadonnées du programme et la liste des modules (sans détailler les sessions).\n" +
+            "Réponds en JSON valide uniquement, sans markdown :\n" +
+            "{\n" +
+            "  \"title\": \"Titre du programme\",\n" +
+            "  \"subtitle\": \"Sous-titre accrocheur\",\n" +
+            "  \"description\": \"Description en 2-3 phrases\",\n" +
+            "  \"totalDuration\": 420,\n" +
+            "  \"level\": \"Intermédiaire\",\n" +
+            "  \"methodology\": \"Description de la méthodologie pédagogique\",\n" +
+            "  \"objectives\": [\"objectif 1\", \"objectif 2\", \"objectif 3\"],\n" +
+            "  \"modules\": [\n" +
+            "    { \"id\": 1, \"title\": \"Titre module 1\", \"duration\": 60, \"description\": \"Description courte\" }\n" +
+            "  ]\n" +
+            "}";
+
+        log.info("📚 [Step 1/2] Generating program metadata and module plan...");
+        Map<String, Object> meta = callAI(metaPrompt, 3000);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> modulePlan = (List<Map<String, Object>>) meta.get("modules");
+        if (modulePlan == null || modulePlan.isEmpty()) {
+            log.warn("No modules returned, using metadata only");
+            return meta;
+        }
+
+        // ── Call 2 (parallel): Detailed sessions for each module in 2 batches ──
+        int half = (modulePlan.size() + 1) / 2;
+        List<Map<String, Object>> batch1Modules = modulePlan.subList(0, half);
+        List<Map<String, Object>> batch2Modules = modulePlan.subList(half, modulePlan.size());
+
+        String programTitle = (String) meta.getOrDefault("title", "Programme de formation");
+        String programLevel = (String) meta.getOrDefault("level", "Intermédiaire");
+        String programDuration = meta.getOrDefault("totalDuration", "7h").toString();
+
+        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(2);
+
+        java.util.concurrent.Future<Map<String, Object>> future1 = executor.submit(() -> {
+            String sessionPrompt = buildSessionPrompt(programTitle, programLevel, batch1Modules);
+            return callAI(sessionPrompt, 4000);
+        });
+        java.util.concurrent.Future<Map<String, Object>> future2 = executor.submit(() -> {
+            if (batch2Modules.isEmpty()) return new HashMap<>();
+            String sessionPrompt = buildSessionPrompt(programTitle, programLevel, batch2Modules);
+            return callAI(sessionPrompt, 4000);
+        });
+
+        log.info("📚 [Step 2/2] Generating detailed sessions in 2 parallel batches...");
+        Map<String, Object> sessions1 = future1.get();
+        Map<String, Object> sessions2 = future2.get();
+        executor.shutdown();
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> detailedModules1 = (List<Map<String, Object>>) sessions1.get("modules");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> detailedModules2 = (List<Map<String, Object>>) sessions2.get("modules");
+
+        List<Map<String, Object>> allModules = new ArrayList<>();
+        if (detailedModules1 != null) allModules.addAll(detailedModules1);
+        if (detailedModules2 != null) allModules.addAll(detailedModules2);
+
+        meta.put("modules", allModules.isEmpty() ? modulePlan : allModules);
+        log.info("✅ Program generated with {} modules", allModules.size());
+        return meta;
+    }
+
+    private String buildSessionPrompt(String programTitle, String level, List<Map<String, Object>> modules) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Tu es un expert en conception pédagogique.\n\n");
+        sb.append("Programme: ").append(programTitle).append("\nNiveau: ").append(level).append("\n\n");
+        sb.append("Pour chacun des modules suivants, génère des sessions détaillées.\n");
+        sb.append("Réponds en JSON valide uniquement, sans markdown:\n");
+        sb.append("{\n  \"modules\": [\n");
+        sb.append("    {\n");
+        sb.append("      \"id\": 1, \"title\": \"Titre\", \"duration\": 60, \"description\": \"Description\",\n");
+        sb.append("      \"learningObjectives\": [\"objectif 1\", \"objectif 2\"],\n");
+        sb.append("      \"difficulty\": \"intermediate\",\n");
+        sb.append("      \"sessions\": [\n");
+        sb.append("        { \"title\": \"Titre session\", \"duration\": \"45min\", \"type\": \"cours|atelier|exercice|discussion\", \"description\": \"Contenu\" }\n");
+        sb.append("      ]\n    }\n  ]\n}\n\n");
+        sb.append("Modules à détailler:\n");
+        for (Map<String, Object> m : modules) {
+            sb.append("- Module ").append(m.get("id")).append(": ").append(m.get("title"))
+              .append(" (").append(m.get("duration")).append(" min) — ").append(m.get("description")).append("\n");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Generate a rich presentation from a curriculum using 3 parallel batches (port of program-generator (3))
+     */
+    public Map<String, Object> generatePresentation(Map<String, Object> curriculum) throws Exception {
+        if (!checkAIAvailability()) {
+            throw new RuntimeException("AI service is not available");
+        }
+
+        String programInfo = "Titre: " + curriculum.getOrDefault("title", "") + "\n" +
+            "Description: " + curriculum.getOrDefault("description", "") + "\n" +
+            "Durée: " + curriculum.getOrDefault("totalDuration", "") + " min\n" +
+            "Niveau: " + curriculum.getOrDefault("level", "") + "\n" +
+            "Objectifs: " + curriculum.getOrDefault("objectives", "") + "\n" +
+            "Modules: " + curriculum.getOrDefault("modules", "");
+
+        String slideJsonFormat = "{\"slides\": [{\"id\": 1, \"type\": \"cover|agenda|content|exercise|conclusion\", " +
+            "\"title\": \"Titre\", \"subtitle\": \"Sous-titre\", \"content\": \"Contenu principal (2-3 phrases)\", " +
+            "\"bullets\": [\"point 1\", \"point 2\"], \"note\": \"Note présentateur avec exemples\", " +
+            "\"icon\": \"emoji\", \"highlight\": \"chiffre clé\"}]}";
+
+        String batch1Desc = "Slide 1: Slide de titre — accroche très impactante, slogan fort, chiffre clé du domaine\n" +
+            "Slide 2: Contexte et problématique — statistiques, enjeux actuels, chiffres de référence\n" +
+            "Slide 3: Définitions et concepts fondamentaux — clair, accessible, avec exemples\n" +
+            "Slide 4: Historique et évolution — dates clés, faits marquants\n" +
+            "Slide 5: Fonctionnement détaillé — mécanismes, processus étape par étape\n" +
+            "Slide 6: Comparaisons et distinctions importantes";
+
+        String batch2Desc = "Slide 7: Typologies et catégories\n" +
+            "Slide 8: Services et offres disponibles — liste complète avec exemples\n" +
+            "Slide 9: Avantages pour les bénéficiaires — chiffres, témoignages\n" +
+            "Slide 10: Inconvénients et limites — regard critique\n" +
+            "Slide 11: Cas pratique — exemple réel avec chiffres concrets";
+
+        String batch3Desc = "Slide 12: Rôle dans l'écosystème global — lien avec le secteur\n" +
+            "Slide 13: Enjeux actuels — digitalisation, accessibilité, défis\n" +
+            "Slide 14: Innovations — nouvelles technologies, tendances\n" +
+            "Slide 15: Conclusion synthétique — récapitulatif, messages clés, perspectives\n" +
+            "Slide 16: Quiz interactif — 4 questions à choix multiples avec bonnes réponses";
+
+        String prompt1 = buildPresentationBatchPrompt(programInfo, batch1Desc, 1, slideJsonFormat);
+        String prompt2 = buildPresentationBatchPrompt(programInfo, batch2Desc, 7, slideJsonFormat);
+        String prompt3 = buildPresentationBatchPrompt(programInfo, batch3Desc, 12, slideJsonFormat);
+
+        log.info("📊 Generating presentation in 3 parallel batches...");
+
+        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(3);
+        java.util.concurrent.Future<Map<String, Object>> f1 = executor.submit(() -> callAI(prompt1, 5000));
+        java.util.concurrent.Future<Map<String, Object>> f2 = executor.submit(() -> callAI(prompt2, 5000));
+        java.util.concurrent.Future<Map<String, Object>> f3 = executor.submit(() -> callAI(prompt3, 5000));
+
+        Map<String, Object> r1 = f1.get();
+        Map<String, Object> r2 = f2.get();
+        Map<String, Object> r3 = f3.get();
+        executor.shutdown();
+
+        @SuppressWarnings("unchecked") List<Map<String, Object>> slides1 = (List<Map<String, Object>>) r1.get("slides");
+        @SuppressWarnings("unchecked") List<Map<String, Object>> slides2 = (List<Map<String, Object>>) r2.get("slides");
+        @SuppressWarnings("unchecked") List<Map<String, Object>> slides3 = (List<Map<String, Object>>) r3.get("slides");
+
+        List<Map<String, Object>> allSlides = new ArrayList<>();
+        int idx = 1;
+        if (slides1 != null) for (Map<String, Object> s : slides1) { s.put("id", idx++); allSlides.add(s); }
+        if (slides2 != null) for (Map<String, Object> s : slides2) { s.put("id", idx++); allSlides.add(s); }
+        if (slides3 != null) for (Map<String, Object> s : slides3) { s.put("id", idx++); allSlides.add(s); }
+
+        Map<String, Object> presentation = new HashMap<>();
+        presentation.put("title", curriculum.getOrDefault("title", "Présentation"));
+        presentation.put("slides", allSlides);
+        presentation.put("totalSlides", allSlides.size());
+        presentation.put("estimatedTime", curriculum.getOrDefault("totalDuration", "60") + " min");
+
+        log.info("✅ Presentation generated with {} slides", allSlides.size());
+        return presentation;
+    }
+
+    private String buildPresentationBatchPrompt(String programInfo, String slideDescriptions, int startId, String slideJsonFormat) {
+        return "Tu es un expert en création de présentations professionnelles.\n\n" +
+            "PROGRAMME:\n" + programInfo + "\n\n" +
+            "Génère UNIQUEMENT les slides suivantes. Chaque slide doit être riche et détaillée.\n" +
+            slideDescriptions + "\n\n" +
+            "Réponds UNIQUEMENT avec ce JSON valide, sans markdown (slide id commence à " + startId + "):\n" +
+            slideJsonFormat;
     }
 
     /**
