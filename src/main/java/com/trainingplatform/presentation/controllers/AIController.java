@@ -463,26 +463,32 @@ public class AIController {
     }
 
     /**
-     * Generate rich presentation slides from a curriculum (3 parallel Claude batches)
+     * Generate presentation slides
      */
     @PostMapping("/generate-presentation")
     public ResponseEntity<Map<String, Object>> generatePresentation(@RequestBody Map<String, Object> request) {
         Map<String, Object> response = new HashMap<>();
+        
         try {
-            log.info("🎨 Generating presentation from curriculum");
+            log.info("Generating presentation slides using AI");
+            
             @SuppressWarnings("unchecked")
             Map<String, Object> curriculum = (Map<String, Object>) request.get("curriculum");
+            
             if (curriculum == null) {
                 response.put("success", false);
                 response.put("error", "Curriculum data is required");
                 return ResponseEntity.badRequest().body(response);
             }
+            
             Map<String, Object> presentation = aiService.generatePresentation(curriculum);
+            
             response.put("success", true);
-            response.put("presentation", presentation);
+            response.putAll(presentation);
+            
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            log.error("❌ Error generating presentation: {}", e.getMessage(), e);
+            log.error("Error generating presentation: {}", e.getMessage(), e);
             response.put("success", false);
             response.put("error", "Error generating presentation: " + e.getMessage());
             return ResponseEntity.badRequest().body(response);
