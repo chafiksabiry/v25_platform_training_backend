@@ -125,16 +125,12 @@ public class AIController {
                     .map(f -> new AIService.FileInfo(f.getName(), f.getType(), f.getUrl(), f.getPublicId()))
                     .toList();
             
-            GenerationOptionsRequest options = request.getGenerationOptions();
-            boolean generateModuleQuizzes = options != null ? options.getGenerateModuleQuizzes() : false;
-            boolean generateFinalExam = options != null ? options.getGenerateFinalExam() : false;
+
             
             aiService.organizeTrainingContent(
                 request.getTrainingId(), 
                 files,
-                request.getOrganizationInstructions(),
-                generateModuleQuizzes,
-                generateFinalExam
+                request.getOrganizationInstructions()
             );
             
             response.put("success", true);
@@ -191,14 +187,7 @@ public class AIController {
     }
 
     public static class GenerationOptionsRequest {
-        private Boolean generateModuleQuizzes;
-        private Boolean generateFinalExam;
-
-        public Boolean getGenerateModuleQuizzes() { return generateModuleQuizzes != null ? generateModuleQuizzes : false; }
-        public void setGenerateModuleQuizzes(Boolean generateModuleQuizzes) { this.generateModuleQuizzes = generateModuleQuizzes; }
-
-        public Boolean getGenerateFinalExam() { return generateFinalExam != null ? generateFinalExam : false; }
-        public void setGenerateFinalExam(Boolean generateFinalExam) { this.generateFinalExam = generateFinalExam; }
+        // Evaluation options removed as per content-only requirement
     }
 
     public static class FileInfoRequest {
@@ -250,141 +239,7 @@ public class AIController {
         public void setEstimatedReadTime(Integer estimatedReadTime) { this.estimatedReadTime = estimatedReadTime; }
     }
     
-    /**
-     * Generate quiz questions using AI for a module
-     */
-    @PostMapping("/generate-quiz")
-    public ResponseEntity<Map<String, Object>> generateQuiz(@RequestBody GenerateQuizRequest request) {
-        Map<String, Object> response = new HashMap<>();
-        
-        try {
-            log.info("Generating quiz with {} questions for module", request.getNumberOfQuestions());
-            if (request.getQuestionDistribution() != null) {
-                log.info("Question distribution: {} QCM, {} True/False, {} Multiple Correct", 
-                    request.getQuestionDistribution().get("multipleChoice"),
-                    request.getQuestionDistribution().get("trueFalse"),
-                    request.getQuestionDistribution().get("multipleCorrect"));
-            }
-            
-            Map<String, Object> result = aiService.generateQuiz(
-                    request.getModuleContent(),
-                    request.getNumberOfQuestions(),
-                    request.getDifficulty(),
-                    request.getQuestionTypes(),
-                    request.getQuestionDistribution()
-            );
-            
-            // Verify number of questions returned
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> questions = (List<Map<String, Object>>) result.get("questions");
-            if (questions != null) {
-                log.info("Generated {} questions (requested: {})", questions.size(), request.getNumberOfQuestions());
-                if (questions.size() != request.getNumberOfQuestions()) {
-                    log.warn("⚠️ Mismatch: Requested {} questions but generated {}", 
-                        request.getNumberOfQuestions(), questions.size());
-                }
-            }
-            
-            response.put("success", true);
-            response.put("data", result);
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            log.error("Error generating quiz: {}", e.getMessage(), e);
-            response.put("success", false);
-            response.put("message", "Error generating quiz: " + e.getMessage());
-            return ResponseEntity.badRequest().body(response);
-        }
-    }
-    
-    /**
-     * Generate a final exam for the entire training
-     */
-    @PostMapping("/generate-final-exam")
-    public ResponseEntity<Map<String, Object>> generateFinalExam(@RequestBody GenerateFinalExamRequest request) {
-        Map<String, Object> response = new HashMap<>();
-        
-        try {
-            log.info("Generating final exam with {} questions for training {}. Modules provided: {}, Title: {}", 
-                request.getNumberOfQuestions(), request.getTrainingId(), 
-                request.getModules() != null ? request.getModules().size() : 0,
-                request.getFormationTitle());
-            
-            Map<String, Object> result;
-            if (request.getModules() != null && !request.getModules().isEmpty()) {
-                // Generate exam from provided modules metadata
-                result = aiService.generateFinalExamFromModules(
-                    request.getModules(),
-                    request.getFormationTitle(),
-                    request.getNumberOfQuestions()
-                );
-            } else {
-                // Generate exam from trainingId
-                result = aiService.generateFinalExam(
-                    request.getTrainingId(),
-                    request.getNumberOfQuestions()
-                );
-            }
-            
-            response.put("success", true);
-            response.put("data", result);
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            log.error("Error generating final exam: {}", e.getMessage(), e);
-            response.put("success", false);
-            response.put("message", "Error generating final exam: " + e.getMessage());
-            return ResponseEntity.badRequest().body(response);
-        }
-    }
-    
-    public static class GenerateQuizRequest {
-        private Map<String, Object> moduleContent;
-        private int numberOfQuestions;
-        private String difficulty;
-        private Map<String, Boolean> questionTypes;
-        private Map<String, Object> questionDistribution;
-        private String moduleId;
-        private String trainingId;
 
-        public Map<String, Object> getModuleContent() { return moduleContent; }
-        public void setModuleContent(Map<String, Object> moduleContent) { this.moduleContent = moduleContent; }
-
-        public int getNumberOfQuestions() { return numberOfQuestions; }
-        public void setNumberOfQuestions(int numberOfQuestions) { this.numberOfQuestions = numberOfQuestions; }
-
-        public String getDifficulty() { return difficulty; }
-        public void setDifficulty(String difficulty) { this.difficulty = difficulty; }
-
-        public Map<String, Boolean> getQuestionTypes() { return questionTypes; }
-        public void setQuestionTypes(Map<String, Boolean> questionTypes) { this.questionTypes = questionTypes; }
-
-        public Map<String, Object> getQuestionDistribution() { return questionDistribution; }
-        public void setQuestionDistribution(Map<String, Object> questionDistribution) { this.questionDistribution = questionDistribution; }
-
-        public String getModuleId() { return moduleId; }
-        public void setModuleId(String moduleId) { this.moduleId = moduleId; }
-
-        public String getTrainingId() { return trainingId; }
-        public void setTrainingId(String trainingId) { this.trainingId = trainingId; }
-    }
-    
-    public static class GenerateFinalExamRequest {
-        private String trainingId;
-        private int numberOfQuestions;
-        private List<Map<String, Object>> modules;
-        private String formationTitle;
-
-        public String getTrainingId() { return trainingId; }
-        public void setTrainingId(String trainingId) { this.trainingId = trainingId; }
-
-        public int getNumberOfQuestions() { return numberOfQuestions; }
-        public void setNumberOfQuestions(int numberOfQuestions) { this.numberOfQuestions = numberOfQuestions; }
-
-        public List<Map<String, Object>> getModules() { return modules; }
-        public void setModules(List<Map<String, Object>> modules) { this.modules = modules; }
-
-        public String getFormationTitle() { return formationTitle; }
-        public void setFormationTitle(String formationTitle) { this.formationTitle = formationTitle; }
-    }
     
     /**
      * Analyze a document with AI to extract key topics, learning objectives, etc.
