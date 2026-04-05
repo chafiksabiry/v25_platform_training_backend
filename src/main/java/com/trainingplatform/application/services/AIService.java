@@ -156,7 +156,6 @@ public class AIService {
             "   - Core content (well-structured modules/sections)\n" +
             "   - Practical examples or use cases\n" +
             "   - Summary\n" +
-            "   - Summary\n" +
             "3. Generate output based on user choice:\n" +
             "   IF format = \"presentation\":\n" +
             "   - Create a slide-by-slide structure\n" +
@@ -438,14 +437,8 @@ public class AIService {
         // Parse response and create modules/sections
         createModulesFromAIResponse(training, aiResponse, files);
         
-        // Generate quizzes based on user options
-        if (generateModuleQuizzes || generateFinalExam) {
-            log.info("Auto-generating quizzes for training: {} (module quizzes: {}, final exam: {})", 
-                trainingId, generateModuleQuizzes, generateFinalExam);
-            generateQuizzesForTraining(trainingId, generateModuleQuizzes, generateFinalExam);
-        } else {
-            log.info("Skipping quiz generation for training: {} (user opted out)", trainingId);
-        }
+        // Generate quizzes based on user options - DISABLED as per content-only requirement
+        log.info("Quiz generation disabled for training: {} (content-only mode active)", trainingId);
     }
     
     /**
@@ -474,167 +467,13 @@ public class AIService {
      * Automatically generate quizzes for all modules and final exam
      */
     private void generateQuizzesForTraining(String trainingId, boolean generateModuleQuizzes, boolean generateFinalExam) {
-        try {
-            // Get all modules for this training
-            List<ManualTrainingModule> modules = manualTrainingModuleRepository.findByTrainingId(trainingId);
-            
-            if (modules == null || modules.isEmpty()) {
-                log.warn("No modules found for training {}, skipping quiz generation", trainingId);
-                return;
-            }
-            
-            log.info("Generating quizzes for {} modules (module quizzes: {}, final exam: {})", 
-                modules.size(), generateModuleQuizzes, generateFinalExam);
-            
-            // Generate quiz for each module (5-15 questions based on module content)
-            if (generateModuleQuizzes) {
-            for (ManualTrainingModule module : modules) {
-                try {
-                    log.info("Generating quiz for module: {}", module.getTitle());
+        log.info("generateQuizzesForTraining called but bypassed (evaluations disabled)");
+    }
                     
-                    Map<String, Object> moduleContent = convertModuleToContent(module);
-                    
-                    Map<String, Boolean> questionTypes = new HashMap<>();
-                    questionTypes.put("multipleChoice", true);
-                    questionTypes.put("trueFalse", true);
-                    questionTypes.put("shortAnswer", false);
-                    
-                        // Calculate dynamic number of questions (5-15)
-                        int numberOfQuestions = calculateQuestionsForModule(module);
-                        
-                        Map<String, Object> quizData = generateQuiz(moduleContent, numberOfQuestions, "medium", questionTypes, null);
-                    
-                    // Create the quiz
-                    @SuppressWarnings("unchecked")
-                    List<Map<String, Object>> questions = (List<Map<String, Object>>) quizData.get("questions");
-                    
-                    com.trainingplatform.core.entities.ManualQuiz quiz = new com.trainingplatform.core.entities.ManualQuiz();
-                    quiz.setModuleId(module.getId());
-                    quiz.setTrainingId(trainingId);
-                    quiz.setTitle(module.getTitle() + " - Quiz");
-                    quiz.setDescription("Quiz auto-généré pour le module: " + module.getTitle());
-                    quiz.setPassingScore(70);
-                    quiz.setTimeLimit(15);
-                    quiz.setMaxAttempts(3);
-                    
-                    // Convert questions
-                    List<com.trainingplatform.core.entities.ManualQuiz.QuizQuestion> quizQuestions = new ArrayList<>();
-                    for (Map<String, Object> q : questions) {
-                        com.trainingplatform.core.entities.ManualQuiz.QuizQuestion question = 
-                            new com.trainingplatform.core.entities.ManualQuiz.QuizQuestion();
-                        question.setId((String) q.get("id"));
-                        question.setQuestion((String) q.get("question"));
-                        question.setType((String) q.get("type"));
-                        
-                        @SuppressWarnings("unchecked")
-                        List<String> options = (List<String>) q.get("options");
-                        question.setOptions(options);
-                        question.setCorrectAnswer(q.get("correctAnswer"));
-                        question.setExplanation((String) q.get("explanation"));
-                        question.setPoints(((Number) q.get("points")).intValue());
-                        
-                        quizQuestions.add(question);
-                    }
-                    
-                    quiz.setQuestions(quizQuestions);
-                    quiz.setSettings(com.trainingplatform.core.entities.ManualQuiz.QuizSettings.builder()
-                        .shuffleQuestions(true)
-                        .shuffleOptions(true)
-                        .showCorrectAnswers(true)
-                        .allowReview(true)
-                        .showExplanations(true)
-                        .build());
-                    
-                    // Save quiz
-                    quiz.setCreatedAt(java.time.LocalDateTime.now());
-                    quiz.setUpdatedAt(java.time.LocalDateTime.now());
-                    quiz.setId(java.util.UUID.randomUUID().toString());
-                    
-                    manualQuizRepository.save(quiz);
-                    
-                    log.info("Quiz created successfully for module: {}", module.getTitle());
-                    
-                } catch (Exception e) {
-                    log.error("Failed to generate quiz for module {}: {}", module.getTitle(), e.getMessage());
-                    // Continue with other modules even if one fails
-                    }
-                }
-            }
-            
-            // Generate final exam (20 questions)
-            if (generateFinalExam && modules.size() > 1) {
-                try {
-                    log.info("Generating final exam for training with 20 questions");
-                    Map<String, Object> examData = generateFinalExam(trainingId, 20);
-                    
-                    // Handle nested exam structure
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> exam = (Map<String, Object>) examData.get("exam");
-                    
-                    @SuppressWarnings("unchecked")
-                    List<Map<String, Object>> questions = exam != null 
-                        ? (List<Map<String, Object>>) exam.get("questions")
-                        : (List<Map<String, Object>>) examData.get("questions");
-                    
-                    ManualTraining training = manualTrainingRepository.findById(trainingId).orElse(null);
-                    if (training != null) {
-                        com.trainingplatform.core.entities.ManualQuiz finalExam = 
-                            new com.trainingplatform.core.entities.ManualQuiz();
-                        finalExam.setModuleId(null); // Final exam doesn't belong to a module
-                        finalExam.setTrainingId(trainingId);
-                        finalExam.setTitle("Examen Final - " + training.getTitle());
-                        finalExam.setDescription("Examen final couvrant tous les modules");
-                        finalExam.setPassingScore(80);
-                        finalExam.setTimeLimit(45);
-                        finalExam.setMaxAttempts(2);
-                        
-                        // Convert questions
-                        List<com.trainingplatform.core.entities.ManualQuiz.QuizQuestion> examQuestions = new ArrayList<>();
-                        for (Map<String, Object> q : questions) {
-                            com.trainingplatform.core.entities.ManualQuiz.QuizQuestion question = 
-                                new com.trainingplatform.core.entities.ManualQuiz.QuizQuestion();
-                            question.setId((String) q.get("id"));
-                            question.setQuestion((String) q.get("question"));
-                            question.setType((String) q.get("type"));
-                            
-                            @SuppressWarnings("unchecked")
-                            List<String> options = (List<String>) q.get("options");
-                            question.setOptions(options);
-                            question.setCorrectAnswer(q.get("correctAnswer"));
-                            question.setExplanation((String) q.get("explanation"));
-                            question.setPoints(((Number) q.get("points")).intValue());
-                            
-                            examQuestions.add(question);
-                        }
-                        
-                        finalExam.setQuestions(examQuestions);
-                        finalExam.setSettings(com.trainingplatform.core.entities.ManualQuiz.QuizSettings.builder()
-                            .shuffleQuestions(true)
-                            .shuffleOptions(true)
-                            .showCorrectAnswers(false)
-                            .allowReview(true)
-                            .showExplanations(false)
-                            .build());
-                        
-                        finalExam.setCreatedAt(java.time.LocalDateTime.now());
-                        finalExam.setUpdatedAt(java.time.LocalDateTime.now());
-                        finalExam.setId(java.util.UUID.randomUUID().toString());
-                        
-                        manualQuizRepository.save(finalExam);
-                        
-                        log.info("Final exam created successfully");
-                    }
-                } catch (Exception e) {
-                    log.error("Failed to generate final exam: {}", e.getMessage());
-                }
-            }
-            
-            log.info("Quiz generation completed for training: {}", trainingId);
-            
-        } catch (Exception e) {
-            log.error("Error generating quizzes for training: {}", e.getMessage());
-            // Don't throw exception - allow training creation to succeed even if quiz generation fails
-        }
+    private void archiveLegacyQuizLogic() {
+        // Method to hold the old logic until cleanup is confirmed or logic is moved
+    }
+
     }
 
     private String buildOrganizationPrompt(ManualTraining training, List<FileInfo> files, String organizationInstructions) {
@@ -695,9 +534,17 @@ public class AIService {
 
         for (Map<String, Object> moduleData : modulesData) {
             ManualTrainingModule module = new ManualTrainingModule();
-            module.setTrainingId(training.getId());
-            module.setTitle((String) moduleData.get("title"));
-            module.setDescription((String) moduleData.get("description"));
+            
+            // Set basic info with safety
+            String trainingId = (training != null) ? training.getId() : null;
+            if (trainingId == null) {
+                log.warn("ManualTraining ID is null, skipping module mapping");
+                continue;
+            }
+            
+            module.setTrainingId(trainingId);
+            module.setTitle((String) moduleData.getOrDefault("title", "Untitled Module"));
+            module.setDescription((String) moduleData.getOrDefault("description", ""));
             
             Object durationObj = moduleData.get("estimatedDuration");
             int duration = 60; // default
@@ -721,13 +568,11 @@ public class AIService {
                     section.setTitle((String) sectionData.get("title"));
                     section.setOrderIndex(i + 1);
 
-                    // Get file info
+                    // Get file info with safety
                     Object fileIndexObj = sectionData.get("fileIndex");
                     int fileIndex = -1;
-                    if (fileIndexObj instanceof Integer) {
-                        fileIndex = (Integer) fileIndexObj;
-                    } else if (fileIndexObj instanceof Double) {
-                        fileIndex = ((Double) fileIndexObj).intValue();
+                    if (fileIndexObj instanceof Number number) {
+                        fileIndex = number.intValue();
                     }
 
                     // IMPORTANT: Skip sections without a valid file
