@@ -27,8 +27,6 @@ public class TrainingModule {
     @Transient
     private List<TrainingSection> sections; // For API processing
     
-    @Transient
-    private List<ModuleQuiz> quizzes; // For API processing
     private String title;
     private String description;
     private Integer duration; // in minutes
@@ -41,8 +39,6 @@ public class TrainingModule {
     private List<String> topics = new ArrayList<>();
     @Builder.Default
     private List<String> sectionIds = new ArrayList<>(); // References to Section documents (ObjectIds)
-    @Builder.Default
-    private List<String> quizIds = new ArrayList<>(); // References to ModuleQuiz documents (ObjectIds)
     private Integer order; // Order within the training journey
     
     private LocalDateTime createdAt;

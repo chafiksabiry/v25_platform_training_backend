@@ -10,11 +10,8 @@ import com.trainingplatform.infrastructure.repositories.RepProgressRepository;
 import com.trainingplatform.infrastructure.repositories.RepRepository;
 import com.trainingplatform.infrastructure.repositories.TrainingModuleRepository;
 import com.trainingplatform.infrastructure.repositories.TrainingSectionRepository;
-import com.trainingplatform.infrastructure.repositories.ModuleQuizRepository;
-import com.trainingplatform.infrastructure.repositories.ExamFinalQuizRepository;
 import com.trainingplatform.core.entities.TrainingModule;
 import com.trainingplatform.core.entities.TrainingSection;
-import com.trainingplatform.core.entities.ModuleQuiz;
 import java.util.Optional;
 import com.trainingplatform.presentation.dtos.TrainerDashboardDTO;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,12 +33,6 @@ public class TrainingJourneyService {
     private TrainingSectionRepository sectionRepository;
     
     @Autowired
-    private ModuleQuizRepository quizRepository;
-    
-    @Autowired
-    private ExamFinalQuizRepository finalExamRepository;
-
-    @Autowired
     private TrainingJourneyRepository journeyRepository;
 
     @Autowired
@@ -59,17 +50,6 @@ public class TrainingJourneyService {
      */
     public TrainingJourneyEntity saveJourney(TrainingJourneyEntity journey) {
         System.out.println("[TrainingJourneyService] Saving partitioned journey: " + journey.getTitle());
-        
-        // 1. Process Final Exam (if present)
-        if (journey.getFinalExam() != null) {
-            ModuleQuiz finalExam = journey.getFinalExam();
-            if (finalExam.get_id() == null || !ObjectId.isValid(finalExam.get_id())) {
-                finalExam.set_id(new ObjectId().toHexString());
-            }
-            finalExam.setTrainingId(journey.getId()); // Might be updated later
-            ModuleQuiz savedFinalExam = quizRepository.save(finalExam);
-            journey.setFinalExamId(savedFinalExam.get_id());
-        }
         
         // 2. Process Modules
         List<com.trainingplatform.core.entities.TrainingModule> modulesToSave = journey.getModules();
@@ -100,19 +80,7 @@ public class TrainingJourneyService {
                 }
                 module.setSectionIds(sectionIds);
                 
-                // 2.b Process Quizzes within Module
-                List<String> quizIds = new ArrayList<>();
-                if (module.getQuizzes() != null) {
-                    for (ModuleQuiz quiz : module.getQuizzes()) {
-                        if (quiz.get_id() == null || !ObjectId.isValid(quiz.get_id())) {
-                            quiz.set_id(new ObjectId().toHexString());
-                        }
-                        quiz.setModuleId(module.get_id());
-                        quizRepository.save(quiz);
-                        quizIds.add(quiz.get_id());
-                    }
-                }
-                module.setQuizIds(quizIds);
+                module.setQuizIds(new ArrayList<>());
                 
                 module.setTrainingJourneyId(journey.getId()); // Might be updated later
                 com.trainingplatform.core.entities.TrainingModule savedModule = moduleRepository.save(module);
@@ -137,13 +105,6 @@ public class TrainingJourneyService {
                     moduleRepository.save(m);
                 });
             }
-        }
-        
-        if (journey.getFinalExamId() != null) {
-            quizRepository.findById(journey.getFinalExamId()).ifPresent(q -> {
-                q.setTrainingId(savedJourney.getId());
-                quizRepository.save(q);
-            });
         }
         
         return savedJourney;
@@ -177,14 +138,7 @@ public class TrainingJourneyService {
                         module.setSections(sections);
                     }
                     
-                    // Re-assemble quizzes for this module
-                    if (module.getQuizIds() != null && !module.getQuizIds().isEmpty()) {
-                        List<ModuleQuiz> quizzes = new ArrayList<>();
-                        for (String quizId : module.getQuizIds()) {
-                            quizRepository.findById(quizId).ifPresent(quizzes::add);
-                        }
-                        module.setQuizzes(quizzes);
-                    }
+                    module.setQuizzes(new ArrayList<>());
                     
                     modules.add(module);
                 });
@@ -194,10 +148,7 @@ public class TrainingJourneyService {
             journey.setModules(modules);
         }
         
-        // Re-assemble final exam
-        if (journey.getFinalExamId() != null) {
-            quizRepository.findById(journey.getFinalExamId()).ifPresent(journey::setFinalExam);
-        }
+        journey.setFinalExam(null);
 
         return journey;
     }

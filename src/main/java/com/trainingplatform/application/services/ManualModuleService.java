@@ -2,7 +2,6 @@ package com.trainingplatform.application.services;
 
 import com.trainingplatform.core.entities.ManualTrainingModule;
 import com.trainingplatform.infrastructure.repositories.ManualTrainingModuleRepository;
-import com.trainingplatform.infrastructure.repositories.ManualQuizRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -20,7 +19,6 @@ import java.util.UUID;
 public class ManualModuleService {
     
     private final ManualTrainingModuleRepository moduleRepository;
-    private final ManualQuizRepository quizRepository;
     private final GCPStorageService gcpStorageService;
     
     /**
@@ -171,14 +169,11 @@ public class ManualModuleService {
     }
     
     /**
-     * Delete module and associated quizzes
+     * Delete module and associated data
      */
     @Transactional
     public void deleteModule(String id) {
         ManualTrainingModule module = getModuleById(id);
-        
-        // Delete associated quizzes
-        quizRepository.deleteByModuleId(id);
         
         // Delete module
         moduleRepository.delete(module);

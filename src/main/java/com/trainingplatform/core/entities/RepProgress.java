@@ -122,17 +122,10 @@ public class RepProgress {
         @Max(value = 100, message = "Progress cannot exceed 100")
         private int progress = 0; // 0-100
         
-        @Min(value = 0, message = "Score cannot be negative")
-        @Max(value = 100, message = "Score cannot exceed 100")
-        private Integer score; // Quiz score
-        
         private int timeSpent = 0; // Time spent on this module in minutes
         
         // Map of sectionId -> SectionProgress
         private Map<String, SectionProgress> sections = new HashMap<>();
-        
-        // Map of quizId -> QuizResult to track quiz attempts and results
-        private Map<String, QuizResult> quizz = new HashMap<>();
         
         private LocalDateTime lastAccessed;
 
@@ -151,9 +144,6 @@ public class RepProgress {
         public int getProgress() { return progress; }
         public void setProgress(int progress) { this.progress = progress; }
 
-        public Integer getScore() { return score; }
-        public void setScore(Integer score) { this.score = score; }
-
         public int getTimeSpent() { return timeSpent; }
         public void setTimeSpent(int timeSpent) { this.timeSpent = timeSpent; }
 
@@ -162,59 +152,10 @@ public class RepProgress {
             this.sections = sections != null ? sections : new HashMap<>();
         }
 
-        public Map<String, QuizResult> getQuizz() { return quizz; }
-        public void setQuizz(Map<String, QuizResult> quizz) { 
-            this.quizz = quizz != null ? quizz : new HashMap<>(); 
-        }
-
         public LocalDateTime getLastAccessed() { return lastAccessed; }
         public void setLastAccessed(LocalDateTime lastAccessed) { this.lastAccessed = lastAccessed; }
     }
     
-    // Inner class for Quiz Result
-    public static class QuizResult {
-        private String quizId;
-        private Integer score; // Score obtained (0-100)
-        private Boolean passed; // Whether the quiz was passed
-        private Integer totalQuestions; // Total number of questions
-        private Integer correctAnswers; // Number of correct answers
-        private LocalDateTime completedAt; // When the quiz was completed
-        private Integer attempts; // Number of attempts
-        
-        // Constructors
-        public QuizResult() {}
-        
-        public QuizResult(String quizId, Integer score, Boolean passed) {
-            this.quizId = quizId;
-            this.score = score;
-            this.passed = passed;
-            this.completedAt = LocalDateTime.now();
-            this.attempts = 1;
-        }
-        
-        // Getters and Setters
-        public String getQuizId() { return quizId; }
-        public void setQuizId(String quizId) { this.quizId = quizId; }
-        
-        public Integer getScore() { return score; }
-        public void setScore(Integer score) { this.score = score; }
-        
-        public Boolean getPassed() { return passed; }
-        public void setPassed(Boolean passed) { this.passed = passed; }
-        
-        public Integer getTotalQuestions() { return totalQuestions; }
-        public void setTotalQuestions(Integer totalQuestions) { this.totalQuestions = totalQuestions; }
-        
-        public Integer getCorrectAnswers() { return correctAnswers; }
-        public void setCorrectAnswers(Integer correctAnswers) { this.correctAnswers = correctAnswers; }
-        
-        public LocalDateTime getCompletedAt() { return completedAt; }
-        public void setCompletedAt(LocalDateTime completedAt) { this.completedAt = completedAt; }
-        
-        public Integer getAttempts() { return attempts; }
-        public void setAttempts(Integer attempts) { this.attempts = attempts; }
-    }
-
     // Inner class for Section Progress
     public static class SectionProgress {
         private boolean completed = false;

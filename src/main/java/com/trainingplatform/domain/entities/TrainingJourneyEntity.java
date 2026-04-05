@@ -29,11 +29,7 @@ public class TrainingJourneyEntity {
     @Transient
     private List<TrainingModule> modules; // For API processing (input/output)
     
-    @Transient
-    private ModuleQuiz finalExam; // For API processing (input/output)
-
     private List<String> moduleIds; // References to TrainingModule documents (ObjectIds)
-    private String finalExamId; // Reference to FinalExamQuiz document (ObjectId)
     private List<String> enrolledRepIds;
     
     private LocalDateTime createdAt;
@@ -125,29 +121,6 @@ public class TrainingJourneyEntity {
         this.modules = modules;
     }
     
-    public ModuleQuiz getFinalExam() {
-        return finalExam;
-    }
-    
-    public void setFinalExam(ModuleQuiz finalExam) {
-        this.finalExam = finalExam;
-    }
-    
-    public List<String> getModuleIds() {
-        return moduleIds;
-    }
-    
-    public void setModuleIds(List<String> moduleIds) {
-        this.moduleIds = moduleIds;
-    }
-    
-    public String getFinalExamId() {
-        return finalExamId;
-    }
-    
-    public void setFinalExamId(String finalExamId) {
-        this.finalExamId = finalExamId;
-    }
     
     public List<String> getEnrolledRepIds() {
         return enrolledRepIds;
