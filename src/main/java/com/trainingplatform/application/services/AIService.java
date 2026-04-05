@@ -474,8 +474,6 @@ public class AIService {
         // Method to hold the old logic until cleanup is confirmed or logic is moved
     }
 
-    }
-
     private String buildOrganizationPrompt(ManualTraining training, List<FileInfo> files, String organizationInstructions) {
         StringBuilder prompt = new StringBuilder();
         prompt.append("Create training modules from files. Analyze content and organize logically.\n\n");
