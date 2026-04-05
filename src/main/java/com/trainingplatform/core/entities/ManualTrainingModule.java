@@ -28,9 +28,6 @@ public class ManualTrainingModule {
     @Builder.Default
     private List<TrainingSection> sections = new ArrayList<>();
     
-    @Builder.Default
-    private List<String> quizIds = new ArrayList<>();
-    
     private Integer estimatedDuration; // in minutes
     
     private LocalDateTime createdAt;
