@@ -156,7 +156,7 @@ public class AIService {
             "   - Core content (well-structured modules/sections)\n" +
             "   - Practical examples or use cases\n" +
             "   - Summary\n" +
-            "   - Evaluation (quiz or questions)\n" +
+            "   - Summary\n" +
             "3. Generate output based on user choice:\n" +
             "   IF format = \"presentation\":\n" +
             "   - Create a slide-by-slide structure\n" +
@@ -172,7 +172,7 @@ public class AIService {
             "   - Adapt the difficulty level to beginner/intermediate learners\n" +
             "5. Output format must be structured JSON EXACTLY as below, do not add markdown backticks:\n\n" +
             "{\n" +
-            "  \"title\": \"\",\n  \"objectives\": [],\n  \"format\": \"" + format + "\",\n  \"content\": [],\n  \"evaluation\": []\n}\n";
+            "  \"title\": \"\",\n  \"objectives\": [],\n  \"format\": \"" + format + "\",\n  \"content\": []\n}\n";
 
         // Limit length to avoid blowing up the token context
         if (prompt.length() > 30000) {
@@ -328,8 +328,7 @@ public class AIService {
         String batch3Desc = "Slide 12: Rôle dans l'écosystème global — lien avec le secteur\n" +
             "Slide 13: Enjeux actuels — digitalisation, accessibilité, défis\n" +
             "Slide 14: Innovations — nouvelles technologies, tendances\n" +
-            "Slide 15: Conclusion synthétique — récapitulatif, messages clés, perspectives\n" +
-            "Slide 16: Quiz interactif — 4 questions à choix multiples avec bonnes réponses";
+            "Slide 15: Conclusion synthétique — récapitulatif, messages clés, perspectives";
 
         String prompt1 = buildPresentationBatchPrompt(programInfo, batch1Desc, 1, slideJsonFormat);
         String prompt2 = buildPresentationBatchPrompt(programInfo, batch2Desc, 7, slideJsonFormat);
