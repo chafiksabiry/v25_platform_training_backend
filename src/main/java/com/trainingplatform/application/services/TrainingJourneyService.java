@@ -40,6 +40,18 @@ public class TrainingJourneyService {
     
     @Autowired
     private ExamFinalQuizRepository finalExamRepository;
+
+    @Autowired
+    private TrainingJourneyRepository journeyRepository;
+
+    @Autowired
+    private GigRepository gigRepository;
+
+    @Autowired
+    private RepProgressRepository repProgressRepository;
+
+    @Autowired
+    private RepRepository repRepository;
     
     /**
      * Create or update a training journey
@@ -141,52 +153,53 @@ public class TrainingJourneyService {
      * Get a journey by ID (Re-assembles the partitioned documents)
      */
     public Optional<TrainingJourneyEntity> getJourneyById(String id) {
-        Optional<TrainingJourneyEntity> journeyOpt = journeyRepository.findById(id);
-        
-        if (journeyOpt.isPresent()) {
-            TrainingJourneyEntity journey = journeyOpt.get();
-            
-            // Re-assemble modules
-            if (journey.getModuleIds() != null && !journey.getModuleIds().isEmpty()) {
-                List<com.trainingplatform.core.entities.TrainingModule> modules = new ArrayList<>();
-                for (String moduleId : journey.getModuleIds()) {
-                    moduleRepository.findById(moduleId).ifPresent(module -> {
-                        // Re-assemble sections for this module
-                        if (module.getSectionIds() != null && !module.getSectionIds().isEmpty()) {
-                            List<com.trainingplatform.core.entities.TrainingSection> sections = new ArrayList<>();
-                            for (String sectionId : module.getSectionIds()) {
-                                sectionRepository.findById(sectionId).ifPresent(sections::add);
-                            }
-                            sections.sort(Comparator.comparingInt(s -> s.getOrder() != null ? s.getOrder() : 0));
-                            module.setSections(sections);
+        return journeyRepository.findById(id).map(this::reassembleJourney);
+    }
+
+    /**
+     * Helper to re-assemble a journey from its partitioned documents
+     */
+    private TrainingJourneyEntity reassembleJourney(TrainingJourneyEntity journey) {
+        if (journey == null) return null;
+
+        // Re-assemble modules
+        if (journey.getModuleIds() != null && !journey.getModuleIds().isEmpty()) {
+            List<TrainingModule> modules = new ArrayList<>();
+            for (String moduleId : journey.getModuleIds()) {
+                moduleRepository.findById(moduleId).ifPresent(module -> {
+                    // Re-assemble sections for this module
+                    if (module.getSectionIds() != null && !module.getSectionIds().isEmpty()) {
+                        List<TrainingSection> sections = new ArrayList<>();
+                        for (String sectionId : module.getSectionIds()) {
+                            sectionRepository.findById(sectionId).ifPresent(sections::add);
                         }
-                        
-                        // Re-assemble quizzes for this module
-                        if (module.getQuizIds() != null && !module.getQuizIds().isEmpty()) {
-                            List<ModuleQuiz> quizzes = new ArrayList<>();
-                            for (String quizId : module.getQuizIds()) {
-                                quizRepository.findById(quizId).ifPresent(quizzes::add);
-                            }
-                            module.setQuizzes(quizzes);
+                        sections.sort(Comparator.comparingInt(s -> s.getOrder() != null ? s.getOrder() : 0));
+                        module.setSections(sections);
+                    }
+                    
+                    // Re-assemble quizzes for this module
+                    if (module.getQuizIds() != null && !module.getQuizIds().isEmpty()) {
+                        List<ModuleQuiz> quizzes = new ArrayList<>();
+                        for (String quizId : module.getQuizIds()) {
+                            quizRepository.findById(quizId).ifPresent(quizzes::add);
                         }
-                        
-                        modules.add(module);
-                    });
-                }
-                // Sort by order
-                modules.sort(Comparator.comparingInt(m -> m.getOrder() != null ? m.getOrder() : 0));
-                journey.setModules(modules);
+                        module.setQuizzes(quizzes);
+                    }
+                    
+                    modules.add(module);
+                });
             }
-            
-            // Re-assemble final exam
-            if (journey.getFinalExamId() != null) {
-                quizRepository.findById(journey.getFinalExamId()).ifPresent(journey::setFinalExam);
-            }
-            
-            return Optional.of(journey);
+            // Sort by order
+            modules.sort(Comparator.comparingInt(m -> m.getOrder() != null ? m.getOrder() : 0));
+            journey.setModules(modules);
         }
         
-        return journeyOpt;
+        // Re-assemble final exam
+        if (journey.getFinalExamId() != null) {
+            quizRepository.findById(journey.getFinalExamId()).ifPresent(journey::setFinalExam);
+        }
+
+        return journey;
     }
     
     /**
@@ -307,16 +320,18 @@ public class TrainingJourneyService {
     public TrainerDashboardDTO getTrainerDashboard(String companyId, String gigId) {
         System.out.println("[TrainerDashboard] Getting dashboard for companyId: " + companyId + ", gigId: " + gigId);
         
-        // Get all journeys for this company/gig
+        // Get all journeys for this company/gig and reassemble them
         List<TrainingJourneyEntity> journeys = getJourneysByCompanyAndGig(companyId, gigId);
-        System.out.println("[TrainerDashboard] Found " + journeys.size() + " journeys");
+        System.out.println("[TrainerDashboard] Found " + journeys.size() + " journeys to reassemble");
+        
+        for (int i = 0; i < journeys.size(); i++) {
+            journeys.set(i, reassembleJourney(journeys.get(i)));
+        }
         
         // Collect all unique enrolled rep IDs
         Set<String> enrolledRepIds = new HashSet<>();
         for (TrainingJourneyEntity journey : journeys) {
-            System.out.println("[TrainerDashboard] Journey ID: " + journey.getId() + ", Title: " + journey.getTitle());
-            System.out.println("[TrainerDashboard] Journey status: " + journey.getStatus());
-            System.out.println("[TrainerDashboard] Journey companyId: " + journey.getCompanyId() + ", gigId: " + journey.getGigId());
+            System.out.println("[TrainerDashboard] Processed Journey ID: " + journey.getId() + ", Title: " + journey.getTitle());
             
             if (journey.getEnrolledRepIds() != null && !journey.getEnrolledRepIds().isEmpty()) {
                 System.out.println("[TrainerDashboard] EnrolledRepIds (" + journey.getEnrolledRepIds().size() + "): " + journey.getEnrolledRepIds());
@@ -571,8 +586,8 @@ public class TrainingJourneyService {
             Rep firstRep = repMap.get(firstRepId);
             
             for (TrainingJourneyEntity journey : journeys) {
-                // Use embedded modules from journey.getModules()
-                List<TrainingJourneyEntity.TrainingModuleEntity> modules = journey.getModules();
+                // Use re-assembled modules from journey.getModules() (transient field)
+                List<TrainingModule> modules = journey.getModules();
                 if (modules != null && !modules.isEmpty() && firstRep != null) {
                     for (int i = 0; i < Math.min(modules.size(), 3); i++) {
                         TrainerDashboardDTO.DeadlineInfo deadline = new TrainerDashboardDTO.DeadlineInfo();
