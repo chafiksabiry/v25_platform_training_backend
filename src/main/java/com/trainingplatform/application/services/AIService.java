@@ -308,8 +308,9 @@ public class AIService {
 
         String slideJsonFormat = "{\"slides\": [{\"id\": 1, \"type\": \"cover|agenda|content|exercise|conclusion\", " +
             "\"title\": \"Titre\", \"subtitle\": \"Sous-titre\", \"content\": \"Contenu principal (2-3 phrases)\", " +
-            "\"bullets\": [\"point 1\", \"point 2\"], \"note\": \"Note présentateur avec exemples\", " +
-            "\"icon\": \"emoji\", \"highlight\": \"chiffre clé\"}]}";
+            "\"bullets\": [\"point 1\", \"point 2\"], \"note\": \"Note pr\u00E9sentateur\", " +
+            "\"icon\": \"emoji\", \"highlight\": \"chiffre cl\u00E9\", " +
+            "\"imageUrl\": \"Générer une URL d'image Pollinations AI. Format obligatoire exact: https://image.pollinations.ai/prompt/DESCRIPTION+EN+ANGLAIS+ICI+ultra+realiste+photographic?width=800&height=600&nologo=true Exemple: https://image.pollinations.ai/prompt/a+professional+business+meeting+in+modern+office+ultra+realiste?width=800&height=600&nologo=true\"}]}";
 
         String batch1Desc = "Slide 1: Slide de titre — accroche très impactante, slogan fort, chiffre clé du domaine\n" +
             "Slide 2: Contexte et problématique — statistiques, enjeux actuels, chiffres de référence\n" +
