@@ -23,132 +23,163 @@ import org.bson.types.ObjectId;
 public class TrainingJourneyService {
     
     @Autowired
-    private TrainingJourneyRepository journeyRepository;
+    private TrainingModuleRepository moduleRepository;
     
     @Autowired
-    private GigRepository gigRepository;
+    private TrainingSectionRepository sectionRepository;
     
     @Autowired
-    private RepProgressRepository repProgressRepository;
+    private ModuleQuizRepository quizRepository;
     
     @Autowired
-    private RepRepository repRepository;
-    
-    // TrainingModuleService no longer needed - modules are embedded in journey
+    private ExamFinalQuizRepository finalExamRepository;
     
     /**
      * Create or update a training journey
-     * Ensures all modules, sections, quizzes, and questions have MongoDB ObjectIds
+     * This method handles the "shredding" of the nested journey object into 4 collections
      */
     public TrainingJourneyEntity saveJourney(TrainingJourneyEntity journey) {
-        // Ensure all ObjectIds are generated before saving
-        ensureObjectIdsForJourney(journey);
+        System.out.println("[TrainingJourneyService] Saving partitioned journey: " + journey.getTitle());
+        
+        // 1. Process Final Exam (if present)
+        if (journey.getFinalExam() != null) {
+            ModuleQuiz finalExam = journey.getFinalExam();
+            if (finalExam.get_id() == null || !ObjectId.isValid(finalExam.get_id())) {
+                finalExam.set_id(new ObjectId().toHexString());
+            }
+            finalExam.setTrainingId(journey.getId()); // Might be updated later
+            ModuleQuiz savedFinalExam = quizRepository.save(finalExam);
+            journey.setFinalExamId(savedFinalExam.get_id());
+        }
+        
+        // 2. Process Modules
+        List<com.trainingplatform.core.entities.TrainingModule> modulesToSave = journey.getModules();
+        List<String> savedModuleIds = new ArrayList<>();
+        
+        if (modulesToSave != null) {
+            for (int i = 0; i < modulesToSave.size(); i++) {
+                com.trainingplatform.core.entities.TrainingModule module = modulesToSave.get(i);
+                module.setOrder(i);
+                
+                if (module.get_id() == null || !ObjectId.isValid(module.get_id())) {
+                    module.set_id(new ObjectId().toHexString());
+                }
+                
+                // 2.a Process Sections within Module
+                List<String> sectionIds = new ArrayList<>();
+                if (module.getSections() != null) {
+                    for (int j = 0; j < module.getSections().size(); j++) {
+                        com.trainingplatform.core.entities.TrainingSection section = module.getSections().get(j);
+                        if (section.get_id() == null || !ObjectId.isValid(section.get_id())) {
+                            section.set_id(new ObjectId().toHexString());
+                        }
+                        section.setModuleId(module.get_id());
+                        section.setOrder(j);
+                        sectionRepository.save(section);
+                        sectionIds.add(section.get_id());
+                    }
+                }
+                module.setSectionIds(sectionIds);
+                
+                // 2.b Process Quizzes within Module
+                List<String> quizIds = new ArrayList<>();
+                if (module.getQuizzes() != null) {
+                    for (ModuleQuiz quiz : module.getQuizzes()) {
+                        if (quiz.get_id() == null || !ObjectId.isValid(quiz.get_id())) {
+                            quiz.set_id(new ObjectId().toHexString());
+                        }
+                        quiz.setModuleId(module.get_id());
+                        quizRepository.save(quiz);
+                        quizIds.add(quiz.get_id());
+                    }
+                }
+                module.setQuizIds(quizIds);
+                
+                module.setTrainingJourneyId(journey.getId()); // Might be updated later
+                com.trainingplatform.core.entities.TrainingModule savedModule = moduleRepository.save(module);
+                savedModuleIds.add(savedModule.get_id());
+            }
+        }
+        
+        journey.setModuleIds(savedModuleIds);
         
         if (journey.getId() == null) {
             journey.setCreatedAt(LocalDateTime.now());
         }
         journey.setUpdatedAt(LocalDateTime.now());
         
-        return journeyRepository.save(journey);
-    }
-    
-    /**
-     * Ensure all modules, sections, quizzes, and questions have MongoDB ObjectIds
-     */
-    private void ensureObjectIdsForJourney(TrainingJourneyEntity journey) {
-        if (journey.getModules() == null) return;
+        TrainingJourneyEntity savedJourney = journeyRepository.save(journey);
         
-        for (TrainingJourneyEntity.TrainingModuleEntity module : journey.getModules()) {
-            // Ensure module has _id
-            String moduleId = module.get_id();
-            if (moduleId == null || moduleId.isEmpty() || !ObjectId.isValid(moduleId)) {
-                moduleId = new ObjectId().toHexString();
-                module.set_id(moduleId);
-                System.out.println("[TrainingJourneyService] Generated MongoDB ObjectId for module: " + moduleId);
-            }
-            
-            // Ensure sections have _id
-            if (module.getSections() != null) {
-                for (TrainingJourneyEntity.SectionEntity section : module.getSections()) {
-                    String sectionId = section.get_id();
-                    if (sectionId == null || sectionId.isEmpty() || !ObjectId.isValid(sectionId)) {
-                        sectionId = new ObjectId().toHexString();
-                        section.set_id(sectionId);
-                        System.out.println("[TrainingJourneyService] Generated MongoDB ObjectId for section: " + sectionId);
-                    }
-                }
-            }
-            
-            // Ensure quizzes have _id
-            if (module.getQuizzes() != null) {
-                for (TrainingJourneyEntity.QuizEntity quiz : module.getQuizzes()) {
-                    String quizId = quiz.get_id();
-                    if (quizId == null || quizId.isEmpty() || !ObjectId.isValid(quizId)) {
-                        quizId = new ObjectId().toHexString();
-                        quiz.set_id(quizId);
-                        System.out.println("[TrainingJourneyService] Generated MongoDB ObjectId for quiz: " + quizId);
-                    }
-                    
-                    // Ensure quiz questions have _id
-                    if (quiz.getQuestions() != null) {
-                        for (TrainingJourneyEntity.QuizQuestion question : quiz.getQuestions()) {
-                            String questionId = question.get_id();
-                            if (questionId == null || questionId.isEmpty() || !ObjectId.isValid(questionId)) {
-                                questionId = new ObjectId().toHexString();
-                                question.set_id(questionId);
-                                System.out.println("[TrainingJourneyService] Generated MongoDB ObjectId for question: " + questionId);
-                            }
-                        }
-                    }
-                }
+        // 3. Update references if journey was NEW
+        if (savedModuleIds.size() > 0) {
+            for (String moduleId : savedModuleIds) {
+                moduleRepository.findById(moduleId).ifPresent(m -> {
+                    m.setTrainingJourneyId(savedJourney.getId());
+                    moduleRepository.save(m);
+                });
             }
         }
         
-        // Ensure final exam has _id
-        if (journey.getFinalExam() != null) {
-            TrainingJourneyEntity.FinalExamEntity finalExam = journey.getFinalExam();
-            String finalExamId = finalExam.get_id();
-            if (finalExamId == null || finalExamId.isEmpty() || !ObjectId.isValid(finalExamId)) {
-                finalExamId = new ObjectId().toHexString();
-                finalExam.set_id(finalExamId);
-                System.out.println("[TrainingJourneyService] Generated MongoDB ObjectId for final exam: " + finalExamId);
-            }
-            
-            // Ensure final exam questions have _id
-            if (finalExam.getQuestions() != null) {
-                for (TrainingJourneyEntity.QuizQuestion question : finalExam.getQuestions()) {
-                    String questionId = question.get_id();
-                    if (questionId == null || questionId.isEmpty() || !ObjectId.isValid(questionId)) {
-                        questionId = new ObjectId().toHexString();
-                        question.set_id(questionId);
-                        System.out.println("[TrainingJourneyService] Generated MongoDB ObjectId for final exam question: " + questionId);
-                    }
-                }
-            }
+        if (journey.getFinalExamId() != null) {
+            quizRepository.findById(journey.getFinalExamId()).ifPresent(q -> {
+                q.setTrainingId(savedJourney.getId());
+                quizRepository.save(q);
+            });
         }
+        
+        return savedJourney;
     }
     
     /**
-     * Launch a training journey
-     * Ensures all modules, sections, quizzes, and questions have MongoDB ObjectIds
-     */
-    public TrainingJourneyEntity launchJourney(TrainingJourneyEntity journey, List<String> enrolledRepIds) {
-        // Ensure all ObjectIds are generated before launching
-        ensureObjectIdsForJourney(journey);
-        
-        journey.setStatus("active");
-        journey.setEnrolledRepIds(enrolledRepIds);
-        journey.setLaunchDate(LocalDateTime.now());
-        journey.setUpdatedAt(LocalDateTime.now());
-        
-        return journeyRepository.save(journey);
-    }
-    
-    /**
-     * Get a journey by ID
+     * Get a journey by ID (Re-assembles the partitioned documents)
      */
     public Optional<TrainingJourneyEntity> getJourneyById(String id) {
-        return journeyRepository.findById(id);
+        Optional<TrainingJourneyEntity> journeyOpt = journeyRepository.findById(id);
+        
+        if (journeyOpt.isPresent()) {
+            TrainingJourneyEntity journey = journeyOpt.get();
+            
+            // Re-assemble modules
+            if (journey.getModuleIds() != null && !journey.getModuleIds().isEmpty()) {
+                List<com.trainingplatform.core.entities.TrainingModule> modules = new ArrayList<>();
+                for (String moduleId : journey.getModuleIds()) {
+                    moduleRepository.findById(moduleId).ifPresent(module -> {
+                        // Re-assemble sections for this module
+                        if (module.getSectionIds() != null && !module.getSectionIds().isEmpty()) {
+                            List<com.trainingplatform.core.entities.TrainingSection> sections = new ArrayList<>();
+                            for (String sectionId : module.getSectionIds()) {
+                                sectionRepository.findById(sectionId).ifPresent(sections::add);
+                            }
+                            sections.sort(Comparator.comparingInt(s -> s.getOrder() != null ? s.getOrder() : 0));
+                            module.setSections(sections);
+                        }
+                        
+                        // Re-assemble quizzes for this module
+                        if (module.getQuizIds() != null && !module.getQuizIds().isEmpty()) {
+                            List<ModuleQuiz> quizzes = new ArrayList<>();
+                            for (String quizId : module.getQuizIds()) {
+                                quizRepository.findById(quizId).ifPresent(quizzes::add);
+                            }
+                            module.setQuizzes(quizzes);
+                        }
+                        
+                        modules.add(module);
+                    });
+                }
+                // Sort by order
+                modules.sort(Comparator.comparingInt(m -> m.getOrder() != null ? m.getOrder() : 0));
+                journey.setModules(modules);
+            }
+            
+            // Re-assemble final exam
+            if (journey.getFinalExamId() != null) {
+                quizRepository.findById(journey.getFinalExamId()).ifPresent(journey::setFinalExam);
+            }
+            
+            return Optional.of(journey);
+        }
+        
+        return journeyOpt;
     }
     
     /**
