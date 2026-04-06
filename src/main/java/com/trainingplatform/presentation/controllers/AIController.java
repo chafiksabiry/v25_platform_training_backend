@@ -299,6 +299,7 @@ public class AIController {
             log.info("Generating real curriculum using AI");
             
             // Extract attributes matching frontend's DocumentAnalysis object
+            @SuppressWarnings("unchecked")
             Map<String, Object> analysis = (Map<String, Object>) request.get("analysis");
             String industry = (String) request.getOrDefault("industry", "General");
             String gig = (String) request.get("gig");
@@ -462,6 +463,7 @@ public class AIController {
     @PostMapping("/export-powerpoint")
     public ResponseEntity<byte[]> exportPowerPoint(@RequestBody Map<String, Object> request) {
         try {
+            @SuppressWarnings("unchecked")
             Map<String, Object> curriculum = (Map<String, Object>) request.get("curriculum");
             if (curriculum == null) {
                 // If not nested, use the whole request body
