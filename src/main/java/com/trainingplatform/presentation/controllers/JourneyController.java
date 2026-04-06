@@ -3,16 +3,13 @@ package com.trainingplatform.presentation.controllers;
 import com.trainingplatform.application.services.TrainingJourneyService;
 import com.trainingplatform.infrastructure.repositories.RepProgressRepository;
 import com.trainingplatform.core.entities.RepProgress;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
-
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import com.trainingplatform.domain.entities.TrainingJourneyEntity;
+import com.trainingplatform.core.entities.TrainingModule;
+import com.trainingplatform.core.entities.TrainingSection;
+import com.trainingplatform.domain.entities.GigEntity;
+import com.trainingplatform.domain.entities.IndustryEntity;
+import com.trainingplatform.domain.repositories.GigRepository;
+import com.trainingplatform.domain.repositories.IndustryRepository;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import org.bson.types.ObjectId;
@@ -1273,14 +1270,13 @@ public class JourneyController {
             // ✅ Utiliser Jackson pour une conversion complète de TOUS les champs
             TrainingJourneyEntity entity = objectMapper.convertValue(data, TrainingJourneyEntity.class);
             
-            // Explicitly handle embedded modules and finalExam
+            // Explicitly handle embedded modules
             if (data.containsKey("modules")) {
                 @SuppressWarnings("unchecked")
                 List<Map<String, Object>> modulesData = (List<Map<String, Object>>) data.get("modules");
-                List<TrainingJourneyEntity.TrainingModuleEntity> modules = convertModules(modulesData);
+                List<TrainingModule> modules = convertModules(modulesData);
                 entity.setModules(modules);
-                System.out.println("[JourneyController] Set modules: " + modules.size() + " modules");
-            }
+                System.out.println("[JourneyController] Set modules: " + (modules != null ? modules.size() : 0) + " modules");
             }
             
             return entity;
@@ -1343,26 +1339,24 @@ public class JourneyController {
                     entity.setGigId(gigIdObj != null ? gigIdObj.toString() : null);
                 }
             }
+            
             if (data.containsKey("modules")) {
                 @SuppressWarnings("unchecked")
                 List<Map<String, Object>> modulesData = (List<Map<String, Object>>) data.get("modules");
-                List<TrainingJourneyEntity.TrainingModuleEntity> modules = convertModules(modulesData);
+                List<TrainingModule> modules = convertModules(modulesData);
                 entity.setModules(modules);
             }
-            }
-            
-            System.err.println("⚠️ Conversion partielle - certains champs peuvent manquer");
             return entity;
         }
     }
     
     // Helper method to convert modules list
-    private List<TrainingJourneyEntity.TrainingModuleEntity> convertModules(List<Map<String, Object>> modulesData) {
-        List<TrainingJourneyEntity.TrainingModuleEntity> modules = new java.util.ArrayList<>();
+    private List<TrainingModule> convertModules(List<Map<String, Object>> modulesData) {
+        List<TrainingModule> modules = new java.util.ArrayList<>();
         if (modulesData == null) return modules;
         
         for (Map<String, Object> moduleData : modulesData) {
-            TrainingJourneyEntity.TrainingModuleEntity module = new TrainingJourneyEntity.TrainingModuleEntity();
+            TrainingModule module = new TrainingModule();
             
             // Extract _id if present (Extended JSON format)
             String moduleId = null;
@@ -1415,36 +1409,24 @@ public class JourneyController {
                 List<String> topics = (List<String>) moduleData.get("topics");
                 module.setTopics(topics != null ? topics : new java.util.ArrayList<>());
             }
-            if (moduleData.containsKey("order")) {
-                Object orderObj = moduleData.get("order");
-                if (orderObj instanceof Number) {
-                    module.setOrder(((Number) orderObj).intValue());
-                }
-            }
-            
-            // Convert sections
             if (moduleData.containsKey("sections")) {
                 @SuppressWarnings("unchecked")
                 List<Map<String, Object>> sectionsData = (List<Map<String, Object>>) moduleData.get("sections");
-                List<TrainingJourneyEntity.SectionEntity> sections = convertSections(sectionsData);
+                List<TrainingSection> sections = convertSections(sectionsData);
                 module.setSections(sections);
             }
-            
-            }
-            
-            modules.add(module);
         }
         
         return modules;
     }
     
     // Helper method to convert sections list
-    private List<TrainingJourneyEntity.SectionEntity> convertSections(List<Map<String, Object>> sectionsData) {
-        List<TrainingJourneyEntity.SectionEntity> sections = new java.util.ArrayList<>();
+    private List<TrainingSection> convertSections(List<Map<String, Object>> sectionsData) {
+        List<TrainingSection> sections = new java.util.ArrayList<>();
         if (sectionsData == null) return sections;
         
         for (Map<String, Object> sectionData : sectionsData) {
-            TrainingJourneyEntity.SectionEntity section = new TrainingJourneyEntity.SectionEntity();
+            TrainingSection section = new TrainingSection();
             
             // Extract _id if present (Extended JSON format)
             String sectionId = null;
@@ -1488,7 +1470,7 @@ public class JourneyController {
             if (sectionData.containsKey("content")) {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> contentData = (Map<String, Object>) sectionData.get("content");
-                TrainingJourneyEntity.SectionContent content = convertSectionContent(contentData);
+                TrainingSection.SectionContent content = convertSectionContent(contentData);
                 section.setContent(content);
             }
             
@@ -1499,10 +1481,10 @@ public class JourneyController {
     }
     
     // Helper method to convert section content
-    private TrainingJourneyEntity.SectionContent convertSectionContent(Map<String, Object> contentData) {
+    private TrainingSection.SectionContent convertSectionContent(Map<String, Object> contentData) {
         if (contentData == null) return null;
         
-        TrainingJourneyEntity.SectionContent content = new TrainingJourneyEntity.SectionContent();
+        TrainingSection.SectionContent content = new TrainingSection.SectionContent();
         
         if (contentData.containsKey("text")) {
             content.setText(contentData.get("text") != null ? contentData.get("text").toString() : null);
@@ -1521,10 +1503,10 @@ public class JourneyController {
     }
     
     // Helper method to convert section file
-    private TrainingJourneyEntity.SectionFile convertSectionFile(Map<String, Object> fileData) {
+    private TrainingSection.SectionFile convertSectionFile(Map<String, Object> fileData) {
         if (fileData == null) return null;
         
-        TrainingJourneyEntity.SectionFile file = new TrainingJourneyEntity.SectionFile();
+        TrainingSection.SectionFile file = new TrainingSection.SectionFile();
         
         if (fileData.containsKey("id")) {
             file.setId(fileData.get("id") != null ? fileData.get("id").toString() : null);
@@ -1554,7 +1536,6 @@ public class JourneyController {
         return file;
     }
     
-}
 }
 
 

@@ -31,9 +31,6 @@ public class TrainingProgress {
     @Builder.Default
     private Map<String, ModuleProgress> moduleProgress = new HashMap<>();
     
-    @Builder.Default
-    private List<QuizAttempt> quizAttempts = new ArrayList<>();
-    
     private LocalDateTime startedAt;
     private LocalDateTime completedAt;
     private LocalDateTime lastAccessedAt;
@@ -52,23 +49,6 @@ public class TrainingProgress {
         private Integer timeSpent; // in minutes
         private LocalDateTime startedAt;
         private LocalDateTime completedAt;
-    }
-    
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class QuizAttempt {
-        private String quizId;
-        private String attemptId;
-        private Integer attemptNumber;
-        private Integer score;
-        private Integer maxScore;
-        private Boolean passed;
-        private Integer timeSpent; // in seconds
-        private LocalDateTime startedAt;
-        private LocalDateTime completedAt;
-        private Map<String, Object> answers;
     }
 }
 

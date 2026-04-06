@@ -80,7 +80,6 @@ public class TrainingJourneyService {
                 }
                 module.setSectionIds(sectionIds);
                 
-                module.setQuizIds(new ArrayList<>());
                 
                 module.setTrainingJourneyId(journey.getId()); // Might be updated later
                 com.trainingplatform.core.entities.TrainingModule savedModule = moduleRepository.save(module);
@@ -138,7 +137,6 @@ public class TrainingJourneyService {
                         module.setSections(sections);
                     }
                     
-                    module.setQuizzes(new ArrayList<>());
                     
                     modules.add(module);
                 });
@@ -148,7 +146,6 @@ public class TrainingJourneyService {
             journey.setModules(modules);
         }
         
-        journey.setFinalExam(null);
 
         return journey;
     }

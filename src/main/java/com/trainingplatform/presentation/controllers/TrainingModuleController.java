@@ -358,11 +358,6 @@ public class TrainingModuleController {
                 List<String> sectionIds = (List<String>) data.get("sectionIds");
                 module.setSectionIds(sectionIds != null ? sectionIds : new ArrayList<>());
             }
-            if (data.containsKey("quizIds")) {
-                @SuppressWarnings("unchecked")
-                List<String> quizIds = (List<String>) data.get("quizIds");
-                module.setQuizIds(quizIds != null ? quizIds : new ArrayList<>());
-            }
             if (data.containsKey("order")) {
                 Object orderObj = data.get("order");
                 if (orderObj instanceof Number) {

@@ -439,26 +439,8 @@ public class AIService {
         log.info("Quiz generation disabled for training: {} (content-only mode active)", trainingId);
     }
     
-    /**
-     * Calculate number of questions for a module (5-15 based on module content)
-     */
-    private int calculateQuestionsForModule(ManualTrainingModule module) {
-        int baseQuestions = 5; // Minimum
-        int maxQuestions = 15; // Maximum
-        
-        // Base calculation on number of sections
-        int sectionCount = (module.getSections() != null) ? module.getSections().size() : 0;
-        
-        // Calculate: 5 + (sections * 2), capped at 15
-        int calculatedQuestions = baseQuestions + (sectionCount * 2);
-        
-        // Ensure it's between 5 and 15
-        int numberOfQuestions = Math.max(baseQuestions, Math.min(maxQuestions, calculatedQuestions));
-        
-        log.debug("Module '{}' has {} sections, generating {} questions", 
-            module.getTitle(), sectionCount, numberOfQuestions);
-        
-        return numberOfQuestions;
+    }
+
     private String buildOrganizationPrompt(ManualTraining training, List<FileInfo> files, String organizationInstructions) {
         StringBuilder prompt = new StringBuilder();
         prompt.append("Create training modules from files. Analyze content and organize logically.\n\n");
