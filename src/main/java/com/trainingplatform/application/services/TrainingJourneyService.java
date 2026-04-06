@@ -12,7 +12,6 @@ import com.trainingplatform.infrastructure.repositories.TrainingModuleRepository
 import com.trainingplatform.infrastructure.repositories.TrainingSectionRepository;
 import com.trainingplatform.core.entities.TrainingModule;
 import com.trainingplatform.core.entities.TrainingSection;
-import java.util.Optional;
 import com.trainingplatform.presentation.dtos.TrainerDashboardDTO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;

@@ -1415,6 +1415,7 @@ public class JourneyController {
                 List<TrainingSection> sections = convertSections(sectionsData);
                 module.setSections(sections);
             }
+            modules.add(module);
         }
         
         return modules;
