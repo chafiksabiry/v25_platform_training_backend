@@ -3,6 +3,7 @@ package com.trainingplatform.presentation.controllers;
 import com.trainingplatform.application.services.AIService;
 import com.trainingplatform.application.services.VertexAIService;
 import com.trainingplatform.application.services.PPTExportService;
+import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
@@ -46,7 +47,7 @@ public class AIController {
     }
 
     @PostMapping("/generate-training-metadata")
-    public ResponseEntity<Map<String, Object>> generateTrainingMetadata(@RequestBody GenerateMetadataRequest request) {
+    public ResponseEntity<Map<String, Object>> generateTrainingMetadata(@RequestBody AnalyzeMetadataRequest request) {
         Map<String, Object> response = new HashMap<>();
         
         try {
@@ -113,8 +114,8 @@ public class AIController {
         }
     }
     
-    @PostMapping("/organize-training")
-    public ResponseEntity<Map<String, Object>> organizeTraining(@RequestBody OrganizeTrainingRequest request) {
+    @PostMapping(value = "/organize-training", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<Map<String, Object>> organizeTraining(@ModelAttribute OrganizeTrainingRequest request) {
             Map<String, Object> response = new HashMap<>();
         
         try {
@@ -144,99 +145,47 @@ public class AIController {
         }
     }
     
-    public static class GenerateMetadataRequest {
+    @Data
+    public static class AnalyzeMetadataRequest {
         private String companyName;
         private String industry;
         private String gig;
         private List<FileInfoRequest> files;
-
-        public String getCompanyName() { return companyName; }
-        public void setCompanyName(String companyName) { this.companyName = companyName; }
-
-        public String getIndustry() { return industry; }
-        public void setIndustry(String industry) { this.industry = industry; }
-
-        public String getGig() { return gig; }
-        public void setGig(String gig) { this.gig = gig; }
-
-        public List<FileInfoRequest> getFiles() { return files; }
-        public void setFiles(List<FileInfoRequest> files) { this.files = files; }
     }
 
+    @Data
     public static class OrganizeTrainingRequest {
         private String trainingId;
-        private List<FileInfoRequest> files;
+        private List<MultipartFile> files;
         private String organizationInstructions;
-        private GenerationOptionsRequest generationOptions;
-
-        public String getTrainingId() { return trainingId; }
-        public void setTrainingId(String trainingId) { this.trainingId = trainingId; }
-
-        public List<FileInfoRequest> getFiles() { return files; }
-        public void setFiles(List<FileInfoRequest> files) { this.files = files; }
-
-        public String getOrganizationInstructions() { return organizationInstructions; }
-        public void setOrganizationInstructions(String organizationInstructions) { 
-            this.organizationInstructions = organizationInstructions; 
-        }
-
-        public GenerationOptionsRequest getGenerationOptions() { return generationOptions; }
-        public void setGenerationOptions(GenerationOptionsRequest generationOptions) {
-            this.generationOptions = generationOptions;
-        }
+        private GenerationOptionsRequest options;
     }
 
+    @Data
     public static class GenerationOptionsRequest {
         // Evaluation options removed as per content-only requirement
     }
 
+    @Data
     public static class FileInfoRequest {
         private String name;
         private String type;
         private String url;
         private String publicId;
-
-        public String getName() { return name; }
-        public void setName(String name) { this.name = name; }
-
-        public String getType() { return type; }
-        public void setType(String type) { this.type = type; }
-
-        public String getUrl() { return url; }
-        public void setUrl(String url) { this.url = url; }
-
-        public String getPublicId() { return publicId; }
-        public void setPublicId(String publicId) { this.publicId = publicId; }
     }
 
+    @Data
     public static class GenerateInitialOrganizationRequest {
         private List<FileInfoRequest> files;
         private List<FileAnalysisRequest> analyses;
-
-        public List<FileInfoRequest> getFiles() { return files; }
-        public void setFiles(List<FileInfoRequest> files) { this.files = files; }
-
-        public List<FileAnalysisRequest> getAnalyses() { return analyses; }
-        public void setAnalyses(List<FileAnalysisRequest> analyses) { this.analyses = analyses; }
     }
 
+    @Data
     public static class FileAnalysisRequest {
         private String fileName;
         private List<String> keyTopics;
         private Integer difficulty;
         private Integer estimatedReadTime;
-
-        public String getFileName() { return fileName; }
-        public void setFileName(String fileName) { this.fileName = fileName; }
-
-        public List<String> getKeyTopics() { return keyTopics; }
-        public void setKeyTopics(List<String> keyTopics) { this.keyTopics = keyTopics; }
-
-        public Integer getDifficulty() { return difficulty; }
-        public void setDifficulty(Integer difficulty) { this.difficulty = difficulty; }
-
-        public Integer getEstimatedReadTime() { return estimatedReadTime; }
-        public void setEstimatedReadTime(Integer estimatedReadTime) { this.estimatedReadTime = estimatedReadTime; }
     }
     
 
