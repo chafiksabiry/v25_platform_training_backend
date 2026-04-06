@@ -438,8 +438,6 @@ public class AIService {
         // Generate quizzes based on user options - DISABLED as per content-only requirement
         log.info("Quiz generation disabled for training: {} (content-only mode active)", trainingId);
     }
-    
-    }
 
     private String buildOrganizationPrompt(ManualTraining training, List<FileInfo> files, String organizationInstructions) {
         StringBuilder prompt = new StringBuilder();
