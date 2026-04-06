@@ -87,6 +87,10 @@ public class GCPStorageService {
      * Upload raw bytes to GCS
      */
     public String uploadBytes(byte[] data, String fileName, String contentType) {
+        if (storage == null) {
+            log.error("❌ GCS storage is not initialized — cannot upload bytes for {}", fileName);
+            throw new IllegalStateException("GCP Storage is not available. Check service account credentials.");
+        }
         BlobId blobId = BlobId.of(bucketName, fileName);
         BlobInfo blobInfo = BlobInfo.newBuilder(blobId)
                 .setContentType(contentType)
@@ -94,7 +98,7 @@ public class GCPStorageService {
 
         storage.create(blobInfo, data);
         String publicUrl = String.format("https://storage.googleapis.com/%s/%s", bucketName, fileName);
-        log.info("Uploaded bytes to GCS: {}", publicUrl);
+        log.info("✅ Uploaded bytes to GCS: {}", publicUrl);
         return publicUrl;
     }
 

@@ -58,6 +58,10 @@ public class VertexAIService {
     public String generatePodcast(String title, String contentSummary) throws Exception {
         log.info("🎙️ Generating AI Podcast for: {}", title);
 
+        if (podcastModel == null) {
+            throw new IllegalStateException("Vertex AI Podcast model is not initialized. Check GCP credentials and project configuration.");
+        }
+
         // 1. Générer le script du podcast avec Gemini
         String scriptPrompt = "Tu es un producteur de podcasts expert. À partir du contenu suivant, génère un script de podcast court (2-3 minutes) entre deux hôtes, Alex et Sam. " +
                 "Le ton doit être dynamique, informatif et engageant. Alex pose des questions et Sam est l'expert qui explique. " +
@@ -81,6 +85,10 @@ public class VertexAIService {
     public String generateVeoVideo(String title, String context) throws Exception {
         log.info("🎬 Generating Veo Video for: {}", title);
 
+        if (generativeModel == null) {
+            throw new IllegalStateException("Vertex AI generative model is not initialized. Check GCP credentials.");
+        }
+
         // 1. Générer un prompt vidéo optimisé pour Veo
         String promptGenRequest = "Basé sur le contenu suivant, génère un prompt visuel détaillé et cinématique pour l'IA Veo de Google. " +
                 "Le prompt doit décrire une scène de formation professionnelle de haute qualité. " +
@@ -92,9 +100,14 @@ public class VertexAIService {
 
         // 2. Simuler l'appel Veo (Mock car Veo est en accès limité)
         log.info("🚀 Calling Veo API with prompt: {}", videoPrompt);
-        
-        // Simuler un délai de génération
-        Thread.sleep(2000);
+
+        // Simuler un délai de génération avec gestion correcte de l'interruption
+        try {
+            Thread.sleep(2000);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Video generation interrupted", ie);
+        }
 
         // Mapper le résultat à une vidéo stockée sur GCS (Mock URL pour le moment)
         return "https://storage.googleapis.com/harx-training-media/mocks/veo_training_sample.mp4";

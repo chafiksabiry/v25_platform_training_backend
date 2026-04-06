@@ -362,6 +362,7 @@ public class AIController {
             String moduleTitle = (String) request.get("moduleTitle");
             String moduleDescription = (String) request.get("moduleDescription");
             String fullTranscription = (String) request.get("fullTranscription");
+            @SuppressWarnings("unchecked")
             List<String> learningObjectives = (List<String>) request.get("learningObjectives");
             
             log.info("Generating content for module: {}", moduleTitle);
