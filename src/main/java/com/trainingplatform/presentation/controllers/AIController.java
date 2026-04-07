@@ -85,15 +85,17 @@ public class AIController {
             log.info("Generating initial organization suggestion for {} files", fileCount);
             
             // Convert request FileInfoRequest -> AIService.FileInfo
-            List<AIService.FileInfo> files = request.getFiles() != null
+            List<AIService.FileInfo> files = (request.getFiles() != null)
                 ? request.getFiles().stream()
+                    .filter(f -> f != null && f.getName() != null)
                     .map(f -> new AIService.FileInfo(f.getName(), f.getType(), f.getUrl(), f.getPublicId()))
                     .toList()
                 : List.of();
 
             // Convert request FileAnalysisRequest -> AIService.FileAnalysis (if analyses exist)
-            List<AIService.FileAnalysis> analyses = request.getAnalyses() != null
+            List<AIService.FileAnalysis> analyses = (request.getAnalyses() != null)
                 ? request.getAnalyses().stream()
+                    .filter(a -> a != null && a.getFileName() != null)
                     .map(a -> new AIService.FileAnalysis(a.getFileName(), a.getKeyTopics(), a.getDifficulty(), a.getEstimatedReadTime()))
                     .toList()
                 : List.of();
@@ -119,12 +121,15 @@ public class AIController {
             Map<String, Object> response = new HashMap<>();
         
         try {
-            log.info("Organizing training {} with {} files", request.getTrainingId(), request.getFiles().size());
+            int fileCount = request.getFiles() != null ? request.getFiles().size() : 0;
+            log.info("Organizing training {} with {} files", request.getTrainingId(), fileCount);
             
-            // Convert request files to AIService.FileInfo
-            List<AIService.FileInfo> files = request.getFiles().stream()
-                    .map(f -> new AIService.FileInfo(f.getName(), f.getType(), f.getUrl(), f.getPublicId()))
-                    .toList();
+            List<AIService.FileInfo> files = (request.getFiles() != null)
+                    ? request.getFiles().stream()
+                        .filter(f -> f != null && f.getName() != null)
+                        .map(f -> new AIService.FileInfo(f.getName(), f.getType(), f.getUrl(), f.getPublicId()))
+                        .toList()
+                    : List.of();
             
 
             
