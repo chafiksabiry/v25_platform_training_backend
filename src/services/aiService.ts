@@ -42,7 +42,7 @@ class AIService {
   async generateWithClaude(prompt: string, systemPrompt?: string): Promise<string> {
     try {
       const response = await this.anthropic.messages.create({
-        model: process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20240620',
+        model: process.env.ANTHROPIC_MODEL || 'claude-3-sonnet-20240229',
         max_tokens: parseInt(process.env.ANTHROPIC_MAX_TOKENS || '4096'),
         system: systemPrompt || 'You are an expert training content creator.',
         messages: [

@@ -9,6 +9,8 @@ import authRoutes from './routes/authRoutes';
 import journeyRoutes from './routes/journeyRoutes';
 import healthRoutes from './routes/healthRoutes';
 import aiRoutes from './routes/aiRoutes';
+import * as aiController from './controllers/aiController';
+import upload from './middleware/upload';
 
 const app: Application = express();
 
@@ -65,6 +67,9 @@ app.use('/api/journeys', journeyRoutes);
 app.use('/training_journeys', journeyRoutes); // Legacy route alias
 app.use('/api/training_journeys', journeyRoutes); // New consistency alias
 app.use('/api/ai', aiRoutes);
+
+// Compatibility alias for legacy document uploads
+app.post('/api/upload/document', upload.single('file'), aiController.analyzeDocument);
 
 app.get('/', (req: Request, res: Response) => {
   res.json({
