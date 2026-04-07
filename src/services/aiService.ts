@@ -52,7 +52,9 @@ class AIService {
     }
   }
 
-  async generateWithClaude(prompt: string, systemPrompt?: string): Promise<string> {
+  async generateWithClaude(prompt: string, systemPrompt?: string, apiKey?: string): Promise<string> {
+    const client = apiKey ? new Anthropic({ apiKey }) : this.anthropic;
+
     const modelsToTry = [
       process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20240620',
       'claude-3-haiku-20240307', // Always available fallback
@@ -61,8 +63,8 @@ class AIService {
     let lastError: any;
     for (const model of modelsToTry) {
       try {
-        console.log(`🤖 Attempting analysis with Claude model: ${model}`);
-        const response = await this.anthropic.messages.create({
+        console.log(`🤖 Attempting analysis with Claude model: ${model}${apiKey ? ' (using custom API key)' : ''}`);
+        const response = await client.messages.create({
           model,
           max_tokens: parseInt(process.env.ANTHROPIC_MAX_TOKENS || '4096'),
           system: systemPrompt || 'You are an expert training content creator.',

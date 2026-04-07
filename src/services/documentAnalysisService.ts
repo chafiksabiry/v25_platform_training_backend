@@ -32,21 +32,31 @@ interface DocumentAnalysisResult {
 }
 
 class DocumentAnalysisService {
-  async analyzeDocument(filePath: string, fileType: string): Promise<DocumentAnalysisResult> {
+  async analyzeDocument(filePath: string, fileType: string, apiKey?: string): Promise<DocumentAnalysisResult> {
     try {
       const text = await documentParserService.parseDocument(filePath, fileType);
       
       const analysisPrompt = `
-        Analyze the following text extracted from a training document and provide a comprehensive training analysis.
-        Text: ${text.substring(0, 15000)} // Limit text size for stability
+        Tu es un analyste expert en formation et ingénierie pédagogique. 
+        Analyse le texte suivant extrait d'un document source pour en extraire une structure de formation de haute qualité.
         
-        The output MUST be a JSON object that matches this structure:
+        TEXTE SOURCE :
+        ${text.substring(0, 30000)} 
+
+        TON OBJECTIF :
+        Réliser un AUDIT PÉDAGOGIQUE PROFOND. Identifie :
+        1. Personas d'apprentissage : À qui s'adresse ce contenu ? Quels sont leurs besoins ?
+        2. Niveaux de la Taxonomie de Bloom : Quels niveaux de maîtrise sont visés (Connaissance, Application, Analyse, etc.) ?
+        3. Lacunes de connaissances : Que manque-t-il dans ce texte pour une formation complète ?
+        4. Points d'accroche interactifs : Où insérer des quiz ou des exercices ?
+
+        Le résultat DOIT être un objet JSON valide avec cette structure exacte :
         {
           "readabilityScore": 85,
           "keyConceptsExtracted": ["Concept A", "Concept B"],
-          "suggestedLearningObjectives": ["Objective 1", "Objective 2"],
+          "suggestedLearningObjectives": ["Objectif 1", "Objectif 2"],
           "recommendedModuleStructure": ["Module 1", "Module 2"],
-          "contentGaps": ["Gap 1"],
+          "contentGaps": ["Manque 1"],
           "engagementScore": 75,
           "improvementSuggestions": [
             {
@@ -67,12 +77,13 @@ class DocumentAnalysisService {
           ]
         }
         
-        Return ONLY the JSON object.
+        Réponds UNIQUEMENT avec l'objet JSON.
       `;
 
       const aiResponse = await aiService.generateWithClaude(
         analysisPrompt,
-        "You are an expert training analyst. Return only valid JSON."
+        "Tu es un expert en formation. Réponds uniquement en JSON valide.",
+        apiKey
       );
 
       const aiAnalysisRaw = JSON.parse(this.cleanJsonResponse(aiResponse));
@@ -103,7 +114,7 @@ class DocumentAnalysisService {
     }
   }
 
-  async generateTrainingProgram(analysis: any): Promise<any> {
+  async generateTrainingProgram(analysis: any, apiKey?: string): Promise<any> {
     try {
       console.log('🚀 Starting Multiphase Program Generation (program-generator method)');
       const analysisContext = typeof analysis === 'string' ? analysis : JSON.stringify(analysis);
@@ -131,7 +142,7 @@ class DocumentAnalysisService {
           ]
         }`;
 
-      const metaRaw = await aiService.generateWithClaude(metaPrompt, "Return ONLY valid JSON metadata.");
+      const metaRaw = await aiService.generateWithClaude(metaPrompt, "Return ONLY valid JSON metadata.", apiKey);
       const meta = aiService.parseJson(metaRaw, 'program_metadata');
       const modulePlan = meta.modules || [];
 
@@ -176,7 +187,7 @@ class DocumentAnalysisService {
         Modules à détailler :
         ${modulePlan.map((m: any) => `- Module ${m.id}: ${m.title} (${m.duration}) — ${m.description}`).join('\n')}`;
 
-      const sessionsRaw = await aiService.generateWithClaude(sessionPrompt, "Return ONLY valid JSON detailed modules.");
+      const sessionsRaw = await aiService.generateWithClaude(sessionPrompt, "Return ONLY valid JSON detailed modules.", apiKey);
       const sessionsData = aiService.parseJson(sessionsRaw, 'program_sessions');
 
       const program = {
@@ -192,7 +203,7 @@ class DocumentAnalysisService {
     }
   }
 
-  async generatePresentation(program: any): Promise<any> {
+  async generatePresentation(program: any, apiKey?: string): Promise<any> {
     try {
       console.log('🚀 Starting Multiphase Presentation Generation (3 batches)');
       const programInfo = `
@@ -226,7 +237,7 @@ class DocumentAnalysisService {
               }
             ]
           }`;
-        const raw = await aiService.generateWithClaude(prompt, `Return ONLY valid JSON for ${label}`);
+        const raw = await aiService.generateWithClaude(prompt, `Return ONLY valid JSON for ${label}`, apiKey);
         return aiService.parseJson(raw, label).slides || [];
       };
 

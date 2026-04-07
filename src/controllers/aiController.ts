@@ -41,9 +41,12 @@ export const analyzeDocument = async (
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
+    const anthropicKey = req.headers['x-anthropic-key'] as string;
+
     const analysis = await documentAnalysisService.analyzeDocument(
       req.file.path,
-      req.file.mimetype
+      req.file.mimetype,
+      anthropicKey
     );
 
     // Upload to Cloudinary
@@ -53,7 +56,6 @@ export const analyzeDocument = async (
       fileUrl = uploadResult.url;
     } catch (uploadError) {
       console.error('Cloudinary upload error:', uploadError);
-      // Optional: don't fail the whole process if upload fails, just keep analysis
     }
 
     // Cleanup local file
@@ -86,8 +88,10 @@ export const generateProgramFromAnalysis = async (
       return res.status(400).json({ error: 'Analysis data is required' });
     }
 
-    const program = await documentAnalysisService.generateTrainingProgram(analysis);
-    const presentation = await documentAnalysisService.generatePresentation(program);
+    const anthropicKey = req.headers['x-anthropic-key'] as string;
+
+    const program = await documentAnalysisService.generateTrainingProgram(analysis, anthropicKey);
+    const presentation = await documentAnalysisService.generatePresentation(program, anthropicKey);
 
     return res.status(200).json({
       success: true,
