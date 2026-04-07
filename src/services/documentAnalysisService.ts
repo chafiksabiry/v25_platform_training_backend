@@ -75,13 +75,25 @@ class DocumentAnalysisService {
         "You are an expert training analyst. Return only valid JSON."
       );
 
-      const aiAnalysis = JSON.parse(this.cleanJsonResponse(aiResponse));
+      const aiAnalysisRaw = JSON.parse(this.cleanJsonResponse(aiResponse));
+      
+      // Ensure all required fields exist with defaults to prevent UI crashes
+      const aiAnalysis = {
+        readabilityScore: aiAnalysisRaw.readabilityScore || 0,
+        keyConceptsExtracted: aiAnalysisRaw.keyConceptsExtracted || [],
+        suggestedLearningObjectives: aiAnalysisRaw.suggestedLearningObjectives || [],
+        recommendedModuleStructure: aiAnalysisRaw.recommendedModuleStructure || [],
+        contentGaps: aiAnalysisRaw.contentGaps || [],
+        engagementScore: aiAnalysisRaw.engagementScore || 0,
+        improvementSuggestions: aiAnalysisRaw.improvementSuggestions || [],
+        mediaRecommendations: aiAnalysisRaw.mediaRecommendations || []
+      };
 
       return {
         extractedContent: {
           text: text.substring(0, 5000), // Return a sample for the UI
           keyTopics: aiAnalysis.keyConceptsExtracted.slice(0, 5),
-          complexity: 5 // Default for now
+          complexity: aiAnalysisRaw.complexity || 5
         },
         aiAnalysis
       };
@@ -162,7 +174,17 @@ class DocumentAnalysisService {
   }
 
   private cleanJsonResponse(raw: string): string {
-    return raw.replace(/```json\n?/, '').replace(/```\n?/, '').trim();
+    try {
+      // Find the first { and last } to extract JSON even if AI adds conversational text
+      const start = raw.indexOf('{');
+      const end = raw.lastIndexOf('}');
+      if (start !== -1 && end !== -1) {
+        return raw.substring(start, end + 1);
+      }
+      return raw.replace(/```json\n?/, '').replace(/```\n?/, '').trim();
+    } catch (e) {
+      return raw.trim();
+    }
   }
 }
 
