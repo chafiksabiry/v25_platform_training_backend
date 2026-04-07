@@ -161,62 +161,56 @@ class DocumentAnalysisService {
       if (modulePlan.length === 0) return meta;
 
       // ── Call 2: Detailed sessions for each module ─────────────────────────
-      // Split modules into two batches to stay within token limits
-      const half = Math.ceil(modulePlan.length / 2);
-      const batch1Modules = modulePlan.slice(0, half);
-      const batch2Modules = modulePlan.slice(half);
-
-      const makeSessionPrompt = (mods: any[]) => `Tu es un expert en conception pédagogique.
+      // Generate sessions individually in parallel to respect max_tokens limits strictly
+      const makeSessionPrompt = (m: any) => `Tu es un expert en conception pédagogique.
         Thème : ${meta.title}
-        Durée : ${meta.duration}
+        Durée globale : ${meta.duration}
         
-        Pour chacun des modules suivants, génère les sessions détaillées et les sections de contenu.
-        Réponds en JSON valide uniquement, sans markdown :
+        Pour le module spécifique suivant, génère les sessions détaillées et les sections de contenu associées.
+        Réponds en JSON valide uniquement, avec cette structure exacte, sans markdown autour du JSON :
         {
-          "modules": [
-            {
-              "id": 1,
-              "title": "Titre exactement comme fourni",
-              "duration": "Durée",
-              "description": "Description détaillée",
-              "learningObjectives": ["Obj 1", "Obj 2"],
-              "sections": [
-                {
-                  "title": "Titre de la section",
-                  "content": "Contenu pédagogique riche en Markdown (300+ mots)",
-                  "type": "text|video|exercise",
-                  "duration": 20
-                }
-              ],
-              "quizzes": [
-                {
-                  "title": "Quiz de validation",
-                  "questions": [
-                    { "question": "Question?", "options": ["A", "B", "C"], "correctAnswer": 0, "explanation": "..." }
-                  ]
-                }
-              ]
-            }
-          ]
+          "module": {
+            "id": ${m.id},
+            "title": "${m.title}",
+            "duration": "${m.duration}",
+            "description": "Description détaillée",
+            "learningObjectives": ["Obj 1", "Obj 2", "Obj 3"],
+            "sections": [
+              {
+                "title": "Titre de la section",
+                "content": "Contenu pédagogique riche en Markdown (300+ mots)",
+                "type": "text|video|exercise",
+                "duration": 20
+              }
+            ],
+            "quizzes": [
+              {
+                "title": "Quiz de validation",
+                "questions": [
+                  { "question": "Question?", "options": ["A", "B", "C"], "correctAnswer": 0, "explanation": "..." }
+                ]
+              }
+            ]
+          }
         }
 
-        Modules à détailler :
-        ${mods.map((m: any) => `- Module ${m.id}: ${m.title} (${m.duration}) — ${m.description}`).join('\n')}`;
+        Identité du Module à détailler :
+        Titre: ${m.title}
+        Durée prévue: ${m.duration}
+        Résumé: ${m.description}`;
 
-      const [sessionsRaw1, sessionsRaw2] = await Promise.all([
-        aiService.generateWithClaude(makeSessionPrompt(batch1Modules), "Return ONLY valid JSON detailed modules.", apiKey),
-        batch2Modules.length > 0 
-          ? aiService.generateWithClaude(makeSessionPrompt(batch2Modules), "Return ONLY valid JSON detailed modules.", apiKey)
-          : Promise.resolve('{ "modules": [] }')
-      ]);
+      const detailedModulesPromises = modulePlan.map(async (m: any) => {
+        try {
+          const raw = await aiService.generateWithClaude(makeSessionPrompt(m), "Return ONLY valid JSON for this module.", apiKey);
+          const parsed = aiService.parseJson(raw, `program_session_module_${m.id}`);
+          return parsed.module || m;
+        } catch (e) {
+          console.error(`⚠️ Fallback for module ${m.id} details:`, e);
+          return m; // Return basic metadata if detail generation fails
+        }
+      });
 
-      const sessionsData1 = aiService.parseJson(sessionsRaw1, 'program_sessions_batch1');
-      const sessionsData2 = aiService.parseJson(sessionsRaw2, 'program_sessions_batch2');
-      
-      const detailedModules = [
-        ...(sessionsData1.modules || []),
-        ...(sessionsData2.modules || [])
-      ];
+      const detailedModules = await Promise.all(detailedModulesPromises);
 
       const program = {
         ...meta,
