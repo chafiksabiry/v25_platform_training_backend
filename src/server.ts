@@ -6,39 +6,38 @@ import connectDB from './config/database';
 
 const PORT = process.env.PORT || 5010;
 
-const startServer = async () => {
+const startServer = () => {
   try {
-    connectDB(); // Start connection without blocking server startup
-
-    app.listen(PORT, () => {
+    // Start listening immediately so Railway health checks pass (prevent 502)
+    const server = app.listen(PORT, () => {
       console.log(`
 ╔═══════════════════════════════════════════════════════╗
 ║                                                       ║
-║     Training Platform API - Node.js Edition          ║
+║     Training Platform API - Node.js Edition           ║
 ║                                                       ║
 ║     Server running on port ${PORT}                      ║
-║     Environment: ${process.env.NODE_ENV || 'development'}                     ║
-║                                                       ║
-║     API Endpoints:                                    ║
-║     - POST   /api/auth/register                       ║
-║     - POST   /api/auth/login                          ║
-║     - GET    /api/auth/me                             ║
-║     - GET    /api/journeys                            ║
-║     - POST   /api/journeys                            ║
-║     - GET    /health                                  ║
+║     Environment: ${process.env.NODE_ENV || 'development'}║
+║     Status: LISTENING (Connecting to DB...)           ║
 ║                                                       ║
 ╚═══════════════════════════════════════════════════════╝
       `);
+
+      // Connect to DB in the background
+      connectDB().then(() => {
+        console.log('✅ Background DB connection established');
+      }).catch(err => {
+        console.error('❌ Background DB connection failed:', err);
+      });
     });
 
     process.on('SIGTERM', () => {
       console.log('SIGTERM received. Shutting down gracefully...');
-      process.exit(0);
+      server.close(() => process.exit(0));
     });
 
     process.on('SIGINT', () => {
       console.log('SIGINT received. Shutting down gracefully...');
-      process.exit(0);
+      server.close(() => process.exit(0));
     });
 
   } catch (error) {

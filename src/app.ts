@@ -12,9 +12,6 @@ import aiRoutes from './routes/aiRoutes';
 
 const app: Application = express();
 
-const corsOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',')
-  : ['http://localhost:3000'];
 
 const allowedOrigins = [
   'https://v25.harx.ai',
@@ -22,37 +19,29 @@ const allowedOrigins = [
   'https://harx25pageslinks.netlify.app',
   'https://harxv25dashboardfrontend.netlify.app',
   'https://v25-platform-training-frontend.vercel.app',
-  'https://v25platformtrainingbackend-production.up.railway.app', // Backend domain itself for self-calls
   'http://localhost:3000',
-  'http://localhost:5173',
-  'http://localhost:5183'
+  'http://localhost:5173'
 ];
 
 app.use(cors({
   origin: (origin, callback) => {
-    // allow requests with no origin (like mobile apps or curl requests)
+    // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
-    if (corsOrigins.includes('*')) {
-      return callback(null, true);
+    const isAllowed = allowedOrigins.includes(origin) || 
+                     origin.endsWith('.harx.ai') || 
+                     origin.endsWith('.netlify.app');
+                     
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      console.warn(`CORS blocked for origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
     }
-
-    if (allowedOrigins.includes(origin) || corsOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    
-    // Allow any subdomain of harx.ai or netlify.app
-    if (origin.endsWith('.harx.ai') || origin.endsWith('.netlify.app') || origin.endsWith('.up.railway.app')) {
-      return callback(null, true);
-    }
-    
-    console.warn(`[CORS] Origin ${origin} not explicitly allowed, but continuing for safety in production`);
-    // Instead of failing, let's be more permissive during this transition phase
-    return callback(null, true); 
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
 }));
 
 app.use(helmet({

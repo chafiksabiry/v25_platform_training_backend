@@ -4,13 +4,18 @@ const connectDB = async (): Promise<void> => {
   try {
     const mongoUri = process.env.MONGODB_URI || '';
 
+    if (!mongoUri) {
+      console.error('CRITICAL ERROR: MONGODB_URI is not defined in environment variables');
+      return; // Return instead of exit to let the server start (for health checks)
+    }
+
     await mongoose.connect(mongoUri, {
       dbName: process.env.DB_NAME || 'harx',
-      serverSelectionTimeoutMS: 5000, // 5 seconds timeout
-      connectTimeoutMS: 10000,        // 10 seconds timeout
+      serverSelectionTimeoutMS: 5000, // Timeout after 5s instead of 30s
+      socketTimeoutMS: 45000, // Close sockets after 45s of inactivity
     });
 
-    console.log('✅ MongoDB connected successfully to', mongoUri.split('@')[1] || 'local');
+    console.log('✅ MongoDB connected successfully to ' + mongoose.connection.host);
 
     mongoose.connection.on('error', (error) => {
       console.error('MongoDB connection error:', error);
