@@ -266,7 +266,8 @@ class TrainingJourneyService {
         )
         .slice(0, 5),
       upcomingDeadlines: [],
-      aiInsights: []
+      aiInsights: [],
+      journeys: journeys // Include the raw journeys list for the UI
     };
   }
 }

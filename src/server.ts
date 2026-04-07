@@ -11,15 +11,15 @@ const startServer = () => {
     // Start listening immediately so Railway health checks pass (prevent 502)
     const server = app.listen(PORT, () => {
       console.log(`
-╔═══════════════════════════════════════════════════════╗
-║                                                       ║
-║     Training Platform API - Node.js Edition           ║
-║                                                       ║
-║     Server running on port ${PORT}                      ║
+╔══════════════════════════════════════════════════════════╗
+║                                                          ║
+║     Training Platform API - Node.js Edition              ║
+║                                                          ║
+║     Server running on port ${PORT}                       ║
 ║     Environment: ${process.env.NODE_ENV || 'development'}║
-║     Status: LISTENING (Connecting to DB...)           ║
-║                                                       ║
-╚═══════════════════════════════════════════════════════╝
+║     Status: LISTENING (Connecting to DB...)              ║
+║                                                          ║
+╚══════════════════════════════════════════════════════════╝
       `);
 
       // Connect to DB in the background
