@@ -250,6 +250,7 @@ class TrainingJourneyService {
     const validRepCount = traineeInfoList.length;
 
     return {
+      journeys,
       totalTrainees: validRepCount,
       activeTrainees: activeCount,
       completionRate: validRepCount > 0 ? (completedCount / validRepCount) * 100 : 0,
@@ -266,8 +267,7 @@ class TrainingJourneyService {
         )
         .slice(0, 5),
       upcomingDeadlines: [],
-      aiInsights: [],
-      journeys: journeys // Include the raw journeys list for the UI
+      aiInsights: []
     };
   }
 }

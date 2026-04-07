@@ -57,5 +57,8 @@ export const getTrainerDashboard = asyncHandler(async (req: AuthRequest, res: Re
     companyId,
     gigId as string | undefined
   );
-  res.status(200).json(dashboard);
+  res.status(200).json({
+    success: true,
+    data: dashboard
+  });
 });
