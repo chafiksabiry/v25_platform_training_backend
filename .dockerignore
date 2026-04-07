@@ -1,5 +1,11 @@
+# Node.js
+node_modules/
+dist/
+npm-debug.log
+yarn-error.log
+
 # Git
-.git
+.git/
 .gitignore
 
 # Documentation
@@ -9,7 +15,7 @@
 logs/
 *.log
 
-# Maven
+# Maven (Stale)
 target/
 
 # IDEs
@@ -23,7 +29,8 @@ Thumbs.db
 
 # Environment
 .env
+.env.local
 
-# Uploads (will be mounted as volume)
+# Uploads
 uploads/
 
