@@ -1,6 +1,6 @@
 package com.trainingplatform.application.services;
 
-import org.apache.poi.sl.usermodel.PictureData;
+import org.apache.poi.sl.usermodel.Placeholder;
 import org.apache.poi.xslf.usermodel.*;
 import org.springframework.stereotype.Service;
 
@@ -49,7 +49,7 @@ public class PPTExportService {
                 XSLFSlide currentSlide = ppt.getSlides().get(ppt.getSlides().size() - 1);
                 XSLFNotes notesSlide = ppt.getNotesSlide(currentSlide);
                 for (XSLFTextShape shape : notesSlide.getPlaceholders()) {
-                    if (shape.getPlaceholder() == org.apache.poi.sl.usermodel.Placeholder.BODY) {
+                    if (shape.getPlaceholder() == Placeholder.BODY) {
                         shape.setText(note);
                         break;
                     }
