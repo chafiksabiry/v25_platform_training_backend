@@ -104,96 +104,149 @@ class DocumentAnalysisService {
   }
 
   async generateTrainingProgram(analysis: any): Promise<any> {
-    const prompt = `
-      Based on this analysis of a training document, generate a full training program structure.
-      Analysis: ${JSON.stringify(analysis)}
+    try {
+      console.log('🚀 Starting Multiphase Program Generation (program-generator method)');
+      const analysisContext = typeof analysis === 'string' ? analysis : JSON.stringify(analysis);
       
-      The output MUST be a JSON object that matches this structure:
-      {
-        "title": "Program Title",
-        "description": "Program Description",
-        "modules": [
-          {
-            "title": "Module Title",
-            "description": "Module Description",
-            "duration": 60,
-            "difficulty": "beginner",
-            "learningObjectives": ["Obj 1"],
-            "topics": ["Topic 1"],
-            "sections": [
-              {
-                "title": "Section Title",
-                "content": "Full markdown content...",
-                "type": "text",
-                "duration": 20
-              }
-            ],
-            "quizzes": [
-              {
-                "title": "Quiz",
-                "questions": [
-                  {
-                    "question": "Question?",
-                    "options": ["A", "B"],
-                    "correctAnswer": 0,
-                    "explanation": "..."
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      }
-      
-      Return ONLY the JSON object.
-    `;
+      // ── Call 1: Program metadata + module plan (no sessions yet) ──────────
+      const metaPrompt = `Tu es un expert en conception pédagogique.
+        CONTEXTE D'ANALYSE:
+        ${analysisContext.slice(0, 5000)}
 
-    const response = await aiService.generateWithClaude(prompt, "You are a curriculum designer. Return only valid JSON.");
-    const programRaw = JSON.parse(this.cleanJsonResponse(response));
-    
-    // Ensure nested structures exist
-    return {
-      title: programRaw.title || 'Training Program',
-      description: programRaw.description || '',
-      modules: (programRaw.modules || []).map((m: any) => ({
-        ...m,
-        learningObjectives: m.learningObjectives || [],
-        topics: m.topics || [],
-        sections: m.sections || [],
-        quizzes: (m.quizzes || []).map((q: any) => ({
-          ...q,
-          questions: q.questions || []
-        }))
-      }))
-    };
+        Génère UNIQUEMENT les métadonnées du programme et la liste des modules (sans détailler les sessions).
+        Réponds en JSON valide uniquement, sans markdown :
+        {
+          "title": "Titre du programme",
+          "subtitle": "Sous-titre accrocheur",
+          "description": "Description en 2-3 phrases",
+          "duration": "Durée totale recommandée",
+          "level": "Niveau",
+          "objectives": ["objectif 1", "objectif 2", "objectif 3", "objectif 4"],
+          "prerequisites": ["prérequis 1", "prérequis 2"],
+          "targetAudience": "Description du public cible",
+          "methodology": "Description de la méthodologie pédagogique",
+          "modules": [
+            { "id": 1, "title": "Titre module 1", "duration": "2h", "description": "Description courte" },
+            { "id": 2, "title": "Titre module 2", "duration": "2h", "description": "Description courte" }
+          ]
+        }`;
+
+      const metaRaw = await aiService.generateWithClaude(metaPrompt, "Return ONLY valid JSON metadata.");
+      const meta = aiService.parseJson(metaRaw, 'program_metadata');
+      const modulePlan = meta.modules || [];
+
+      if (modulePlan.length === 0) return meta;
+
+      // ── Call 2: Detailed sessions for each module ─────────────────────────
+      // We process all modules to ensure consistency
+      const sessionPrompt = `Tu es un expert en conception pédagogique.
+        Thème : ${meta.title}
+        Durée : ${meta.duration}
+        
+        Pour chacun des modules suivants, génère les sessions détaillées et les sections de contenu.
+        Réponds en JSON valide uniquement, sans markdown :
+        {
+          "modules": [
+            {
+              "id": 1,
+              "title": "Titre exactement comme fourni",
+              "duration": "Durée",
+              "description": "Description détaillée",
+              "learningObjectives": ["Obj 1", "Obj 2"],
+              "sections": [
+                {
+                  "title": "Titre de la section",
+                  "content": "Contenu pédagogique riche en Markdown (300+ mots)",
+                  "type": "text|video|exercise",
+                  "duration": 20
+                }
+              ],
+              "quizzes": [
+                {
+                  "title": "Quiz de validation",
+                  "questions": [
+                    { "question": "Question?", "options": ["A", "B", "C"], "correctAnswer": 0, "explanation": "..." }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+
+        Modules à détailler :
+        ${modulePlan.map((m: any) => `- Module ${m.id}: ${m.title} (${m.duration}) — ${m.description}`).join('\n')}`;
+
+      const sessionsRaw = await aiService.generateWithClaude(sessionPrompt, "Return ONLY valid JSON detailed modules.");
+      const sessionsData = aiService.parseJson(sessionsRaw, 'program_sessions');
+
+      const program = {
+        ...meta,
+        modules: sessionsData.modules || modulePlan
+      };
+
+      console.log('✅ Iterative Program Generation Complete');
+      return program;
+    } catch (error) {
+      console.error('❌ Program generation error:', error);
+      throw new AppError('Failed to generate high-quality program', 500);
+    }
   }
 
   async generatePresentation(program: any): Promise<any> {
-    const prompt = `
-      Create a presentation slides deck for this training program:
-      Program: ${JSON.stringify(program)}
-      
-      The output MUST be a JSON object:
-      {
-        "slides": [
-          {
-            "title": "Title",
-            "content": "Bullet points",
-            "speakerNotes": "Notes"
-          }
-        ]
-      }
-    `;
+    try {
+      console.log('🚀 Starting Multiphase Presentation Generation (3 batches)');
+      const programInfo = `
+        Titre : ${program.title || ''}
+        Description : ${program.description || ''}
+        Objectifs : ${(program.objectives || []).join(', ')}
+        Modules : ${(program.modules || []).map((m: any) => m.title).join(', ')}
+      `;
 
-    const response = await aiService.generateWithClaude(prompt, "You are a presentation expert. Return only valid JSON.");
-    const presentationRaw = JSON.parse(this.cleanJsonResponse(response));
-    return {
-      slides: (presentationRaw.slides || []).map((s: any) => ({
-        title: s.title || 'Slide',
-        content: s.content || '',
-        speakerNotes: s.speakerNotes || ''
-      }))
-    };
+      const generateBatch = async (label: string, slideDescriptions: string, startId: number) => {
+        const prompt = `Tu es un expert en création de présentations.
+          PROGRAMME : ${programInfo}
+          
+          Génère UNIQUEMENT les slides suivantes :
+          ${slideDescriptions}
+
+          Réponds en JSON valide uniquement :
+          {
+            "slides": [
+              {
+                "id": ${startId},
+                "type": "cover|agenda|content|exercise|quote|conclusion|quiz",
+                "title": "Titre de la slide",
+                "subtitle": "Sous-titre",
+                "content": "Contenu détaillé (3 phrases min)",
+                "bullets": ["point 1", "point 2", "point 3"],
+                "note": "Note présentateur riche",
+                "icon": "emoji",
+                "highlight": "chiffre clé",
+                "imageDescription": "Prompt pour image DALL-E"
+              }
+            ]
+          }`;
+        const raw = await aiService.generateWithClaude(prompt, `Return ONLY valid JSON for ${label}`);
+        return aiService.parseJson(raw, label).slides || [];
+      };
+
+      const [slides1, slides2, slides3] = await Promise.all([
+        generateBatch('batch 1 (1-6)', 'Slides 1-6: Titre, Agenda, Introduction, Concepts de base', 1),
+        generateBatch('batch 2 (7-11)', 'Slides 7-11: Cas pratiques, Processus, Typologies', 7),
+        generateBatch('batch 3 (12-17)', 'Slides 12-17: Innovation, Futur, Résumé, Quiz, Conclusion', 12)
+      ]);
+
+      const allSlides = [...slides1, ...slides2, ...slides3].map((s, i) => ({ ...s, id: i + 1 }));
+
+      return {
+        title: program.title || 'Présentation',
+        totalSlides: allSlides.length,
+        slides: allSlides
+      };
+    } catch (error) {
+      console.error('❌ Presentation generation error:', error);
+      throw new AppError('Failed to generate high-quality presentation', 500);
+    }
   }
 
   private cleanJsonResponse(raw: string): string {

@@ -14,6 +14,19 @@ class AIService {
     });
   }
 
+  public parseJson(raw: string, label: string = 'JSON'): any {
+    try {
+      const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+      const match = cleaned.match(/\{[\s\S]*\}/) || cleaned.match(/\[[\s\S]*\]/);
+      if (!match) throw new Error(`Aucun JSON valide trouvé (${label})`);
+      return JSON.parse(match[0]);
+    } catch (e: any) {
+      console.error(`❌ JSON Parsing Error (${label}):`, e.message);
+      console.error(`📄 Raw content was:`, raw.slice(0, 500) + '...');
+      throw new Error(`Failed to parse AI response: ${e.message}`);
+    }
+  }
+
   async generateTrainingContent(prompt: string): Promise<string> {
     try {
       const response = await this.openai.chat.completions.create({
@@ -60,6 +73,9 @@ class AIService {
         const firstContent = response.content[0];
         if (firstContent.type === 'text') {
           console.log(`✅ Analysis successful with Claude model: ${model}`);
+          if (response.stop_reason === 'max_tokens') {
+            console.warn(`⚠️ Claude response TRUNCATED due to max_tokens (${model})`);
+          }
           return firstContent.text;
         }
       } catch (error: any) {
