@@ -40,9 +40,12 @@ class AIService {
   }
 
   async generateWithClaude(prompt: string, systemPrompt?: string): Promise<string> {
+    // Force stable model to resolve production 404 error
+    const model = 'claude-3-sonnet-20240229';
+
     try {
       const response = await this.anthropic.messages.create({
-        model: process.env.ANTHROPIC_MODEL || 'claude-3-sonnet-20240229',
+        model,
         max_tokens: parseInt(process.env.ANTHROPIC_MAX_TOKENS || '4096'),
         system: systemPrompt || 'You are an expert training content creator.',
         messages: [
