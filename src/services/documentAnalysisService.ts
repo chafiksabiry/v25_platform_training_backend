@@ -260,6 +260,46 @@ class DocumentAnalysisService {
     }
   }
 
+  async synthesizeMultipleAnalyses(analyses: any[], apiKey?: string): Promise<any> {
+    console.log(`🧠 Synthesizing ${analyses.length} document analyses into one unified journey...`);
+    
+    const synthesisPrompt = `Tu es un expert en synthèse pédagogique. 
+      Tu as reçu ${analyses.length} analyses de documents différents.
+      TA MISSION : Fusionner ces analyses en un SEUL contexte cohérent pour créer une formation unique.
+      - Identifie les thèmes communs.
+      - Résous les contradictions.
+      - Crée une progression logique globale.
+
+      ANALYSES :
+      ${analyses.map((a, i) => `--- DOC ${i+1} ---\n${JSON.stringify(a.aiAnalysis || a)}`).join('\n\n')}
+
+      Réponds en JSON valide uniquement (Format Synthèse) :
+      {
+        "unifiedTitle": "Titre global",
+        "unifiedDescription": "Description qui englobe tout",
+        "keyConcepts": ["Concept 1", "Concept 2"],
+        "suggestedStructure": ["Introduction multi-sources", "Thème A", "Thème B", "Conclusion"],
+        "learningPersonas": ["Persona 1", "Persona 2"]
+      }`;
+
+    const raw = await aiService.generateWithClaude(synthesisPrompt, "Return ONLY valid JSON synthesis.", apiKey);
+    const synthesis = aiService.parseJson(raw, 'multi_doc_synthesis');
+
+    // Return something compatible with 'analyzeDocument' output to reuse generation phases
+    return {
+      extractedContent: { text: "Synthèse Multi-Documents" },
+      aiAnalysis: {
+        ...synthesis,
+        keyConceptsExtracted: (synthesis.keyConcepts || []).map((c: string) => ({ concept: c, importance: 'high' })),
+        pedagogicalAudit: {
+          bloomsTaxonomyLevel: "Synthesis",
+          learningPersonas: synthesis.learningPersonas || [],
+          knowledgeGaps: []
+        }
+      }
+    };
+  }
+
   private cleanJsonResponse(raw: string): string {
     try {
       // Find the first { and last } to extract JSON even if AI adds conversational text

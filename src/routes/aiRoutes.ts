@@ -20,6 +20,11 @@ router.post(
   aiController.generateProgramFromAnalysis
 );
 
+router.post(
+  '/synthesize-programs',
+  aiController.synthesizePrograms
+);
+
 // Compatibility alias for frontend
 router.post(
   '/generate-curriculum',

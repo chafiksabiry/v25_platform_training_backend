@@ -111,3 +111,36 @@ export const generateProgramFromAnalysis = async (
     return next(error);
   }
 };
+
+export const synthesizePrograms = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { analyses } = req.body;
+    if (!analyses || !Array.isArray(analyses) || analyses.length === 0) {
+      return res.status(400).json({ error: 'At least one analysis is required for synthesis' });
+    }
+
+    const anthropicKey = req.headers['x-anthropic-key'] as string;
+
+    // Phase 1: Synthesize all analyses into one unified analysis
+    const unifiedAnalysis = await documentAnalysisService.synthesizeMultipleAnalyses(analyses, anthropicKey);
+    
+    // Phase 2: Generate program and presentation from synthesized context
+    const program = await documentAnalysisService.generateTrainingProgram(unifiedAnalysis, anthropicKey);
+    const presentation = await documentAnalysisService.generatePresentation(program, anthropicKey);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        program,
+        presentation,
+        unifiedAnalysis
+      }
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
