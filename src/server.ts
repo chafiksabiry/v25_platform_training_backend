@@ -8,7 +8,7 @@ const PORT = process.env.PORT || 5010;
 
 const startServer = async () => {
   try {
-    await connectDB();
+    connectDB(); // Start connection without blocking server startup
 
     app.listen(PORT, () => {
       console.log(`
