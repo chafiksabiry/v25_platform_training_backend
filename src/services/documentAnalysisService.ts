@@ -86,7 +86,7 @@ class DocumentAnalysisService {
         apiKey
       );
 
-      const aiAnalysisRaw = JSON.parse(this.cleanJsonResponse(aiResponse));
+      const aiAnalysisRaw = aiService.parseJson(aiResponse, 'document_analysis');
       
       // Legacy compatibility mapping
       const readability = aiAnalysisRaw.readabilityScore || 85;
@@ -120,9 +120,9 @@ class DocumentAnalysisService {
         },
         aiAnalysis
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error('Document analysis error:', error);
-      throw new AppError('Failed to analyze document', 500);
+      throw new AppError(`Failed to analyze document: ${error.message || String(error)}`, 500);
     }
   }
 
