@@ -161,8 +161,12 @@ class DocumentAnalysisService {
       if (modulePlan.length === 0) return meta;
 
       // ── Call 2: Detailed sessions for each module ─────────────────────────
-      // We process all modules to ensure consistency
-      const sessionPrompt = `Tu es un expert en conception pédagogique.
+      // Split modules into two batches to stay within token limits
+      const half = Math.ceil(modulePlan.length / 2);
+      const batch1Modules = modulePlan.slice(0, half);
+      const batch2Modules = modulePlan.slice(half);
+
+      const makeSessionPrompt = (mods: any[]) => `Tu es un expert en conception pédagogique.
         Thème : ${meta.title}
         Durée : ${meta.duration}
         
@@ -197,14 +201,26 @@ class DocumentAnalysisService {
         }
 
         Modules à détailler :
-        ${modulePlan.map((m: any) => `- Module ${m.id}: ${m.title} (${m.duration}) — ${m.description}`).join('\n')}`;
+        ${mods.map((m: any) => `- Module ${m.id}: ${m.title} (${m.duration}) — ${m.description}`).join('\n')}`;
 
-      const sessionsRaw = await aiService.generateWithClaude(sessionPrompt, "Return ONLY valid JSON detailed modules.", apiKey);
-      const sessionsData = aiService.parseJson(sessionsRaw, 'program_sessions');
+      const [sessionsRaw1, sessionsRaw2] = await Promise.all([
+        aiService.generateWithClaude(makeSessionPrompt(batch1Modules), "Return ONLY valid JSON detailed modules.", apiKey),
+        batch2Modules.length > 0 
+          ? aiService.generateWithClaude(makeSessionPrompt(batch2Modules), "Return ONLY valid JSON detailed modules.", apiKey)
+          : Promise.resolve('{ "modules": [] }')
+      ]);
+
+      const sessionsData1 = aiService.parseJson(sessionsRaw1, 'program_sessions_batch1');
+      const sessionsData2 = aiService.parseJson(sessionsRaw2, 'program_sessions_batch2');
+      
+      const detailedModules = [
+        ...(sessionsData1.modules || []),
+        ...(sessionsData2.modules || [])
+      ];
 
       const program = {
         ...meta,
-        modules: sessionsData.modules || modulePlan
+        modules: detailedModules.length > 0 ? detailedModules : modulePlan
       };
 
       console.log('✅ Iterative Program Generation Complete');

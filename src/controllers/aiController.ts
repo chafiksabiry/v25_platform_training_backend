@@ -100,8 +100,30 @@ export const generateProgramFromAnalysis = async (
     const program = await documentAnalysisService.generateTrainingProgram(analysis, anthropicKey);
     const presentation = await documentAnalysisService.generatePresentation(program, anthropicKey);
 
+    const parseDuration = (val: any): number => {
+      if (typeof val === 'number') return val;
+      if (!val) return 120;
+      const str = String(val).toLowerCase();
+      if (str.includes('h')) {
+        const hours = parseFloat(str) || 2;
+        return hours * 60;
+      }
+      return parseFloat(str) || 120;
+    };
+
+    const modules = (program.modules || []).map((m: any) => ({
+      ...m,
+      duration: parseDuration(m.duration),
+      difficulty: m.difficulty || 'intermediate'
+    }));
+
     return res.status(200).json({
       success: true,
+      title: program.title || 'Formation Générée par IA',
+      description: program.description || 'Description du programme',
+      totalDuration: parseDuration(program.duration || program.totalDuration),
+      methodology: program.methodology || 'Interactive',
+      modules: modules,
       data: {
         program,
         presentation
@@ -132,8 +154,30 @@ export const synthesizePrograms = async (
     const program = await documentAnalysisService.generateTrainingProgram(unifiedAnalysis, anthropicKey);
     const presentation = await documentAnalysisService.generatePresentation(program, anthropicKey);
 
+    const parseDuration = (val: any): number => {
+      if (typeof val === 'number') return val;
+      if (!val) return 120;
+      const str = String(val).toLowerCase();
+      if (str.includes('h')) {
+        const hours = parseFloat(str) || 2;
+        return hours * 60;
+      }
+      return parseFloat(str) || 120;
+    };
+
+    const modules = (program.modules || []).map((m: any) => ({
+      ...m,
+      duration: parseDuration(m.duration),
+      difficulty: m.difficulty || 'intermediate'
+    }));
+
     return res.status(200).json({
       success: true,
+      title: program.title || 'Formation Générée par IA',
+      description: program.description || 'Description du programme',
+      totalDuration: parseDuration(program.duration || program.totalDuration),
+      methodology: program.methodology || 'Interactive',
+      modules: modules,
       data: {
         program,
         presentation,

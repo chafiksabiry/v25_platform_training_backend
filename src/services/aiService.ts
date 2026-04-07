@@ -56,7 +56,8 @@ class AIService {
     const client = apiKey ? new Anthropic({ apiKey }) : this.anthropic;
 
     const modelsToTry = [
-      process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022',
+      process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5',
+      'claude-3-5-sonnet-20241022',
       'claude-3-5-sonnet-20240620',
       'claude-3-haiku-20240307',
     ];
@@ -67,7 +68,7 @@ class AIService {
         console.log(`🤖 Attempting analysis with Claude model: ${model}${apiKey ? ' (using custom API key)' : ''}`);
         const response = await client.messages.create({
           model,
-          max_tokens: parseInt(process.env.ANTHROPIC_MAX_TOKENS || '4096'),
+          max_tokens: parseInt(process.env.ANTHROPIC_MAX_TOKENS || '8192'),
           system: systemPrompt || 'You are an expert training content creator.',
           messages: [{ role: 'user', content: prompt }],
           temperature: parseFloat(process.env.OPENAI_TEMPERATURE || '0.7')
