@@ -1,11 +1,16 @@
 import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 
 class AIService {
   private openai: OpenAI;
+  private anthropic: Anthropic;
 
   constructor() {
     this.openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY
+    });
+    this.anthropic = new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY || ''
     });
   }
 
@@ -31,6 +36,32 @@ class AIService {
     } catch (error) {
       console.error('OpenAI API error:', error);
       throw new Error('Failed to generate training content');
+    }
+  }
+
+  async generateWithClaude(prompt: string, systemPrompt?: string): Promise<string> {
+    try {
+      const response = await this.anthropic.messages.create({
+        model: process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20240620',
+        max_tokens: parseInt(process.env.ANTHROPIC_MAX_TOKENS || '4096'),
+        system: systemPrompt || 'You are an expert training content creator.',
+        messages: [
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: parseFloat(process.env.OPENAI_TEMPERATURE || '0.7')
+      });
+
+      const firstContent = response.content[0];
+      if (firstContent.type === 'text') {
+        return firstContent.text;
+      }
+      return '';
+    } catch (error) {
+      console.error('Anthropic API error:', error);
+      throw new Error('Failed to generate content with Claude');
     }
   }
 

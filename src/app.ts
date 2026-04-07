@@ -8,6 +8,7 @@ import { errorHandler } from './middleware/errorHandler';
 import authRoutes from './routes/authRoutes';
 import journeyRoutes from './routes/journeyRoutes';
 import healthRoutes from './routes/healthRoutes';
+import aiRoutes from './routes/aiRoutes';
 
 const app: Application = express();
 
@@ -45,6 +46,7 @@ app.use('/uploads', express.static('uploads'));
 app.use('/', healthRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/journeys', journeyRoutes);
+app.use('/api/ai', aiRoutes);
 
 app.get('/', (req: Request, res: Response) => {
   res.json({

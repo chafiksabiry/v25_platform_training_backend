@@ -5,16 +5,16 @@ import { createJourneyValidation } from '../middleware/validator';
 
 const router = Router();
 
-router.use(authenticate);
+// router.use(authenticate); // Disabled auth
 
-router.post('/', authorize('trainer', 'admin'), createJourneyValidation, journeyController.createJourney);
+router.post('/', createJourneyValidation, journeyController.createJourney);
 router.get('/', journeyController.getAllJourneys);
-router.get('/dashboard', authorize('trainer', 'admin'), journeyController.getTrainerDashboard);
+router.get('/dashboard', journeyController.getTrainerDashboard);
 router.get('/status/:status', journeyController.getJourneysByStatus);
 router.get('/:id', journeyController.getJourneyById);
-router.put('/:id', authorize('trainer', 'admin'), journeyController.updateJourney);
-router.post('/:id/launch', authorize('trainer', 'admin'), journeyController.launchJourney);
-router.delete('/:id', authorize('trainer', 'admin'), journeyController.deleteJourney);
-router.patch('/:id/archive', authorize('trainer', 'admin'), journeyController.archiveJourney);
+router.put('/:id', journeyController.updateJourney);
+router.post('/:id/launch', journeyController.launchJourney);
+router.delete('/:id', journeyController.deleteJourney);
+router.patch('/:id/archive', journeyController.archiveJourney);
 
 export default router;
