@@ -40,31 +40,52 @@ class AIService {
   }
 
   async generateWithClaude(prompt: string, systemPrompt?: string): Promise<string> {
-    // Force stable model to resolve production 404 error
-    const model = 'claude-3-sonnet-20240229';
+    const modelsToTry = [
+      process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20240620',
+      'claude-3-haiku-20240307', // Always available fallback
+    ];
 
+    let lastError: any;
+    for (const model of modelsToTry) {
+      try {
+        console.log(`🤖 Attempting analysis with Claude model: ${model}`);
+        const response = await this.anthropic.messages.create({
+          model,
+          max_tokens: parseInt(process.env.ANTHROPIC_MAX_TOKENS || '4096'),
+          system: systemPrompt || 'You are an expert training content creator.',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: parseFloat(process.env.OPENAI_TEMPERATURE || '0.7')
+        });
+
+        const firstContent = response.content[0];
+        if (firstContent.type === 'text') {
+          console.log(`✅ Analysis successful with Claude model: ${model}`);
+          return firstContent.text;
+        }
+      } catch (error: any) {
+        lastError = error;
+        console.warn(`⚠️ Claude model ${model} failed: ${error.message}`);
+        // If it's not a 404/401/403, we might want to stop, but for now we follow the waterfall
+      }
+    }
+
+    // FINAL FALLBACK: OpenAI
+    console.log('🔄 All Claude models failed. Falling back to OpenAI...');
     try {
-      const response = await this.anthropic.messages.create({
-        model,
-        max_tokens: parseInt(process.env.ANTHROPIC_MAX_TOKENS || '4096'),
-        system: systemPrompt || 'You are an expert training content creator.',
+      const response = await this.openai.chat.completions.create({
+        model: process.env.OPENAI_MODEL || 'gpt-4o',
         messages: [
-          {
-            role: 'user',
-            content: prompt
-          }
+          { role: 'system', content: systemPrompt || 'You are an expert training content creator.' },
+          { role: 'user', content: prompt }
         ],
-        temperature: parseFloat(process.env.OPENAI_TEMPERATURE || '0.7')
+        temperature: 0.7
       });
 
-      const firstContent = response.content[0];
-      if (firstContent.type === 'text') {
-        return firstContent.text;
-      }
-      return '';
-    } catch (error) {
-      console.error('Anthropic API error:', error);
-      throw new Error('Failed to generate content with Claude');
+      console.log('✅ Analysis successful with OpenAI fallback');
+      return response.choices[0]?.message?.content || '';
+    } catch (openaiError: any) {
+      console.error('❌ ALL AI models failed (Claude & OpenAI):', openaiError);
+      throw new Error(`AI Analysis failed: ${lastError?.message || openaiError.message}`);
     }
   }
 
