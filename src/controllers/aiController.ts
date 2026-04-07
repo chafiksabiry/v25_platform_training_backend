@@ -19,7 +19,8 @@ export const generateTrainingFromGig = async (
       return res.status(400).json({ error: 'gigId is required' });
     }
 
-    const journey = await gigTrainingGeneratorService.generateTrainingFromGig(gigId);
+    const anthropicKey = req.headers['x-anthropic-key'] as string;
+    const journey = await gigTrainingGeneratorService.generateTrainingFromGig(gigId, anthropicKey);
     
     return res.status(201).json({
       message: 'Training journey generated successfully',
@@ -52,10 +53,16 @@ export const analyzeDocument = async (
     // Upload to Cloudinary
     let fileUrl = '';
     try {
-      const uploadResult = await cloudinaryService.uploadDocument(req.file, 'training-content');
-      fileUrl = uploadResult.url;
-    } catch (uploadError) {
-      console.error('Cloudinary upload error:', uploadError);
+      if (req.file) {
+        const uploadResult = await cloudinaryService.uploadDocument(req.file, 'training-content');
+        fileUrl = uploadResult.url;
+      }
+    } catch (uploadError: any) {
+      if (uploadError.http_code === 401) {
+        console.warn('⚠️ Cloudinary: Account disabled or invalid credentials (401). Skipping upload.');
+      } else {
+        console.error('❌ Cloudinary upload error:', uploadError);
+      }
     }
 
     // Cleanup local file

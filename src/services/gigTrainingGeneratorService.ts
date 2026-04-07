@@ -4,114 +4,123 @@ import aiService from './aiService';
 import { AppError } from '../middleware/errorHandler';
 
 class GigTrainingGeneratorService {
-  async generateTrainingFromGig(gigId: string): Promise<ITrainingJourney> {
+  async generateTrainingFromGig(gigId: string, apiKey?: string): Promise<ITrainingJourney> {
     const gig = await Gig.findById(gigId);
     if (!gig) {
       throw new AppError('Gig not found', 404);
     }
 
-    const programPrompt = `
-      Generate a comprehensive training program for a professional gig with the following details:
-      Title: ${gig.title}
-      Description: ${gig.description}
-      Industry: ${gig.industry}
-
-      The output MUST be a JSON object that matches this structure:
-      {
-        "name": "Program Name",
-        "title": "Program Title",
-        "description": "Program Description",
-        "estimatedDuration": "X hours",
-        "targetRoles": ["Role 1", "Role 2"],
-        "modules": [
-          {
-            "title": "Module Title",
-            "description": "Module Description",
-            "duration": 60,
-            "difficulty": "beginner",
-            "learningObjectives": ["Obj 1", "Obj 2"],
-            "topics": ["Topic 1", "Topic 2"],
-            "sections": [
-              {
-                "title": "Section Title",
-                "content": "Comprehensive markdown content for this section.",
-                "type": "text",
-                "duration": 20
-              }
-            ],
-            "quizzes": [
-              {
-                "title": "Quiz Title",
-                "questions": [
-                  {
-                    "question": "Question text?",
-                    "options": ["Opt 1", "Opt 2", "Opt 3", "Opt 4"],
-                    "correctAnswer": 0,
-                    "explanation": "Why this is correct"
-                  }
-                ],
-                "passingScore": 70
-              }
-            ]
-          }
-        ]
-      }
-      
-      Return ONLY the JSON object.
-    `;
-
-    const presentationPrompt = `
-      Generate a training presentation (slides) for the training program of this gig:
-      Title: ${gig.title}
-      Description: ${gig.description}
-
-      The output MUST be a JSON object representing slides:
-      {
-        "slides": [
-          {
-            "title": "Slide Title",
-            "content": "Slide content (bullet points or brief text)",
-            "speakerNotes": "Notes for the trainer"
-          }
-        ]
-      }
-      
-      Return ONLY the JSON object.
-    `;
+    console.log(`🚀 Starting Iterative Generation for Gig: ${gig.title}`);
 
     try {
-      // Generate Program
-      const programRaw = await aiService.generateWithClaude(programPrompt, "You are an expert training architect. Return only valid JSON.");
-      const programData = JSON.parse(this.cleanJsonResponse(programRaw));
+      // ── Phase 1: Program Metadata & Module Plan ─────────────────────────
+      const metaPrompt = `Tu es un expert en conception pédagogique. 
+        Génère un programme de formation professionnel pour ce job (Gig) :
+        TITRE : ${gig.title}
+        DESCRIPTION : ${gig.description}
+        INDUSTRIE : ${gig.industry}
 
-      // Generate Presentation
-      const presentationRaw = await aiService.generateWithClaude(presentationPrompt, "You are an expert presentation designer. Return only valid JSON.");
-      const presentationData = JSON.parse(this.cleanJsonResponse(presentationRaw));
+        Réponds en JSON valide uniquement :
+        {
+          "name": "Titre du programme",
+          "title": "Titre accrocheur",
+          "description": "Description détaillée",
+          "estimatedDuration": "X heures",
+          "targetRoles": ["Rôle 1", "Rôle 2"],
+          "objectives": ["Obj 1", "Obj 2"],
+          "modules": [
+            { "id": 1, "title": "Module 1", "duration": "1h", "description": "..." },
+            { "id": 2, "title": "Module 2", "duration": "1h", "description": "..." }
+          ]
+        }`;
 
-      // Create the journey
+      const metaRaw = await aiService.generateWithClaude(metaPrompt, "Return ONLY valid JSON metadata.", apiKey);
+      const meta = aiService.parseJson(metaRaw, 'gig_metadata');
+
+      // ── Phase 2: Detailed Sessions for Each Module ──────────────────────
+      const modulePlan = meta.modules || [];
+      const sessionPrompt = `Tu es un expert pédagogique.
+        Thème : ${meta.title}
+        
+        Pour chacun des modules suivants, génère les sessions détaillées et les sections de contenu.
+        Réponds en JSON valide uniquement :
+        {
+          "modules": [
+            {
+              "id": 1,
+              "title": "Titre",
+              "duration": 60,
+              "description": "Description",
+              "learningObjectives": ["Obj 1"],
+              "sections": [
+                { "title": "Section 1", "content": "Contenu riche en Markdown (300+ mots)", "type": "text", "duration": 20 }
+              ],
+              "quizzes": [
+                { "title": "Quiz", "questions": [ { "question": "?", "options": ["A", "B"], "correctAnswer": 0, "explanation": "..." } ] }
+              ]
+            }
+          ]
+        }
+
+        Modules :
+        ${modulePlan.map((m: any) => `- ${m.id}: ${m.title}`).join('\n')}`;
+
+      const sessionsRaw = await aiService.generateWithClaude(sessionPrompt, "Return ONLY valid JSON detailed modules.", apiKey);
+      const sessionsData = aiService.parseJson(sessionsRaw, 'gig_sessions');
+
+      // ── Phase 3: Batched Presentation Generation ────────────────────────
+      const generatePresentationBatch = async (batchLabel: string, slideCount: string, startId: number) => {
+        const prompt = `Génère ${slideCount} slides pour la présentation de formation "${meta.title}".
+          GIG CONTEXTE : ${gig.title} - ${gig.industry}
+
+          Réponds en JSON valide uniquement :
+          {
+            "slides": [
+              {
+                "id": ${startId},
+                "type": "cover|content|exercise|quote|conclusion",
+                "title": "Titre",
+                "content": "Développement détaillé (3 phrases min)",
+                "bullets": ["Point A", "Point B"],
+                "note": "Note présentateur riche",
+                "icon": "emoji",
+                "highlight": "chiffre clé"
+              }
+            ]
+          }`;
+        const raw = await aiService.generateWithClaude(prompt, `Return ONLY valid JSON for ${batchLabel}`, apiKey);
+        return aiService.parseJson(raw, batchLabel).slides || [];
+      };
+
+      const [batch1, batch2, batch3] = await Promise.all([
+        generatePresentationBatch('B1', 'Slides 1-6', 1),
+        generatePresentationBatch('B2', 'Slides 7-12', 7),
+        generatePresentationBatch('B3', 'Slides 13-17+', 13)
+      ]);
+
+      const allSlides = [...batch1, ...batch2, ...batch3].map((s, i) => ({ ...s, id: i + 1 }));
+
+      // ── Final Assembly & Persistence ────────────────────────────────────
       const journeyData: Partial<ITrainingJourney> = {
-        ...programData,
+        ...meta,
+        modules: sessionsData.modules || [],
         companyId: gig.companyId,
         gigId: gig._id,
         industry: gig.industry,
         status: 'draft',
         methodologyData: {
-          presentation: presentationData.slides,
+          presentation: allSlides,
           generatedAt: new Date()
         }
       };
 
       const journey = await TrainingJourney.create(journeyData);
+      console.log('✅ Iterative Gig Generation Complete');
       return journey;
     } catch (error) {
-      console.error('Generation error:', error);
-      throw new AppError('Failed to generate training content from Gig', 500);
+      console.error('❌ Gig generation error:', error);
+      throw new AppError('Failed to generate high-quality training from Gig', 500);
     }
-  }
-
-  private cleanJsonResponse(raw: string): string {
-    // Remove markdown code blocks if present
-    return raw.replace(/```json\n?/, '').replace(/```\n?/, '').trim();
   }
 }
 

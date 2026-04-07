@@ -20,4 +20,10 @@ router.post(
   aiController.generateProgramFromAnalysis
 );
 
+// Compatibility alias for frontend
+router.post(
+  '/generate-curriculum',
+  aiController.generateProgramFromAnalysis
+);
+
 export default router;

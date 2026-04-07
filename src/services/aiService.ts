@@ -57,7 +57,8 @@ class AIService {
 
     const modelsToTry = [
       process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20240620',
-      'claude-3-haiku-20240307', // Always available fallback
+      'claude-3-sonnet-20240229',
+      'claude-3-haiku-20240307',
     ];
 
     let lastError: any;
