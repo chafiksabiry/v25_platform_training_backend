@@ -10,6 +10,7 @@ const router = Router();
 router.post('/', createJourneyValidation, journeyController.createJourney);
 router.get('/', journeyController.getAllJourneys);
 router.get('/dashboard', journeyController.getTrainerDashboard);
+router.get('/trainer/companyId/:companyId', journeyController.getTrainerDashboard); // Legacy compatibility route
 router.get('/status/:status', journeyController.getJourneysByStatus);
 router.get('/:id', journeyController.getJourneyById);
 router.put('/:id', journeyController.updateJourney);
@@ -18,3 +19,4 @@ router.delete('/:id', journeyController.deleteJourney);
 router.patch('/:id/archive', journeyController.archiveJourney);
 
 export default router;
+

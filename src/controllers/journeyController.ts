@@ -48,9 +48,13 @@ export const archiveJourney = asyncHandler(async (req: AuthRequest, res: Respons
 });
 
 export const getTrainerDashboard = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { companyId, gigId } = req.query;
+  const { companyId: queryCompanyId, gigId } = req.query;
+  const { companyId: pathCompanyId } = req.params;
+  
+  const companyId = (pathCompanyId || queryCompanyId) as string;
+  
   const dashboard = await trainingJourneyService.getTrainerDashboard(
-    companyId as string,
+    companyId,
     gigId as string | undefined
   );
   res.status(200).json(dashboard);

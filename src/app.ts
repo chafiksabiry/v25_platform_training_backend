@@ -16,11 +16,27 @@ const corsOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',')
   : ['http://localhost:3000'];
 
+const allowedOrigins = [
+  'https://v25.harx.ai',
+  'https://v25-preprod.harx.ai',
+  'https://harx25pageslinks.netlify.app',
+  'https://harxv25dashboardfrontend.netlify.app',
+  'https://v25-platform-training-frontend.vercel.app',
+  'http://localhost:3000',
+  'http://localhost:5173'
+];
+
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
     if (corsOrigins.includes('*')) return callback(null, true);
-    if (corsOrigins.includes(origin)) return callback(null, true);
+    if (corsOrigins.includes(origin) || allowedOrigins.includes(origin)) return callback(null, true);
+    
+    // Allow any subdomain of harx.ai or netlify.app
+    if (origin.endsWith('.harx.ai') || origin.endsWith('.netlify.app')) {
+      return callback(null, true);
+    }
+    
     callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
@@ -46,6 +62,7 @@ app.use('/uploads', express.static('uploads'));
 app.use('/', healthRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/journeys', journeyRoutes);
+app.use('/training_journeys', journeyRoutes); // Legacy route alias
 app.use('/api/ai', aiRoutes);
 
 app.get('/', (req: Request, res: Response) => {
