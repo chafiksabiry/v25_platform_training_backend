@@ -21,6 +21,11 @@ router.post(
 );
 
 router.post(
+  '/generate-presentation',
+  aiController.generatePresentation
+);
+
+router.post(
   '/synthesize-programs',
   aiController.synthesizePrograms
 );

@@ -134,6 +134,29 @@ export const generateProgramFromAnalysis = async (
   }
 };
 
+export const generatePresentation = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { curriculum } = req.body;
+    if (!curriculum) {
+      return res.status(400).json({ error: 'Curriculum data is required' });
+    }
+
+    const anthropicKey = req.headers['x-anthropic-key'] as string;
+    const presentation = await documentAnalysisService.generatePresentation(curriculum, anthropicKey);
+
+    return res.status(200).json({
+      success: true,
+      presentation
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 export const synthesizePrograms = async (
   req: Request,
   res: Response,
