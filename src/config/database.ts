@@ -5,7 +5,8 @@ const connectDB = async (): Promise<void> => {
     const mongoUri = process.env.MONGODB_URI || '';
 
     if (!mongoUri) {
-      throw new Error('MONGODB_URI is not defined in environment variables');
+      console.error('CRITICAL ERROR: MONGODB_URI is not defined in environment variables');
+      return; // Return instead of exit to let the server start (for health checks)
     }
 
     await mongoose.connect(mongoUri, {
@@ -24,7 +25,7 @@ const connectDB = async (): Promise<void> => {
 
   } catch (error) {
     console.error('Failed to connect to MongoDB:', error);
-    process.exit(1);
+    // process.exit(1); // Modified to permit starting even if DB connection fails temporarily
   }
 };
 
