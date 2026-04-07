@@ -149,7 +149,23 @@ class DocumentAnalysisService {
     `;
 
     const response = await aiService.generateWithClaude(prompt, "You are a curriculum designer. Return only valid JSON.");
-    return JSON.parse(this.cleanJsonResponse(response));
+    const programRaw = JSON.parse(this.cleanJsonResponse(response));
+    
+    // Ensure nested structures exist
+    return {
+      title: programRaw.title || 'Training Program',
+      description: programRaw.description || '',
+      modules: (programRaw.modules || []).map((m: any) => ({
+        ...m,
+        learningObjectives: m.learningObjectives || [],
+        topics: m.topics || [],
+        sections: m.sections || [],
+        quizzes: (m.quizzes || []).map((q: any) => ({
+          ...q,
+          questions: q.questions || []
+        }))
+      }))
+    };
   }
 
   async generatePresentation(program: any): Promise<any> {
@@ -170,7 +186,14 @@ class DocumentAnalysisService {
     `;
 
     const response = await aiService.generateWithClaude(prompt, "You are a presentation expert. Return only valid JSON.");
-    return JSON.parse(this.cleanJsonResponse(response));
+    const presentationRaw = JSON.parse(this.cleanJsonResponse(response));
+    return {
+      slides: (presentationRaw.slides || []).map((s: any) => ({
+        title: s.title || 'Slide',
+        content: s.content || '',
+        speakerNotes: s.speakerNotes || ''
+      }))
+    };
   }
 
   private cleanJsonResponse(raw: string): string {
