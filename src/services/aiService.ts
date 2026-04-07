@@ -56,8 +56,8 @@ class AIService {
     const client = apiKey ? new Anthropic({ apiKey }) : this.anthropic;
 
     const modelsToTry = [
-      process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20240620',
-      'claude-3-sonnet-20240229',
+      process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022',
+      'claude-3-5-sonnet-20240620',
       'claude-3-haiku-20240307',
     ];
 

@@ -88,14 +88,26 @@ class DocumentAnalysisService {
 
       const aiAnalysisRaw = JSON.parse(this.cleanJsonResponse(aiResponse));
       
+      // Legacy compatibility mapping
+      const readability = aiAnalysisRaw.readabilityScore || 85;
+      const complexity = aiAnalysisRaw.engagementScore || 75;
+      
       // Ensure all required fields exist with defaults to prevent UI crashes
       const aiAnalysis = {
-        readabilityScore: aiAnalysisRaw.readabilityScore || 0,
+        ...aiAnalysisRaw,
+        // Legacy keys for UI compatibility
+        keyTopics: aiAnalysisRaw.keyConceptsExtracted || aiAnalysisRaw.keyTopics || [],
+        difficulty: Math.round(10 - (readability / 10)),
+        estimatedReadTime: Math.max(1, Math.round(text.length / 1000)),
+        suggestedModules: aiAnalysisRaw.recommendedModuleStructure || aiAnalysisRaw.suggestedModules || [],
+        
+        // Standard fields
+        readabilityScore: readability,
         keyConceptsExtracted: aiAnalysisRaw.keyConceptsExtracted || [],
         suggestedLearningObjectives: aiAnalysisRaw.suggestedLearningObjectives || [],
         recommendedModuleStructure: aiAnalysisRaw.recommendedModuleStructure || [],
         contentGaps: aiAnalysisRaw.contentGaps || [],
-        engagementScore: aiAnalysisRaw.engagementScore || 0,
+        engagementScore: complexity,
         improvementSuggestions: aiAnalysisRaw.improvementSuggestions || [],
         mediaRecommendations: aiAnalysisRaw.mediaRecommendations || []
       };
@@ -290,6 +302,13 @@ class DocumentAnalysisService {
       extractedContent: { text: "Synthèse Multi-Documents" },
       aiAnalysis: {
         ...synthesis,
+        // Legacy keys for UI compatibility
+        keyTopics: synthesis.keyConcepts || synthesis.suggestedStructure || [],
+        difficulty: 5,
+        estimatedReadTime: 30, // Default estimate for synthesis
+        suggestedModules: synthesis.suggestedStructure || [],
+        
+        // Standard pedagogical fields
         keyConceptsExtracted: (synthesis.keyConcepts || []).map((c: string) => ({ concept: c, importance: 'high' })),
         pedagogicalAudit: {
           bloomsTaxonomyLevel: "Synthesis",
