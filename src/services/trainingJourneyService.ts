@@ -169,6 +169,7 @@ class TrainingJourneyService {
 
     if (enrolledRepIds.size === 0) {
       return {
+        journeys,
         totalTrainees: 0,
         activeTrainees: 0,
         completionRate: 0,
