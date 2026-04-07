@@ -114,8 +114,8 @@ public class AIController {
         }
     }
     
-    @PostMapping(value = "/organize-training", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<Map<String, Object>> organizeTraining(@ModelAttribute OrganizeTrainingRequest request) {
+    @PostMapping("/organize-training")
+    public ResponseEntity<Map<String, Object>> organizeTraining(@RequestBody OrganizeTrainingRequest request) {
             Map<String, Object> response = new HashMap<>();
         
         try {
@@ -156,7 +156,7 @@ public class AIController {
     @Data
     public static class OrganizeTrainingRequest {
         private String trainingId;
-        private List<MultipartFile> files;
+        private List<FileInfoRequest> files;
         private String organizationInstructions;
         private GenerationOptionsRequest options;
     }
