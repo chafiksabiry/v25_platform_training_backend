@@ -2,18 +2,49 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import trainingJourneyService from '../services/trainingJourneyService';
 import { asyncHandler } from '../middleware/errorHandler';
+import cloudinaryService from '../services/cloudinaryService';
 
 export const createJourney = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const journey = await trainingJourneyService.saveJourney(req.body);
-  res.status(201).json(journey);
+  const { presentationData, ...journeyData } = req.body;
+  
+  if (presentationData) {
+    try {
+      const fileName = `presentation_${Date.now()}`;
+      const uploadResult = await cloudinaryService.uploadJsonData(presentationData, fileName);
+      journeyData.presentationUrl = uploadResult.url;
+    } catch (error) {
+      console.error('Failed to upload presentation to Cloudinary:', error);
+    }
+  }
+
+  const journey = await trainingJourneyService.saveJourney(journeyData);
+  res.status(201).json({
+    success: true,
+    journey
+  });
 });
 
 export const updateJourney = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { presentationData, ...journeyData } = req.body;
+  
+  if (presentationData) {
+    try {
+      const fileName = `presentation_${Date.now()}`;
+      const uploadResult = await cloudinaryService.uploadJsonData(presentationData, fileName);
+      journeyData.presentationUrl = uploadResult.url;
+    } catch (error) {
+      console.error('Failed to upload presentation to Cloudinary:', error);
+    }
+  }
+
   const journey = await trainingJourneyService.saveJourney({
     _id: req.params.id,
-    ...req.body
+    ...journeyData
   });
-  res.status(200).json(journey);
+  res.status(200).json({
+    success: true,
+    journey
+  });
 });
 
 export const getJourneyById = asyncHandler(async (req: AuthRequest, res: Response) => {
