@@ -230,72 +230,70 @@ class DocumentAnalysisService {
 
   async generatePresentation(program: any, apiKey?: string): Promise<any> {
     try {
-      console.log('🚀 Starting Multiphase High-Quality Presentation Generation (3 batches with Claude)');
+      console.log('🚀 Starting Full-Claude High-Quality Presentation Generation (3 batches)');
       const programInfo = `
-        NOM DU PROGRAMME : ${program.title || ''}
-        SOUS-TITRE : ${program.subtitle || ''}
-        DESCRIPTION : ${program.description || ''}
-        PUBLIC CIBLE : ${program.targetAudience || 'Professionnels'}
-        OBJECTIFS PÉDAGOGIQUES : ${(program.objectives || []).join(', ')}
-        MODULES PRÉVUS : ${(program.modules || []).map((m: any) => `${m.id}: ${m.title}`).join(' | ')}
+        PROGRAMME : ${program.title || ''}
+        OBJECTIFS : ${(program.objectives || []).join(', ')}
+        STRUCTURE : ${(program.modules || []).map((m: any) => `${m.id}: ${m.title}`).join(' | ')}
+        CONTENU DÉTAILLÉ : ${JSON.stringify(program.modules || []).slice(0, 8000)}
       `;
 
       const generateBatch = async (label: string, slideDescriptions: string, startId: number) => {
-        const prompt = `Tu es un concepteur pédagogique expert et un designer de présentations de haut niveau.
+        const prompt = `Tu es le LEAD INSTRUCTIONAL DESIGNER chez HARX. Ta mission est de créer une présentation de classe mondiale.
           
-          CONTEXTE :
+          CONTEXTE DU PROGRAMME :
           ${programInfo}
 
-          MISSION :
-          Génère les slides suivantes :
+          MISSION SPÉCIFIQUE :
+          Génère les slides suivantes avec une PROFONDEUR PÉDAGOGIQUE EXPERTE :
           ${slideDescriptions}
 
-          RÈGLES CRITIQUES :
-          1. CONCISION : Les notes et contenus doivent être percutants mais brefs pour tenir dans les limites techniques.
-          2. FORMAT : JSON valide uniquement.
-          3. TYPES : 'cover', 'agenda', 'module', 'content', 'exercise', 'quote', 'conclusion', 'quiz'.
+          RÈGLES D'OR DE QUALITÉ :
+          1. EXPERTISE : Le contenu doit être digne d'un consultant senior (McKinsey/BCG style).
+          2. RICHESSE : Utilise des titres percutants, des points clés détaillés, et des chiffres si pertinent.
+          3. NOTES : Rédige des notes de présentateur (script) qui expliquent le "Pourquoi" et apportent de la valeur ajoutée.
+          4. FORMAT : JSON valide uniquement.
 
-          Structure JSON :
+          Structure JSON attendue :
           {
             "slides": [
               {
                 "id": ${startId},
-                "type": "type",
-                "title": "Titre",
-                "subtitle": "Sous-titre",
-                "content": "Description courte",
-                "bullets": ["Point 1", "Point 2"],
-                "note": "Script concis pour le présentateur (max 100 mots).",
-                "icon": "🚀",
-                "highlight": "Chiffre clé",
-                "imageDescription": "Description visuelle"
+                "type": "cover|agenda|module|content|exercise|quote|conclusion|quiz",
+                "title": "Titre Impactant",
+                "subtitle": "Sous-titre stratégique",
+                "content": "Paragraphe d'introduction ou de contexte riche",
+                "bullets": ["Point d'expertise 1", "Point d'expertise 2", "Insight stratégique 3"],
+                "note": "Script complet et conseils pour le présentateur (sois loquace et expert).",
+                "icon": "Icône pertinente",
+                "highlight": "Chiffre ou concept clé à mettre en avant",
+                "imageDescription": "Description détaillée pour un designer visuel"
               }
             ]
           }`;
-        const raw = await aiService.generateWithClaude(prompt, `Génère les slides pour ${label}`, apiKey);
+        
+        const raw = await aiService.generateWithClaude(prompt, `Tu es un expert HARX. Génère le ${label} de la présentation.`, apiKey);
         return aiService.parseJson(raw, label).slides || [];
       };
 
-      // 5 batches smaller to avoid token limit truncation
-      const [batch1, batch2, batch3, batch4, batch5] = await Promise.all([
-        generateBatch('LOT 1', 'Slide 1: Cover, Slide 2: Agenda, Slide 3: Intro.', 1),
-        generateBatch('LOT 2', 'Slides 4-7: Contexte technique et enjeux.', 4),
-        generateBatch('LOT 3', 'Slides 8-11: Méthodologie et Cœur du sujet.', 8),
-        generateBatch('LOT 4', 'Slides 12-14: Cas pratiques et exercices.', 12),
-        generateBatch('LOT 5', 'Slides 15-17: Futur, Quiz et Conclusion.', 15)
+      // 3 Batches for better context and higher quality per slide
+      const [batch1, batch2, batch3] = await Promise.all([
+        generateBatch('LOT 1 (Ouverture)', 'Slide 1: Cover, Slide 2: Agenda, Slide 3: Vision & Enjeux, Slide 4: Objectifs.', 1),
+        generateBatch('LOT 2 (Cœur)', 'Slides 5-10: Développement des concepts clés, méthodologie et piliers de la solution.', 5),
+        generateBatch('LOT 3 (Clôture)', 'Slides 11-15: Cas pratiques, Prochaines étapes, Quiz et Conclusion Impactante.', 11)
       ]);
 
-      const allSlides = [...batch1, ...batch2, ...batch3, ...batch4, ...batch5].map((s, i) => ({ ...s, id: i + 1 }));
+      const allSlides = [...batch1, ...batch2, ...batch3].map((s, i) => ({ ...s, id: i + 1 }));
 
       return {
-        title: program.title || 'Présentation de Formation',
+        title: program.title || 'Présentation Stratégique HARX',
         totalSlides: allSlides.length,
         slides: allSlides,
-        estimatedTime: `${allSlides.length * 2} minutes`
+        estimatedTime: `${allSlides.length * 3} minutes`
       };
     } catch (error) {
-      console.error('❌ Presentation generation error:', error);
-      throw new AppError('Failed to generate high-quality presentation', 500);
+      console.error('❌ Full-Claude Presentation generation error:', error);
+      throw new AppError('Failed to generate elite presentation with Claude', 500);
     }
   }
 
