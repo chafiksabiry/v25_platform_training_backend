@@ -22,179 +22,63 @@ function makeShadow() {
 /**
  * Slide generator for Cover type
  */
-function addCoverSlide(pres: PptxGenJS, slide: ISlide, title?: string, subtitle?: string) {
-  const s = pres.addSlide();
-  s.background = { color: C.DARK };
-
-  // Rose accent bar left
-  s.addShape('rect' as any, {
-    x: 0, y: 0, w: 0.18, h: SLIDE_H,
-    fill: { color: C.ROSE }, line: { width: 0 }
-  });
-
-  // Subtle geometric decoration top-right (Purple glow)
-  s.addShape('rect' as any, {
-    x: 7.5, y: 0, w: 2.5, h: 2.2,
-    fill: { color: C.PURPLE, transparency: 85 }, line: { width: 0 }
-  });
-  s.addShape('rect' as any, {
-    x: 8.2, y: 0, w: 1.8, h: 2.2,
-    fill: { color: C.ROSE, transparency: 90 }, line: { width: 0 }
-  });
-
-  // Icon
-  if (slide.icon) {
-    s.addText(slide.icon, {
-      x: 0.5, y: 0.5, w: 1.2, h: 1,
-      fontSize: 40, align: 'left', valign: 'top'
-    });
-  }
-
-  // Title
-  s.addText(slide.title || title || 'Présentation', {
-    x: 0.5, y: 1.3, w: 8.5, h: 1.8,
-    fontFace: 'Georgia', fontSize: 40, bold: true,
-    color: C.WHITE, align: 'left', valign: 'middle',
-  });
-
-  // Subtitle
-  const sub = (slide.subtitle || subtitle || '') as string;
-  if (sub) {
-    s.addText(sub, {
-      x: 0.5, y: 3.15, w: 8, h: 0.6,
-      fontFace: 'Helvetica', fontSize: 16, color: 'E5E7EB',
-      align: 'left', valign: 'middle',
-    });
-  }
-
-  // Bottom bar
-  s.addShape('rect' as any, {
-    x: 0, y: SLIDE_H - 0.55, w: SLIDE_W, h: 0.55,
-    fill: { color: C.PURPLE, transparency: 80 }, line: { width: 0 }
-  });
-  s.addText('Généré par HARX Smart Orchestrator', {
-    x: 0.5, y: SLIDE_H - 0.5, w: 9, h: 0.4,
-    fontFace: 'Helvetica', fontSize: 10, color: C.WHITE, align: 'left',
-  });
-}
-
 /**
- * Slide generator for Module divider
+ * Unified Dynamic Slide Generator
  */
-function addModuleSlide(pres: PptxGenJS, slide: ISlide) {
+function addDynamicSlide(pres: PptxGenJS, slide: ISlide, cfg: { bg: string, accent: string, layout: string, isDark?: boolean, title?: string }) {
   const s = pres.addSlide();
-  s.background = { color: C.DARK };
+  s.background = { color: cfg.bg };
+  const textColor = cfg.isDark ? C.WHITE : C.DARK;
 
-  s.addShape('rect' as any, {
-    x: 0, y: 0, w: SLIDE_W, h: 0.12,
-    fill: { color: C.PURPLE }, line: { width: 0 }
-  });
-  
-  s.addShape('rect' as any, {
-    x: 7.5, y: 0.12, w: 2.5, h: SLIDE_H - 0.12,
-    fill: { color: C.ROSE, transparency: 90 }, line: { width: 0 }
-  });
-
-  s.addText(slide.icon || '📘', {
-    x: 0.5, y: 0.7, w: 1.2, h: 1, fontSize: 36, align: 'left',
-  });
-  s.addText(slide.title || '', {
-    x: 0.5, y: 1.7, w: 6.8, h: 1.5,
-    fontFace: 'Helvetica', fontSize: 36, bold: true,
-    color: C.WHITE, align: 'left', valign: 'middle',
-  });
-  if (slide.subtitle) {
-    s.addText(slide.subtitle, {
-      x: 0.5, y: 3.3, w: 6.8, h: 0.7,
-      fontFace: 'Helvetica', fontSize: 16, color: 'E5E7EB', align: 'left',
+  if (cfg.layout === 'cover' || cfg.layout === 'module') {
+    // Left Accent Bar
+    s.addShape('rect' as any, { x: 0, y: 0, w: 0.2, h: SLIDE_H, fill: { color: cfg.accent } });
+    
+    // Title
+    s.addText(slide.title || cfg.title || '', {
+      x: 0.6, y: 1.5, w: 8.8, h: 2,
+      fontFace: 'Helvetica', fontSize: 36, bold: true, color: C.WHITE, valign: 'middle'
     });
+    
+    // Subtitle
+    if (slide.subtitle) {
+      s.addText(slide.subtitle, {
+        x: 0.6, y: 3.5, w: 8.8, h: 0.5, fontFace: 'Helvetica', fontSize: 16, color: 'D1D5DB'
+      });
+    }
+  } else if (cfg.layout === 'quote') {
+    s.addText('"', { x: 0.5, y: 0.5, w: 2, h: 1.5, fontFace: 'Georgia', fontSize: 96, color: cfg.accent, bold: true });
+    s.addText(slide.content || slide.title || '', {
+      x: 1, y: 1.5, w: 8, h: 2.5, fontFace: 'Helvetica', fontSize: 24, italic: true, color: textColor, align: 'center', valign: 'middle'
+    });
+  } else if (cfg.layout === 'split') {
+    // Left side (Accent)
+    s.addShape('rect' as any, { x: 0, y: 0, w: 4, h: SLIDE_H, fill: { color: cfg.accent } });
+    s.addText(slide.title || '', { x: 0.4, y: 0.5, w: 3.2, h: 1.5, fontFace: 'Helvetica', fontSize: 28, bold: true, color: C.WHITE });
+    
+    // Right side (Content)
+    if (slide.bullets && slide.bullets.length > 0) {
+      const bulletItems = slide.bullets.map((b: string) => ({ text: b, options: { bullet: true, fontSize: 13, color: textColor } }));
+      s.addText(bulletItems, { x: 4.4, y: 1, w: 5.2, h: 4, fontFace: 'Helvetica' });
+    }
+  } else {
+    // Standard / Minimal / Highlight
+    s.addText(slide.title || '', {
+      x: 0.5, y: 0.3, w: 9, h: 0.8, fontFace: 'Helvetica', fontSize: 24, bold: true, color: cfg.accent
+    });
+    s.addShape('rect' as any, { x: 0.5, y: 1.1, w: 9, h: 0.03, fill: { color: C.BORDER } });
+
+    const contentY = 1.3;
+    if (slide.bullets && slide.bullets.length > 0) {
+      const bulletItems = slide.bullets.map((b: string) => ({ text: b, options: { bullet: true, fontSize: 13, color: textColor, paraSpaceAfter: 8 } }));
+      s.addText(bulletItems, { x: 0.6, y: contentY, w: 8.8, h: 4, fontFace: 'Helvetica' });
+    } else if (slide.content) {
+      s.addText(slide.content, { x: 0.6, y: contentY, w: 8.8, h: 4, fontFace: 'Helvetica', fontSize: 14, color: textColor });
+    }
   }
-}
 
-/**
- * Slide generator for standard Content
- */
-function addContentSlide(pres: PptxGenJS, slide: ISlide) {
-  const s = pres.addSlide();
-  s.background = { color: C.WHITE };
-
-  s.addShape('rect' as any, {
-    x: 0, y: 0, w: 0.07, h: SLIDE_H,
-    fill: { color: C.PURPLE }, line: { width: 0 }
-  });
-
-  s.addText(slide.title || '', {
-    x: 0.35, y: 0.25, w: 9.2, h: 0.75,
-    fontFace: 'Helvetica', fontSize: 24, bold: true,
-    color: C.DARK, align: 'left', valign: 'middle',
-  });
-  
-  s.addShape('rect' as any, {
-    x: 0.35, y: 0.98, w: 9.2, h: 0.025,
-    fill: { color: C.BORDER }, line: { width: 0 }
-  });
-
-  if (slide.bullets && slide.bullets.length > 0) {
-    const bulletItems = slide.bullets.map((b: string) => ({
-      text: b,
-      options: { bullet: { type: 'number' as const, color: C.PURPLE }, fontSize: 13, color: C.DARK, paraSpaceAfter: 10 }
-    }));
-    s.addText(bulletItems, {
-      x: 0.5, y: 1.15, w: 9, h: SLIDE_H - 1.6,
-      fontFace: 'Helvetica', valign: 'top',
-    });
-  } else if (slide.content) {
-    s.addText(slide.content, {
-      x: 0.5, y: 1.15, w: 9, h: SLIDE_H - 1.6,
-      fontFace: 'Helvetica', fontSize: 13, color: C.DARK,
-      align: 'left', valign: 'top', wrap: true,
-    });
-  }
-}
-
-/**
- * Slide generator for Exercise
- */
-function addExerciseSlide(pres: PptxGenJS, slide: ISlide) {
-  const s = pres.addSlide();
-  s.background = { color: 'F9FAFB' }; // Very light slate
-
-  s.addShape('rect' as any, {
-    x: 0, y: 0, w: SLIDE_W, h: 1.05,
-    fill: { color: C.PURPLE }, line: { width: 0 }
-  });
-  s.addText((slide.icon || '🛠') + '  ' + (slide.title || ''), {
-    x: 0.4, y: 0, w: 9.2, h: 1.05,
-    fontFace: 'Helvetica', fontSize: 24, bold: true,
-    color: C.WHITE, align: 'left', valign: 'middle',
-  });
-
-  if (slide.content) {
-    s.addText(slide.content, {
-      x: 0.5, y: 1.2, w: 9, h: 1.2,
-      fontFace: 'Helvetica', fontSize: 14, color: C.DARK,
-      align: 'left', valign: 'top', wrap: true,
-    });
-  }
-}
-
-/**
- * Slide generator for Quote
- */
-function addQuoteSlide(pres: PptxGenJS, slide: ISlide) {
-  const s = pres.addSlide();
-  s.background = { color: C.DARK };
-
-  s.addText('"', {
-    x: 0.5, y: 0.5, w: 2, h: 1.5,
-    fontFace: 'Helvetica', fontSize: 96, color: C.ROSE,
-    align: 'left', valign: 'top', bold: true,
-  });
-  s.addText(slide.content || slide.title || '', {
-    x: 0.9, y: 1.4, w: 8.2, h: 2.5,
-    fontFace: 'Helvetica', fontSize: 22, italic: true,
-    color: C.WHITE, align: 'left', valign: 'middle', wrap: true,
-  });
+  // Footer
+  s.addText('HARX Smart Orchestrator', { x: 0.5, y: SLIDE_H - 0.4, w: 9, h: 0.3, fontFace: 'Helvetica', fontSize: 9, color: cfg.isDark ? '9CA3AF' : '6B7280' });
 }
 
 /**
@@ -206,28 +90,24 @@ export const generatePPTX = async (presentation: IPresentation): Promise<Buffer>
   pres.title = presentation.title || 'Formation';
 
   for (const slide of presentation.slides) {
+    const vc = (slide as any).visualConfig || {};
+    const theme = vc.theme === 'dark' ? C.DARK : C.WHITE;
+    const accent = vc.accent === 'rose' ? C.ROSE : (vc.accent === 'purple' ? C.PURPLE : C.GRADIENT_1);
+    const textColor = vc.theme === 'dark' ? C.WHITE : C.DARK;
+
     let slideObj: any;
     switch (slide.type) {
       case 'cover':
-        addCoverSlide(pres, slide, presentation.title);
-        break;
-      case 'agenda':
-        addCoverSlide(pres, slide, presentation.title); // Same layout as cover or similar
+        addDynamicSlide(pres, slide, { bg: C.DARK, accent: C.ROSE, layout: 'cover', title: presentation.title });
         break;
       case 'module':
-        addModuleSlide(pres, slide);
-        break;
-      case 'exercise':
-        addExerciseSlide(pres, slide);
+        addDynamicSlide(pres, slide, { bg: C.DARK, accent: C.PURPLE, layout: 'module' });
         break;
       case 'quote':
-        addQuoteSlide(pres, slide);
-        break;
-      case 'conclusion':
-        addCoverSlide(pres, slide, presentation.title); // Use cover layout for final slide
+        addDynamicSlide(pres, slide, { bg: theme, accent: accent, layout: 'quote', isDark: vc.theme === 'dark' });
         break;
       default:
-        addContentSlide(pres, slide);
+        addDynamicSlide(pres, slide, { bg: theme, accent: accent, layout: vc.layout || 'content', isDark: vc.theme === 'dark' });
         break;
     }
     

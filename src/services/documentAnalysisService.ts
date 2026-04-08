@@ -245,29 +245,37 @@ class DocumentAnalysisService {
           ${programInfo}
 
           MISSION SPÉCIFIQUE :
-          Génère les slides suivantes avec une PROFONDEUR PÉDAGOGIQUE EXPERTE :
+          Génère les slides suivantes avec une PROFONDEUR PÉDAGOGIQUE EXPERTE et un DESIGN VISUEL STRATÉGIQUE :
           ${slideDescriptions}
 
+          CHARTE GRAPHIQUE HARX (À RESPECTER) :
+          - Couleurs : Rose (#F43F5E), Violet (#6D28D9), Anthracite (#111827).
+          - Style : Moderne, épuré, Glassmorphism, Premium.
+
           RÈGLES D'OR DE QUALITÉ :
-          1. EXPERTISE : Le contenu doit être digne d'un consultant senior (McKinsey/BCG style).
-          2. RICHESSE : Utilise des titres percutants, des points clés détaillés, et des chiffres si pertinent.
-          3. NOTES : Rédige des notes de présentateur (script) qui expliquent le "Pourquoi" et apportent de la valeur ajoutée.
+          1. EXPERTISE : Contenu de niveau consultant senior.
+          2. DESIGNER : Pour CHAQUE slide, choisis le meilleur 'visualConfig' pour l'impact visuel.
+          3. NOTES : Script pro incluant des conseils de posture et d'animation.
           4. FORMAT : JSON valide uniquement.
 
-          Structure JSON attendue :
+          Structure JSON avec Design :
           {
             "slides": [
               {
                 "id": ${startId},
                 "type": "cover|agenda|module|content|exercise|quote|conclusion|quiz",
-                "title": "Titre Impactant",
-                "subtitle": "Sous-titre stratégique",
-                "content": "Paragraphe d'introduction ou de contexte riche",
-                "bullets": ["Point d'expertise 1", "Point d'expertise 2", "Insight stratégique 3"],
-                "note": "Script complet et conseils pour le présentateur (sois loquace et expert).",
-                "icon": "Icône pertinente",
-                "highlight": "Chiffre ou concept clé à mettre en avant",
-                "imageDescription": "Description détaillée pour un designer visuel"
+                "title": "Titre",
+                "subtitle": "Sous-titre",
+                "content": "Texte riche",
+                "bullets": ["Point 1", "Point 2"],
+                "note": "Notes présentateur détaillées",
+                "visualConfig": {
+                  "layout": "split|gradient|minimal|highlight",
+                  "theme": "dark|light",
+                  "accent": "rose|purple|gold",
+                  "icon": "lucide-icon-name"
+                },
+                "imageDescription": "Description visuelle pour DALL-E"
               }
             ]
           }`;
