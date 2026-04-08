@@ -146,7 +146,15 @@ class TrainingJourneyService {
     companyId: string,
     gigId?: string
   ): Promise<ITrainingJourney[]> {
-    const query: any = { companyId };
+    // Search by either companyId (string) or company (ObjectId/string field) 
+    // to handle variations in how the ID was stored
+    const query: any = { 
+      $or: [
+        { companyId },
+        { company: companyId }
+      ]
+    };
+    
     if (gigId) {
       query.gigId = gigId;
     }
