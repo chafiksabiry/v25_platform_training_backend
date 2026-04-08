@@ -31,7 +31,14 @@ class GigTrainingGeneratorService {
           "modules": [
             { "id": 1, "title": "Module 1", "duration": "1h", "description": "..." },
             { "id": 2, "title": "Module 2", "duration": "1h", "description": "..." }
-          ]
+          ],
+          "visualTheme": {
+            "primaryColor": "#HEX",
+            "secondaryColor": "#HEX",
+            "accentColor": "#HEX",
+            "fontFamily": "font-name",
+            "layoutStyle": "modern|corporate|creative"
+          }
         }`;
 
       const metaRaw = await aiService.generateWithClaude(metaPrompt, "Return ONLY valid JSON metadata.", apiKey);
@@ -53,11 +60,12 @@ class GigTrainingGeneratorService {
               "description": "Description",
               "learningObjectives": ["Obj 1"],
               "sections": [
-                { "title": "Section 1", "content": "Contenu riche en Markdown (300+ mots)", "type": "text", "duration": 20 }
+                { "title": "Section 1", "content": "Contenu riche en Markdown (300+ mots)", "type": "text", "duration": 20, "imageDescription": "Description visuelle détaillée pour génération d'image" }
               ],
               "quizzes": [
                 { "title": "Quiz", "questions": [ { "question": "?", "options": ["A", "B"], "correctAnswer": 0, "explanation": "..." } ] }
-              ]
+              ],
+              "imageDescription": "Description visuelle du module"
             }
           ]
         }

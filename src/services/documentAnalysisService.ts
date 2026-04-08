@@ -152,7 +152,14 @@ class DocumentAnalysisService {
           "modules": [
             { "id": 1, "title": "Titre module 1", "duration": "2h", "description": "Description courte" },
             { "id": 2, "title": "Titre module 2", "duration": "2h", "description": "Description courte" }
-          ]
+          ],
+          "visualTheme": {
+            "primaryColor": "#HEX",
+            "secondaryColor": "#HEX",
+            "accentColor": "#HEX",
+            "fontFamily": "font-name",
+            "layoutStyle": "modern|corporate|creative"
+          }
         }`;
 
       const metaRaw = await aiService.generateWithClaude(metaPrompt, "Return ONLY valid JSON metadata.", apiKey);
@@ -183,7 +190,8 @@ class DocumentAnalysisService {
                 "title": "Titre explicite",
                 "content": "Contenu pédagogique concis en Markdown (100-150 mots max)",
                 "type": "text",
-                "duration": 20
+                "duration": 20,
+                "imageDescription": "Description visuelle détaillée pour génération d'image"
               }
             ],
             "quizzes": [ // MAX 1 quiz de 3 questions !!!
@@ -193,7 +201,8 @@ class DocumentAnalysisService {
                   { "question": "Q?", "options": ["A", "B", "C"], "correctAnswer": 0, "explanation": "..." }
                 ]
               }
-            ]
+            ],
+            "imageDescription": "Description visuelle du module"
           }
         }
 

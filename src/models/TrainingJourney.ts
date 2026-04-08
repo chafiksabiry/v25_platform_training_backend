@@ -23,6 +23,8 @@ export interface ISection {
   content: string;
   type: string;
   duration?: number;
+  imageDescription?: string;
+  imageUrl?: string;
   resources?: Array<{
     title: string;
     url: string;
@@ -42,6 +44,8 @@ export interface ITrainingModule {
   sections: ISection[];
   quizzes: IQuiz[];
   order?: number;
+  imageDescription?: string;
+  imageUrl?: string;
 }
 
 export interface IFinalExam {
@@ -95,6 +99,13 @@ export interface ITrainingJourney extends Document {
   finalExam?: IFinalExam;
   enrolledRepIds?: string[];
   launchDate?: Date;
+  visualTheme?: {
+    primaryColor?: string;
+    secondaryColor?: string;
+    accentColor?: string;
+    fontFamily?: string;
+    layoutStyle?: 'modern' | 'corporate' | 'creative';
+  };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -129,6 +140,8 @@ const sectionSchema = new Schema<ISection>(
     content: { type: String, required: true },
     type: { type: String, default: 'text' },
     duration: { type: Number },
+    imageDescription: { type: String },
+    imageUrl: { type: String },
     resources: [{
       title: { type: String },
       url: { type: String },
@@ -154,7 +167,9 @@ const trainingModuleSchema = new Schema<ITrainingModule>(
     topics: [{ type: String }],
     sections: [sectionSchema],
     quizzes: [quizSchema],
-    order: { type: Number }
+    order: { type: Number },
+    imageDescription: { type: String },
+    imageUrl: { type: String }
   },
   { _id: false }
 );
@@ -250,6 +265,13 @@ const trainingJourneySchema = new Schema<ITrainingJourney>(
         style: { type: String }
       },
       estimatedTime: { type: String }
+    },
+    visualTheme: {
+      primaryColor: { type: String },
+      secondaryColor: { type: String },
+      accentColor: { type: String },
+      fontFamily: { type: String },
+      layoutStyle: { type: String, enum: ['modern', 'corporate', 'creative'] }
     }
   },
   {

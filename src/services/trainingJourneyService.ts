@@ -3,6 +3,7 @@ import TrainingJourney, { ITrainingJourney } from '../models/TrainingJourney';
 import RepProgress from '../models/RepProgress';
 import Rep from '../models/Rep';
 import { AppError } from '../middleware/errorHandler';
+import { ImageGenerationService } from './imageGenerationService';
 
 class TrainingJourneyService {
   private ensureObjectIds(journey: any): void {
@@ -61,8 +62,39 @@ class TrainingJourneyService {
     });
   }
 
+  private async populateImages(journey: any): Promise<void> {
+    if (!journey.modules) return;
+
+    for (const module of journey.modules) {
+      // Generate module image if description exists but URL is missing
+      if (module.imageDescription && !module.imageUrl) {
+        try {
+          module.imageUrl = await ImageGenerationService.generateImage(module.imageDescription);
+        } catch (error) {
+          console.error(`[TrainingJourneyService] Failed to generate image for module: ${module.title}`, error);
+        }
+      }
+
+      if (module.sections) {
+        for (const section of module.sections) {
+          // Generate section image if description exists but URL is missing
+          if (section.imageDescription && !section.imageUrl) {
+            try {
+              section.imageUrl = await ImageGenerationService.generateImage(section.imageDescription);
+            } catch (error) {
+              console.error(`[TrainingJourneyService] Failed to generate image for section: ${section.title}`, error);
+            }
+          }
+        }
+      }
+    }
+  }
+
   async saveJourney(journeyData: Partial<ITrainingJourney>): Promise<ITrainingJourney> {
     this.ensureObjectIds(journeyData);
+    
+    // Automatically populate images if descriptions are present
+    await this.populateImages(journeyData);
 
     if (journeyData._id) {
       const updated = await TrainingJourney.findByIdAndUpdate(
