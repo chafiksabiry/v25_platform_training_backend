@@ -16,10 +16,28 @@ class AIService {
 
   public parseJson(raw: string, label: string = 'JSON'): any {
     try {
-      const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+      let cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+      
+      // If it doesn't start with { or [ but seems to be JSON content, wrap it
+      if (!cleaned.startsWith('{') && !cleaned.startsWith('[')) {
+        if (cleaned.includes('"')) {
+          cleaned = '{' + cleaned;
+          if (!cleaned.endsWith('}')) cleaned += '}';
+        }
+      }
+
+      // Extract the JSON object or array
       const match = cleaned.match(/\{[\s\S]*\}/) || cleaned.match(/\[[\s\S]*\]/);
       if (!match) throw new Error(`Aucun JSON valide trouvé (${label})`);
-      return JSON.parse(match[0]);
+      
+      let jsonString = match[0];
+      
+      // Remove JS-style comments (// comment and /* comment */) before parsing
+      jsonString = jsonString
+        .replace(/\/\*[\s\S]*?\*\//g, '') // remove multi-line comments
+        .replace(/\/\/.*$/gm, '');        // remove single-line comments
+
+      return JSON.parse(jsonString);
     } catch (e: any) {
       console.error(`❌ JSON Parsing Error (${label}):`, e.message);
       console.error(`📄 Raw content was:`, raw.slice(0, 500) + '...');
@@ -96,8 +114,10 @@ class AIService {
     // FINAL FALLBACK: OpenAI
     console.log('🔄 All Claude models failed. Falling back to OpenAI...');
     try {
+      const isJsonRequested = prompt.toLowerCase().includes('json') || (systemPrompt || '').toLowerCase().includes('json');
       const response = await this.openai.chat.completions.create({
         model: process.env.OPENAI_MODEL || 'gpt-4o',
+        response_format: isJsonRequested ? { type: 'json_object' } : undefined,
         messages: [
           { role: 'system', content: systemPrompt || 'You are an expert training content creator.' },
           { role: 'user', content: prompt }

@@ -50,15 +50,15 @@ class DocumentAnalysisService {
         3. Lacunes de connaissances : Que manque-t-il dans ce texte pour une formation complète ?
         4. Points d'accroche interactifs : Où insérer des quiz ou des exercices ?
 
-        Le résultat DOIT être un objet JSON valide avec cette structure exacte, et chaque tableau DOIT être limité à MAXIMUM 5 à 7 éléments les plus importants :
+        Le résultat DOIT être un objet JSON valide (SANS AUCUN COMMENTAIRE) avec cette structure exacte, et chaque tableau DOIT être limité à MAXIMUM 5 à 7 éléments les plus importants :
         {
           "readabilityScore": 85,
-          "keyConceptsExtracted": ["Concept A", "Concept B"], // Limité à 7 max
-          "suggestedLearningObjectives": ["Objectif 1", "Objectif 2"], // Limité à 5 max
-          "recommendedModuleStructure": ["Module 1", "Module 2"], // Limité à 7 max
-          "contentGaps": ["Manque 1"], // Limité à 4 max
+          "keyConceptsExtracted": ["Concept A", "Concept B"],
+          "suggestedLearningObjectives": ["Objectif 1", "Objectif 2"],
+          "recommendedModuleStructure": ["Module 1", "Module 2"],
+          "contentGaps": ["Manque 1"],
           "engagementScore": 75,
-          "improvementSuggestions": [ // Limité à 3 max
+          "improvementSuggestions": [
             {
               "type": "media",
               "priority": "high",
@@ -67,7 +67,7 @@ class DocumentAnalysisService {
               "expectedImpact": "..."
             }
           ],
-          "mediaRecommendations": [ // Limité à 4 max
+          "mediaRecommendations": [
             {
               "type": "video",
               "purpose": "...",
@@ -78,7 +78,7 @@ class DocumentAnalysisService {
         }
         
         CRITIQUE : Sois très concis. Ne génère pas de longues listes.
-        Réponds UNIQUEMENT avec l'objet JSON valide sans texte avant ni après.
+        Réponds UNIQUEMENT avec l'objet JSON valide sans texte avant ni après, et SANS commentaires (//).
       `;
 
       const aiResponse = await aiService.generateWithClaude(
@@ -177,15 +177,15 @@ class DocumentAnalysisService {
         Pour le module spécifique suivant, génère les sessions détaillées et les sections de contenu associées.
         CRITIQUE: Pour éviter de dépasser la limite de tokens, tu DOIS te limiter à MAXIMUM 2 sections et 1 quiz de 3 questions maximum. Le contenu doit être concis (150 mots max par section).
         
-        Réponds en JSON valide uniquement, avec cette structure exacte, sans texte avant ou après :
+        Réponds en JSON valide uniquement, avec cette structure exacte (SANS commentaires), sans texte avant ou après :
         {
           "module": {
             "id": ${m.id},
             "title": "${m.title}",
             "duration": "${m.duration}",
             "description": "Description détaillée courte",
-            "learningObjectives": ["Obj 1", "Obj 2"], // Max 3
-            "sections": [ // MAX 2 sections !!!
+            "learningObjectives": ["Obj 1", "Obj 2"],
+            "sections": [
               {
                 "title": "Titre explicite",
                 "content": "Contenu pédagogique concis en Markdown (100-150 mots max)",
@@ -194,7 +194,7 @@ class DocumentAnalysisService {
                 "imageDescription": "Description visuelle détaillée pour génération d'image"
               }
             ],
-            "quizzes": [ // MAX 1 quiz de 3 questions !!!
+            "quizzes": [
               {
                 "title": "Validation des acquis",
                 "questions": [
@@ -257,8 +257,9 @@ class DocumentAnalysisService {
           Génère les slides suivantes avec une PROFONDEUR PÉDAGOGIQUE EXPERTE et un DESIGN VISUEL STRATÉGIQUE :
           ${slideDescriptions}
 
-          CHARTE GRAPHIQUE HARX (À RESPECTER) :
-          - Couleurs : Rose (#F43F5E), Violet (#6D28D9), Anthracite (#111827).
+          CHARTE GRAPHIQUE HARX (RECOMMANDÉE MAIS ADAPTABLE) :
+          - Tu es un Directeur Artistique. Choisis des couleurs (HEX) qui correspondent parfaitement au **thème de la slide**.
+          - N'hésite pas à utiliser des dégradés subtils, des thèmes clairs (light) ou foncés (dark) selon l'émotion recherchée.
           - Style : Moderne, épuré, Glassmorphism, Premium.
 
           RÈGLES D'OR DE QUALITÉ :
@@ -282,7 +283,9 @@ class DocumentAnalysisService {
                 "visualConfig": {
                   "layout": "split|gradient|minimal|highlight",
                   "theme": "dark|light",
-                  "accent": "rose|purple|gold",
+                  "backgroundHex": "# HEX code pour le fond (ex: #0f172a pour sombre, #ffffff pour clair)",
+                  "textHex": "# HEX code pour le texte (ex: #f8fafc ou #0f172a)",
+                  "accentHex": "# HEX code pour les accents/boutons/décors (ex: #f43f5e)",
                   "icon": "lucide-icon-name"
                 },
                 "imageDescription": "Description visuelle pour DALL-E"
@@ -305,6 +308,7 @@ class DocumentAnalysisService {
 
       return {
         title: program.title || 'Présentation Elite HARX',
+        visualTheme: program.visualTheme,
         totalSlides: allSlides.length,
         slides: allSlides,
         estimatedTime: `${allSlides.length * 3} minutes`
