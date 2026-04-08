@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import gigTrainingGeneratorService from '../services/gigTrainingGeneratorService';
 import documentAnalysisService from '../services/documentAnalysisService';
 import { generatePPTX } from '../services/pptxExportService';
+import { PythonPPTService } from '../services/pythonPPTService';
 import cloudinaryService from '../services/cloudinaryService';
 import { AppError } from '../middleware/errorHandler';
 import fs from 'fs';
@@ -237,6 +238,36 @@ export const exportToPPTX = async (
 
     return res.status(200).send(buffer);
   } catch (error) {
+    return next(error);
+  }
+};
+
+export const exportToPPTXPython = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { presentation } = req.body;
+    if (!presentation) {
+      return res.status(400).json({ error: 'Presentation data is required' });
+    }
+
+    console.log('[AIController] Starting Python-based PPTX generation...');
+    const buffer = await PythonPPTService.generateWithPython(presentation);
+
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${encodeURIComponent(presentation.title || 'presentation')}_premium.pptx"`
+    );
+
+    return res.status(200).send(buffer);
+  } catch (error) {
+    console.error('[AIController] Python PPTX error:', error);
     return next(error);
   }
 };

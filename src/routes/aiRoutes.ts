@@ -40,4 +40,9 @@ router.post(
   aiController.exportToPPTX
 );
 
+router.post(
+  '/export-pptx-python',
+  aiController.exportToPPTXPython
+);
+
 export default router;
