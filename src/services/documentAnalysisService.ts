@@ -230,54 +230,69 @@ class DocumentAnalysisService {
 
   async generatePresentation(program: any, apiKey?: string): Promise<any> {
     try {
-      console.log('🚀 Starting Multiphase Presentation Generation (3 batches)');
+      console.log('🚀 Starting Multiphase High-Quality Presentation Generation (3 batches with Claude)');
       const programInfo = `
-        Titre : ${program.title || ''}
-        Description : ${program.description || ''}
-        Objectifs : ${(program.objectives || []).join(', ')}
-        Modules : ${(program.modules || []).map((m: any) => m.title).join(', ')}
+        NOM DU PROGRAMME : ${program.title || ''}
+        SOUS-TITRE : ${program.subtitle || ''}
+        DESCRIPTION : ${program.description || ''}
+        PUBLIC CIBLE : ${program.targetAudience || 'Professionnels'}
+        OBJECTIFS PÉDAGOGIQUES : ${(program.objectives || []).join(', ')}
+        MODULES PRÉVUS : ${(program.modules || []).map((m: any) => `${m.id}: ${m.title}`).join(' | ')}
       `;
 
       const generateBatch = async (label: string, slideDescriptions: string, startId: number) => {
-        const prompt = `Tu es un expert en création de présentations.
-          PROGRAMME : ${programInfo}
+        const prompt = `Tu es un concepteur pédagogique expert et un designer de présentations de haut niveau (type McKinsey/Apple).
           
-          Génère UNIQUEMENT les slides suivantes :
+          CONTEXTE DU PROGRAMME DE FORMATION :
+          ${programInfo}
+
+          TA MISSION :
+          Génère les slides suivantes pour une présentation de formation professionnelle :
           ${slideDescriptions}
 
-          Réponds en JSON valide uniquement :
+          RÈGLES DE CONCEPTION :
+          1. TYPE : Choisis entre 'cover' (titre), 'agenda' (sommaire), 'module' (transition), 'content' (cours), 'exercise' (atelier), 'quote' (citation), 'conclusion' or 'quiz'.
+          2. CONTENU : Sois percutant. Pas trop de texte sur la slide, mais des idées fortes.
+          3. BULLETS : Utilise des listes à puces claires (3 à 5 max).
+          4. NOTE PRÉSENTATEUR : Très important. Rédige un script complet et des conseils de facilitation pour le formateur.
+          5. HIGHLIGHT : Propose un chiffre clé ou une idée forte à mettre en avant.
+          6. ICON : Propose un emoji moderne et pertinent pour illustrer la slide.
+          7. IMAGE : Décris une image professionnelle (style Unsplash) qui illustre le concept.
+
+          Réponds UNIQUEMENT en JSON valide :
           {
             "slides": [
               {
                 "id": ${startId},
-                "type": "cover|agenda|content|exercise|quote|conclusion|quiz",
-                "title": "Titre de la slide",
-                "subtitle": "Sous-titre",
-                "content": "Contenu détaillé (3 phrases min)",
-                "bullets": ["point 1", "point 2", "point 3"],
-                "note": "Note présentateur riche",
-                "icon": "emoji",
-                "highlight": "chiffre clé",
-                "imageDescription": "Prompt pour image DALL-E"
+                "type": "type_de_slide",
+                "title": "Titre accrocheur",
+                "subtitle": "Sous-titre ou phrase d'accroche",
+                "content": "Paragraphe principal si nécessaire",
+                "bullets": ["Point clé 1", "Point clé 2"],
+                "note": "Script détaillé pour le formateur et conseils de pose de voix.",
+                "icon": "🚀",
+                "highlight": "90%",
+                "imageDescription": "Un bureau moderne avec des collaborateurs qui collaborent..."
               }
             ]
           }`;
-        const raw = await aiService.generateWithClaude(prompt, `Return ONLY valid JSON for ${label}`, apiKey);
+        const raw = await aiService.generateWithClaude(prompt, `Génère les slides pour ${label}`, apiKey);
         return aiService.parseJson(raw, label).slides || [];
       };
 
       const [slides1, slides2, slides3] = await Promise.all([
-        generateBatch('batch 1 (1-6)', 'Slides 1-6: Titre, Agenda, Introduction, Concepts de base', 1),
-        generateBatch('batch 2 (7-11)', 'Slides 7-11: Cas pratiques, Processus, Typologies', 7),
-        generateBatch('batch 3 (12-17)', 'Slides 12-17: Innovation, Futur, Résumé, Quiz, Conclusion', 12)
+        generateBatch('PHASE 1 (Fondations)', 'Slide 1: Cover (Titre et impact), Slide 2: Agenda (Plan du parcours), Slide 3-6: Introduction, contexte du marché et enjeux principaux.', 1),
+        generateBatch('PHASE 2 (Cœur du sujet)', 'Slides 7-12: Détails techniques, méthodologie, cas pratiques et exercices interactifs.', 7),
+        generateBatch('PHASE 3 (Consolidation)', 'Slides 13-17: Futur du secteur, Résumé global, Quiz de validation, et Conclusion inspirante.', 13)
       ]);
 
       const allSlides = [...slides1, ...slides2, ...slides3].map((s, i) => ({ ...s, id: i + 1 }));
 
       return {
-        title: program.title || 'Présentation',
+        title: program.title || 'Présentation de Formation',
         totalSlides: allSlides.length,
-        slides: allSlides
+        slides: allSlides,
+        estimatedTime: `${allSlides.length * 2} minutes`
       };
     } catch (error) {
       console.error('❌ Presentation generation error:', error);

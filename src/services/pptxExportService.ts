@@ -216,6 +216,9 @@ export const generatePPTX = async (presentation: IPresentation): Promise<Buffer>
       case 'cover':
         addCoverSlide(pres, slide, presentation.title);
         break;
+      case 'agenda':
+        addCoverSlide(pres, slide, presentation.title); // Same layout as cover or similar
+        break;
       case 'module':
         addModuleSlide(pres, slide);
         break;
@@ -224,6 +227,9 @@ export const generatePPTX = async (presentation: IPresentation): Promise<Buffer>
         break;
       case 'quote':
         addQuoteSlide(pres, slide);
+        break;
+      case 'conclusion':
+        addCoverSlide(pres, slide, presentation.title); // Use cover layout for final slide
         break;
       default:
         addContentSlide(pres, slide);
