@@ -79,9 +79,9 @@ export interface IPresentation {
 }
 
 export interface ITrainingJourney extends Document {
-  companyId?: string;
-  gigId?: string;
-  industry?: string;
+  companyId?: string | mongoose.Types.ObjectId;
+  gigId?: string | mongoose.Types.ObjectId;
+  industry?: string | mongoose.Types.ObjectId;
   presentationUrl?: string;
   presentation?: IPresentation;
   name: string;
@@ -174,16 +174,16 @@ const finalExamSchema = new Schema<IFinalExam>(
 const trainingJourneySchema = new Schema<ITrainingJourney>(
   {
     companyId: {
-      type: String,
+      type: Schema.Types.ObjectId,
       ref: 'Company'
     },
     gigId: {
-      type: String,
+      type: Schema.Types.ObjectId,
       ref: 'Gig'
     },
     industry: {
-      type: String,
-      trim: true
+      type: Schema.Types.ObjectId,
+      ref: 'Industry'
     },
     presentationUrl: {
       type: String

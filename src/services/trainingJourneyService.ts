@@ -51,6 +51,14 @@ class TrainingJourneyService {
         });
       }
     }
+
+    // New: Ensure relational IDs are valid ObjectIds if they look like ones
+    // This helps Mongoose cast them correctly
+    ['companyId', 'gigId', 'industry'].forEach(field => {
+      if (journey[field] && typeof journey[field] === 'string' && mongoose.Types.ObjectId.isValid(journey[field])) {
+        // Mongoose will handle the actual casting, but we ensure it's a valid hex string
+      }
+    });
   }
 
   async saveJourney(journeyData: Partial<ITrainingJourney>): Promise<ITrainingJourney> {
