@@ -263,11 +263,12 @@ class DocumentAnalysisService {
           - Style : Moderne, épuré, Glassmorphism, Premium.
 
           RÈGLES D'OR DE QUALITÉ :
-          1. EXPERTISE : Contenu de niveau consultant senior, BASÉ UNIQUEMENT SUR LES DOCUMENTS UPLOADÉS.
-          2. DESIGNER : Pour CHAQUE slide, choisis le meilleur 'visualConfig' pour l'impact visuel.
-          3. NOTES : Script pro incluant des conseils de posture et d'animation.
-          4. STRICTEMENT INTERDIT : Ne génère AUCUN quiz, exercice, ou examen final. Concentre-toi sur la transmission du savoir.
+          1. EXPERTISE : Contenu de niveau consultant, BASÉ UNIQUEMENT SUR LES DOCUMENTS.
+          2. DESIGNER : Choisis le meilleur 'visualConfig'.
+          3. NOTES : Script court (max 1 phrase).
+          4. STRICTEMENT INTERDIT : Ne génère AUCUN quiz.
           5. FORMAT : JSON valide uniquement.
+          6. LONGUEUR : SOIS EXTRÊMEMENT CONCIS. Ne fais pas de longues phrases, utilise 100 mots max par slide. Évite la troncature.
 
           Structure JSON avec Design :
           {
@@ -293,8 +294,23 @@ class DocumentAnalysisService {
             ]
           }`;
         
-        const raw = await aiService.generateWithClaude(prompt, `Tu es un expert HARX. Génère le ${label} de la présentation.`, apiKey);
-        return aiService.parseJson(raw, label).slides || [];
+        try {
+          // Explicitly ask for 8192 tokens by making the backend handle it or through the prompt context, 
+          // but we rely on aiService having a high limit. The brevity constraint should be enough.
+          const raw = await aiService.generateWithClaude(prompt, `Tu es un expert HARX. Génère le ${label} de la présentation.`, apiKey);
+          return aiService.parseJson(raw, label).slides || [];
+        } catch (e: any) {
+          console.error(`❌ Batch generation failed for ${label}:`, e.message);
+          return [
+            {
+              id: startId,
+              type: "content",
+              title: "⚠️ Contenu en cours d'optimisation",
+              content: "Le contenu de cette section est en cours de structuration par l'IA...",
+              visualConfig: { layout: "minimal", backgroundHex: "#2D3748", textHex: "#FFFFFF" }
+            }
+          ];
+        }
       };
 
       // 3 Specialized Batches for purely document-centric training

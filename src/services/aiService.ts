@@ -84,7 +84,10 @@ class AIService {
     for (const model of modelsToTry) {
       try {
         console.log(`🤖 Attempting analysis with Claude model: ${model}${apiKey ? ' (using custom API key)' : ''}`);
-        const maxTokens = parseInt(process.env.ANTHROPIC_MAX_TOKENS || '8192');
+        // Ensure max_tokens is high enough to handle complex presentations
+        const envMaxTokens = parseInt(process.env.ANTHROPIC_MAX_TOKENS || '8192');
+        const maxTokens = Math.max(envMaxTokens, 8192);
+        
         const response = await client.messages.create({
           model,
           max_tokens: maxTokens,
