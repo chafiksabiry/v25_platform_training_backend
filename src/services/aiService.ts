@@ -66,13 +66,17 @@ class AIService {
     for (const model of modelsToTry) {
       try {
         console.log(`🤖 Attempting analysis with Claude model: ${model}${apiKey ? ' (using custom API key)' : ''}`);
+        const maxTokens = parseInt(process.env.ANTHROPIC_MAX_TOKENS || '8192');
         const response = await client.messages.create({
           model,
-          max_tokens: parseInt(process.env.ANTHROPIC_MAX_TOKENS || '8192'),
+          max_tokens: maxTokens,
           system: systemPrompt || 'You are an expert training content creator.',
           messages: [{ role: 'user', content: prompt }],
           temperature: parseFloat(process.env.OPENAI_TEMPERATURE || '0.7')
+        }, {
+          headers: { 'anthropic-beta': 'max-tokens-3-5-sonnet-2024-07-15' }
         });
+
 
         const firstContent = response.content[0];
         if (firstContent.type === 'text') {
