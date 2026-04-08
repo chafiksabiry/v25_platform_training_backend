@@ -241,38 +241,34 @@ class DocumentAnalysisService {
       `;
 
       const generateBatch = async (label: string, slideDescriptions: string, startId: number) => {
-        const prompt = `Tu es un concepteur pédagogique expert et un designer de présentations de haut niveau (type McKinsey/Apple).
+        const prompt = `Tu es un concepteur pédagogique expert et un designer de présentations de haut niveau.
           
-          CONTEXTE DU PROGRAMME DE FORMATION :
+          CONTEXTE :
           ${programInfo}
 
-          TA MISSION :
-          Génère les slides suivantes pour une présentation de formation professionnelle :
+          MISSION :
+          Génère les slides suivantes :
           ${slideDescriptions}
 
-          RÈGLES DE CONCEPTION :
-          1. TYPE : Choisis entre 'cover' (titre), 'agenda' (sommaire), 'module' (transition), 'content' (cours), 'exercise' (atelier), 'quote' (citation), 'conclusion' or 'quiz'.
-          2. CONTENU : Sois percutant. Pas trop de texte sur la slide, mais des idées fortes.
-          3. BULLETS : Utilise des listes à puces claires (3 à 5 max).
-          4. NOTE PRÉSENTATEUR : Très important. Rédige un script complet et des conseils de facilitation pour le formateur.
-          5. HIGHLIGHT : Propose un chiffre clé ou une idée forte à mettre en avant.
-          6. ICON : Propose un emoji moderne et pertinent pour illustrer la slide.
-          7. IMAGE : Décris une image professionnelle (style Unsplash) qui illustre le concept.
+          RÈGLES CRITIQUES :
+          1. CONCISION : Les notes et contenus doivent être percutants mais brefs pour tenir dans les limites techniques.
+          2. FORMAT : JSON valide uniquement.
+          3. TYPES : 'cover', 'agenda', 'module', 'content', 'exercise', 'quote', 'conclusion', 'quiz'.
 
-          Réponds UNIQUEMENT en JSON valide :
+          Structure JSON :
           {
             "slides": [
               {
                 "id": ${startId},
-                "type": "type_de_slide",
-                "title": "Titre accrocheur",
-                "subtitle": "Sous-titre ou phrase d'accroche",
-                "content": "Paragraphe principal si nécessaire",
-                "bullets": ["Point clé 1", "Point clé 2"],
-                "note": "Script détaillé pour le formateur et conseils de pose de voix.",
+                "type": "type",
+                "title": "Titre",
+                "subtitle": "Sous-titre",
+                "content": "Description courte",
+                "bullets": ["Point 1", "Point 2"],
+                "note": "Script concis pour le présentateur (max 100 mots).",
                 "icon": "🚀",
-                "highlight": "90%",
-                "imageDescription": "Un bureau moderne avec des collaborateurs qui collaborent..."
+                "highlight": "Chiffre clé",
+                "imageDescription": "Description visuelle"
               }
             ]
           }`;
@@ -280,13 +276,16 @@ class DocumentAnalysisService {
         return aiService.parseJson(raw, label).slides || [];
       };
 
-      const [slides1, slides2, slides3] = await Promise.all([
-        generateBatch('PHASE 1 (Fondations)', 'Slide 1: Cover (Titre et impact), Slide 2: Agenda (Plan du parcours), Slide 3-6: Introduction, contexte du marché et enjeux principaux.', 1),
-        generateBatch('PHASE 2 (Cœur du sujet)', 'Slides 7-12: Détails techniques, méthodologie, cas pratiques et exercices interactifs.', 7),
-        generateBatch('PHASE 3 (Consolidation)', 'Slides 13-17: Futur du secteur, Résumé global, Quiz de validation, et Conclusion inspirante.', 13)
+      // 5 batches smaller to avoid token limit truncation
+      const [batch1, batch2, batch3, batch4, batch5] = await Promise.all([
+        generateBatch('LOT 1', 'Slide 1: Cover, Slide 2: Agenda, Slide 3: Intro.', 1),
+        generateBatch('LOT 2', 'Slides 4-7: Contexte technique et enjeux.', 4),
+        generateBatch('LOT 3', 'Slides 8-11: Méthodologie et Cœur du sujet.', 8),
+        generateBatch('LOT 4', 'Slides 12-14: Cas pratiques et exercices.', 12),
+        generateBatch('LOT 5', 'Slides 15-17: Futur, Quiz et Conclusion.', 15)
       ]);
 
-      const allSlides = [...slides1, ...slides2, ...slides3].map((s, i) => ({ ...s, id: i + 1 }));
+      const allSlides = [...batch1, ...batch2, ...batch3, ...batch4, ...batch5].map((s, i) => ({ ...s, id: i + 1 }));
 
       return {
         title: program.title || 'Présentation de Formation',
