@@ -21,6 +21,11 @@ router.post(
 );
 
 router.post(
+  '/generate-curriculum',
+  aiController.generateProgramFromAnalysis
+);
+
+router.post(
   '/generate-presentation',
   aiController.generatePresentation
 );
