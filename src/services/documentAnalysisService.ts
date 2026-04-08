@@ -284,17 +284,19 @@ class DocumentAnalysisService {
         return aiService.parseJson(raw, label).slides || [];
       };
 
-      // 3 Batches for better context and higher quality per slide
-      const [batch1, batch2, batch3] = await Promise.all([
-        generateBatch('LOT 1 (Ouverture)', 'Slide 1: Cover, Slide 2: Agenda, Slide 3: Vision & Enjeux, Slide 4: Objectifs.', 1),
-        generateBatch('LOT 2 (Cœur)', 'Slides 5-10: Développement des concepts clés, méthodologie et piliers de la solution.', 5),
-        generateBatch('LOT 3 (Clôture)', 'Slides 11-15: Cas pratiques, Prochaines étapes, Quiz et Conclusion Impactante.', 11)
+      // 5 Specialized Batches to avoid token truncation while maintaining elite quality
+      const [batch1, batch2, batch3, batch4, batch5] = await Promise.all([
+        generateBatch('LOT 1 (Ouverture)', 'Slide 1: Cover, Slide 2: Agenda, Slide 3: Vision & Enjeux.', 1),
+        generateBatch('LOT 2 (Fondations)', 'Slides 4-6: Concepts fondamentaux, théorie et piliers stratégiques.', 4),
+        generateBatch('LOT 3 (Méthodologie)', 'Slides 7-9: Cœur de la solution, processus détaillé et insights experts.', 7),
+        generateBatch('LOT 4 (Pratique)', 'Slides 10-12: Cas pratiques, Scénarios réels et Ateliers interactifs.', 10),
+        generateBatch('LOT 5 (Clôture)', 'Slides 13-15: Quiz de validation, Prochaines étapes et Conclusion Impactante.', 13)
       ]);
 
-      const allSlides = [...batch1, ...batch2, ...batch3].map((s, i) => ({ ...s, id: i + 1 }));
+      const allSlides = [...batch1, ...batch2, ...batch3, ...batch4, ...batch5].map((s, i) => ({ ...s, id: i + 1 }));
 
       return {
-        title: program.title || 'Présentation Stratégique HARX',
+        title: program.title || 'Présentation Elite HARX',
         totalSlides: allSlides.length,
         slides: allSlides,
         estimatedTime: `${allSlides.length * 3} minutes`
