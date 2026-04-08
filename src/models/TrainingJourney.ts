@@ -53,11 +53,37 @@ export interface IFinalExam {
   duration?: number;
 }
 
+export interface ISlide {
+  id: number;
+  type: string;
+  title: string;
+  subtitle?: string;
+  content?: string;
+  bullets?: string[];
+  note?: string;
+  icon?: string;
+  highlight?: string;
+  imageDescription?: string;
+}
+
+export interface IPresentation {
+  title: string;
+  totalSlides: number;
+  slides: ISlide[];
+  theme?: {
+    primary?: string;
+    accent?: string;
+    style?: string;
+  };
+  estimatedTime?: string;
+}
+
 export interface ITrainingJourney extends Document {
   companyId?: string;
   gigId?: string;
   industry?: string;
   presentationUrl?: string;
+  presentation?: IPresentation;
   name: string;
   title: string;
   description?: string;
@@ -202,6 +228,28 @@ const trainingJourneySchema = new Schema<ITrainingJourney>(
     }],
     launchDate: {
       type: Date
+    },
+    presentation: {
+      title: { type: String },
+      totalSlides: { type: Number },
+      slides: [{
+        id: { type: Number },
+        type: { type: String },
+        title: { type: String },
+        subtitle: { type: String },
+        content: { type: String },
+        bullets: [{ type: String }],
+        note: { type: String },
+        icon: { type: String },
+        highlight: { type: String },
+        imageDescription: { type: String }
+      }],
+      theme: {
+        primary: { type: String },
+        accent: { type: String },
+        style: { type: String }
+      },
+      estimatedTime: { type: String }
     }
   },
   {
