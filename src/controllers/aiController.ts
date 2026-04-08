@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import gigTrainingGeneratorService from '../services/gigTrainingGeneratorService';
 import documentAnalysisService from '../services/documentAnalysisService';
+import { generatePPTX } from '../services/pptxExportService';
 import cloudinaryService from '../services/cloudinaryService';
 import { AppError } from '../middleware/errorHandler';
 import fs from 'fs';
@@ -207,6 +208,34 @@ export const synthesizePrograms = async (
         unifiedAnalysis
       }
     });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const exportToPPTX = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { presentation } = req.body;
+    if (!presentation) {
+      return res.status(400).json({ error: 'Presentation data is required' });
+    }
+
+    const buffer = await generatePPTX(presentation);
+
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${encodeURIComponent(presentation.title || 'presentation')}.pptx"`
+    );
+
+    return res.status(200).send(buffer);
   } catch (error) {
     return next(error);
   }

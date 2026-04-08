@@ -30,10 +30,9 @@ router.post(
   aiController.synthesizePrograms
 );
 
-// Compatibility alias for frontend
 router.post(
-  '/generate-curriculum',
-  aiController.generateProgramFromAnalysis
+  '/export-pptx',
+  aiController.exportToPPTX
 );
 
 export default router;
