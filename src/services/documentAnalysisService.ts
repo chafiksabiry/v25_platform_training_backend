@@ -168,27 +168,29 @@ class DocumentAnalysisService {
         Durée globale : ${meta.duration}
         
         Pour le module spécifique suivant, génère les sessions détaillées et les sections de contenu associées.
-        Réponds en JSON valide uniquement, avec cette structure exacte, sans markdown autour du JSON :
+        CRITIQUE: Pour éviter de dépasser la limite de tokens, tu DOIS te limiter à MAXIMUM 2 sections et 1 quiz de 3 questions maximum. Le contenu doit être concis (150 mots max par section).
+        
+        Réponds en JSON valide uniquement, avec cette structure exacte, sans texte avant ou après :
         {
           "module": {
             "id": ${m.id},
             "title": "${m.title}",
             "duration": "${m.duration}",
-            "description": "Description détaillée",
-            "learningObjectives": ["Obj 1", "Obj 2", "Obj 3"],
-            "sections": [
+            "description": "Description détaillée courte",
+            "learningObjectives": ["Obj 1", "Obj 2"], // Max 3
+            "sections": [ // MAX 2 sections !!!
               {
-                "title": "Titre de la section",
-                "content": "Contenu pédagogique riche en Markdown (300+ mots)",
-                "type": "text|video|exercise",
+                "title": "Titre explicite",
+                "content": "Contenu pédagogique concis en Markdown (100-150 mots max)",
+                "type": "text",
                 "duration": 20
               }
             ],
-            "quizzes": [
+            "quizzes": [ // MAX 1 quiz de 3 questions !!!
               {
-                "title": "Quiz de validation",
+                "title": "Validation des acquis",
                 "questions": [
-                  { "question": "Question?", "options": ["A", "B", "C"], "correctAnswer": 0, "explanation": "..." }
+                  { "question": "Q?", "options": ["A", "B", "C"], "correctAnswer": 0, "explanation": "..." }
                 ]
               }
             ]
