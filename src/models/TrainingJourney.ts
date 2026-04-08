@@ -68,6 +68,14 @@ export interface ISlide {
   icon?: string;
   highlight?: string;
   imageDescription?: string;
+  visualConfig?: {
+    layout?: string;
+    theme?: string;
+    accent?: string;
+    backgroundHex?: string;
+    textHex?: string;
+    accentHex?: string;
+  };
 }
 
 export interface IPresentation {
@@ -78,6 +86,13 @@ export interface IPresentation {
     primary?: string;
     accent?: string;
     style?: string;
+  };
+  visualTheme?: {
+    primaryColor?: string;
+    secondaryColor?: string;
+    accentColor?: string;
+    fontFamily?: string;
+    layoutStyle?: 'modern' | 'corporate' | 'creative';
   };
   estimatedTime?: string;
 }
@@ -257,12 +272,27 @@ const trainingJourneySchema = new Schema<ITrainingJourney>(
         note: { type: String },
         icon: { type: String },
         highlight: { type: String },
-        imageDescription: { type: String }
+        imageDescription: { type: String },
+        visualConfig: {
+          layout: { type: String },
+          theme: { type: String },
+          accent: { type: String },
+          backgroundHex: { type: String },
+          textHex: { type: String },
+          accentHex: { type: String }
+        }
       }],
       theme: {
         primary: { type: String },
         accent: { type: String },
         style: { type: String }
+      },
+      visualTheme: {
+        primaryColor: { type: String },
+        secondaryColor: { type: String },
+        accentColor: { type: String },
+        fontFamily: { type: String },
+        layoutStyle: { type: String, enum: ['modern', 'corporate', 'creative'] }
       },
       estimatedTime: { type: String }
     },
