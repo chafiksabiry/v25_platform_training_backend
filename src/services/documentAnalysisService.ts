@@ -50,15 +50,15 @@ class DocumentAnalysisService {
         3. Lacunes de connaissances : Que manque-t-il dans ce texte pour une formation complète ?
         4. Points d'accroche interactifs : Où insérer des quiz ou des exercices ?
 
-        Le résultat DOIT être un objet JSON valide avec cette structure exacte :
+        Le résultat DOIT être un objet JSON valide avec cette structure exacte, et chaque tableau DOIT être limité à MAXIMUM 5 à 7 éléments les plus importants :
         {
           "readabilityScore": 85,
-          "keyConceptsExtracted": ["Concept A", "Concept B"],
-          "suggestedLearningObjectives": ["Objectif 1", "Objectif 2"],
-          "recommendedModuleStructure": ["Module 1", "Module 2"],
-          "contentGaps": ["Manque 1"],
+          "keyConceptsExtracted": ["Concept A", "Concept B"], // Limité à 7 max
+          "suggestedLearningObjectives": ["Objectif 1", "Objectif 2"], // Limité à 5 max
+          "recommendedModuleStructure": ["Module 1", "Module 2"], // Limité à 7 max
+          "contentGaps": ["Manque 1"], // Limité à 4 max
           "engagementScore": 75,
-          "improvementSuggestions": [
+          "improvementSuggestions": [ // Limité à 3 max
             {
               "type": "media",
               "priority": "high",
@@ -67,7 +67,7 @@ class DocumentAnalysisService {
               "expectedImpact": "..."
             }
           ],
-          "mediaRecommendations": [
+          "mediaRecommendations": [ // Limité à 4 max
             {
               "type": "video",
               "purpose": "...",
@@ -77,7 +77,8 @@ class DocumentAnalysisService {
           ]
         }
         
-        Réponds UNIQUEMENT avec l'objet JSON.
+        CRITIQUE : Sois très concis. Ne génère pas de longues listes.
+        Réponds UNIQUEMENT avec l'objet JSON valide sans texte avant ni après.
       `;
 
       const aiResponse = await aiService.generateWithClaude(
