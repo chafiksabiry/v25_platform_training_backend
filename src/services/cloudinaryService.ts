@@ -60,6 +60,31 @@ class CloudinaryService {
   async deleteFile(publicId: string): Promise<void> {
     await cloudinary.uploader.destroy(publicId);
   }
+
+  async uploadJsonData(
+    data: any,
+    fileName: string,
+    folder: string = 'training-presentations'
+  ): Promise<{ url: string; publicId: string }> {
+    return new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          folder,
+          resource_type: 'raw',
+          public_id: fileName,
+          format: 'json'
+        },
+        (error, result) => {
+          if (error) return reject(error);
+          resolve({
+            url: result!.secure_url,
+            publicId: result!.public_id
+          });
+        }
+      );
+      uploadStream.end(JSON.stringify(data));
+    });
+  }
 }
 
 export default new CloudinaryService();

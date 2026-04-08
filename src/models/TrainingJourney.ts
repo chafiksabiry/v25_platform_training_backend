@@ -57,6 +57,7 @@ export interface ITrainingJourney extends Document {
   companyId?: string;
   gigId?: string;
   industry?: string;
+  presentationUrl?: string;
   name: string;
   title: string;
   description?: string;
@@ -157,6 +158,9 @@ const trainingJourneySchema = new Schema<ITrainingJourney>(
     industry: {
       type: String,
       trim: true
+    },
+    presentationUrl: {
+      type: String
     },
     name: {
       type: String,
