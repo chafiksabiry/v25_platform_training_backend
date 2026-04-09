@@ -239,7 +239,7 @@ class DocumentAnalysisService {
 
   async generatePresentation(program: any, apiKey?: string): Promise<any> {
     try {
-      console.log('🚀 Starting Full-Claude High-Quality Presentation Generation (3 batches)');
+      console.log('🚀 Starting Full-Claude MÉTHODE 360° Presentation Generation (17 slides, 3 batches)');
       const programInfo = `
         PROGRAMME : ${program.title || ''}
         OBJECTIFS : ${(program.objectives || []).join(', ')}
@@ -248,90 +248,95 @@ class DocumentAnalysisService {
       `;
 
       const generateBatch = async (label: string, slideDescriptions: string, startId: number) => {
-        const prompt = `Tu es le LEAD INSTRUCTIONAL DESIGNER chez HARX. Ta mission est de créer une présentation de classe mondiale.
+        const prompt = `Tu es le LEAD INSTRUCTIONAL DESIGNER chez HARX. Ta mission est de créer une présentation de classe mondiale en utilisant la MÉTHODE 360°.
           
           CONTEXTE DU PROGRAMME :
           ${programInfo}
 
           MISSION SPÉCIFIQUE :
-          Génère les slides suivantes avec une PROFONDEUR PÉDAGOGIQUE EXPERTE et un DESIGN VISUEL STRATÉGIQUE :
+          Génère UNIQUEMENT les slides suivantes avec une PROFONDEUR PÉDAGOGIQUE EXPERTE :
           ${slideDescriptions}
 
-          CHARTE GRAPHIQUE HARX (RECOMMANDÉE MAIS ADAPTABLE) :
-          - Tu es un Directeur Artistique. Choisis des couleurs (HEX) qui correspondent parfaitement au **thème de la slide**.
-          - N'hésite pas à utiliser des dégradés subtils, des thèmes clairs (light) ou foncés (dark) selon l'émotion recherchée.
-          - Style : Moderne, épuré, Glassmorphism, Premium.
+          CHARTE GRAPHIQUE HARX :
+          - Style : Moderne, épuré, Premium, Corporate.
+          - Utilise des visuels suggestifs (imageDescription) pour chaque slide.
 
-          RÈGLES D'OR DE QUALITÉ :
-          1. EXPERTISE : Contenu de niveau consultant, BASÉ UNIQUEMENT SUR LES DOCUMENTS.
-          2. DESIGNER : Choisis le meilleur 'visualConfig'.
-          3. NOTES : Script court (max 1 phrase).
-          4. STRICTEMENT INTERDIT : Ne génère AUCUN quiz.
-          5. FORMAT : JSON valide uniquement.
-          6. LONGUEUR : SOIS EXTRÊMEMENT CONCIS. Ne fais pas de longues phrases, utilise 100 mots max par slide. Évite la troncature.
+          RÈGLES D'OR :
+          1. EXPERTISE : Contenu de niveau consultant, BASÉ SUR LE PROGRAMME.
+          2. DESIGNER : Choisis le meilleur 'visualConfig' (split, minimal, highlight).
+          3. NOTES : Script court pour le présentateur.
+          4. FORMAT : JSON valide uniquement.
 
-          Structure JSON avec Design :
+          Structure JSON pour chaque slide :
           {
-            "slides": [
-              {
-                "id": ${startId},
-                "type": "cover|agenda|module|content|quote|conclusion",
-                "title": "Titre",
-                "subtitle": "Sous-titre",
-                "content": "Texte riche",
-                "bullets": ["Point 1", "Point 2"],
-                "note": "Notes présentateur détaillées",
-                "visualConfig": {
-                  "layout": "split|gradient|minimal|highlight",
-                  "theme": "dark|light",
-                  "backgroundHex": "# HEX code pour le fond (ex: #0f172a pour sombre, #ffffff pour clair)",
-                  "textHex": "# HEX code pour le texte (ex: #f8fafc ou #0f172a)",
-                  "accentHex": "# HEX code pour les accents/boutons/décors (ex: #f43f5e)",
-                  "icon": "lucide-icon-name"
-                },
-                "imageDescription": "Description visuelle pour DALL-E"
-              }
-            ]
+            "id": number,
+            "type": "cover|agenda|content|quote|conclusion|quiz",
+            "title": "Titre",
+            "subtitle": "Sous-titre",
+            "content": "Développement riche (3 phrases min)",
+            "bullets": ["Point clé 1", "Point clé 2", "Point clé 3"],
+            "note": "Note présentateur",
+            "visualConfig": { "layout": "split|gradient|minimal|highlight", "theme": "dark|light", "backgroundHex": "#HEX", "textHex": "#HEX", "accentHex": "#HEX", "icon": "emoji" },
+            "imageDescription": "Description pour DALL-E"
           }`;
         
         try {
-          // Explicitly ask for 8192 tokens by making the backend handle it or through the prompt context, 
-          // but we rely on aiService having a high limit. The brevity constraint should be enough.
-          const raw = await aiService.generateWithClaude(prompt, `Tu es un expert HARX. Génère le ${label} de la présentation.`, apiKey);
-          return aiService.parseJson(raw, label).slides || [];
+          const raw = await aiService.generateWithClaude(prompt, `Génère le ${label} (MÉTHODE 360°).`, apiKey);
+          const parsed = aiService.parseJson(raw, label);
+          return parsed.slides || [];
         } catch (e: any) {
           console.error(`❌ Batch generation failed for ${label}:`, e.message);
-          return [
-            {
-              id: startId,
-              type: "content",
-              title: "⚠️ Contenu en cours d'optimisation",
-              content: "Le contenu de cette section est en cours de structuration par l'IA...",
-              visualConfig: { layout: "minimal", backgroundHex: "#2D3748", textHex: "#FFFFFF" }
-            }
-          ];
+          return [];
         }
       };
 
-      // 3 Specialized Batches for purely document-centric training
-      const [batch1, batch2, batch3] = await Promise.all([
-        generateBatch('LOT 1 (Introduction)', 'Slides 1-3: Cover, Agenda, et Contexte/Introduction du document.', 1),
-        generateBatch('LOT 2 (Contenu Cœur)', 'Slides 4-7: Analyse détaillée, concepts majeurs et points clés du document.', 4),
-        generateBatch('LOT 3 (Conclusion)', 'Slides 8-10: Synthèse des apprentissages, principaux Takeaways, et conclusion.', 8)
+      // ── LOT 1 : LES FONDATIONS (6 slides) ──────────────────────────────
+      const batch1Desc = `
+        Slide 1 : Slide de titre — accroche impactante, slogan fort, chiffre clé du domaine.
+        Slide 2 : Contexte et problématique — statistiques, enjeux actuels, chiffres de référence.
+        Slide 3 : Définition et concepts fondamentaux — clair, accessible, avec exemples concrets.
+        Slide 4 : Historique et évolution — dates clés, timeline, faits marquants.
+        Slide 5 : Fonctionnement détaillé — mécanismes, processus étape par étape.
+        Slide 6 : Comparaisons et distinctions importantes — tableau ou points comparatifs.
+      `;
+
+      // ── LOT 2 : L'EXPERTISE 360° (5 slides) ─────────────────────────────
+      const batch2Desc = `
+        Slide 7 : Typologies et catégories (publiques, privées, professionnelles…).
+        Slide 8 : Services et offres disponibles — liste complète avec exemples.
+        Slide 9 : Avantages pour les bénéficiaires — bénéfices concrets, chiffres, témoignages.
+        Slide 10 : Inconvénients et limites — regard critique et réaliste.
+        Slide 11 : Cas pratique — exemple réel ou simulé avec chiffres concrets.
+      `;
+
+      // ── LOT 3 : L'ACTION & FUTUR (6 slides) ─────────────────────────────
+      const batch3Desc = `
+        Slide 12 : Rôle dans l'écosystème global — lien avec le système global et la société.
+        Slide 13 : Contexte local/régional (Maroc ou pays cible) — données locales, spécificités.
+        Slide 14 : Enjeux actuels et Innovations — IA, digitalisation, nouvelles technologies.
+        Slide 15 : Conclusion synthétique — récapitulatif, messages clés, perspectives.
+        Slide 16 : Prochaines étapes (Call to Action) — que faire après cette formation.
+        Slide 17 : Quiz interactif — 4 questions (3 options chacune) avec réponses et explications.
+      `;
+
+      const [slides1, slides2, slides3] = await Promise.all([
+        generateBatch('B1 (Fondations)', batch1Desc, 1),
+        generateBatch('B2 (Expertise)', batch2Desc, 7),
+        generateBatch('B3 (Action/Futur)', batch3Desc, 12)
       ]);
 
-      const allSlides = [...batch1, ...batch2, ...batch3].map((s, i) => ({ ...s, id: i + 1 }));
+      const allSlides = [...slides1, ...slides2, ...slides3].map((s, i) => ({ ...s, id: i + 1 }));
 
       return {
-        title: program.title || 'Présentation Elite HARX',
+        title: program.title || 'Formation 360° HARX',
         visualTheme: program.visualTheme,
         totalSlides: allSlides.length,
         slides: allSlides,
-        estimatedTime: `${allSlides.length * 3} minutes`
+        estimatedTime: `${allSlides.length * 2} minutes`
       };
     } catch (error) {
-      console.error('❌ Full-Claude Presentation generation error:', error);
-      throw new AppError('Failed to generate elite presentation with Claude', 500);
+      console.error('❌ Méthode 360° Presentation generation error:', error);
+      throw new AppError('Failed to generate 360° presentation', 500);
     }
   }
 

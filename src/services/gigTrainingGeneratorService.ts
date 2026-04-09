@@ -119,41 +119,72 @@ class GigTrainingGeneratorService {
       const sessionsData = aiService.parseJson(sessionsRaw, 'gig_sessions');
 
       // ── Phase 3: Batched Presentation Generation ────────────────────────
-      const generatePresentationBatch = async (batchLabel: string, slideCount: string, startId: number) => {
-        const prompt = `Génère ${slideCount} slides pour la présentation "${meta.title}".
+      const generatePresentationBatch = async (batchLabel: string, slideDescriptions: string, startId: number) => {
+        const prompt = `Tu es un expert en formation chez HARX. Génère UNIQUEMENT les slides suivantes pour la présentation "${meta.title}" en utilisant la MÉTHODE 360°.
           GIG : ${gig.title}
           ${kbPromptFragment}
 
-          RÈGLES : 
-          1. Les slides doivent être extrêmement techniques et précises, basées sur la BASE DE CONNAISSANCES.
-          2. Ne sois pas superficiel. Extrais les chiffres, processus ou définitions des documents.
+          MISSION :
+          Génère ces slides avec une précision technique maximale basée sur la BASE DE CONNAISSANCES :
+          ${slideDescriptions}
 
-          Réponds en JSON valide uniquement :
+          RÈGLES : 
+          1. Les slides doivent être extrêmement techniques et précises.
+          2. Extrais les chiffres, processus ou définitions des documents.
+          3. Réponds en JSON valide uniquement.
+
+          Structure JSON :
           {
             "slides": [
               {
-                "id": ${startId},
-                "type": "cover|content|exercise|quote|conclusion",
+                "id": number,
+                "type": "cover|agenda|content|quote|conclusion|quiz",
                 "title": "Titre",
                 "content": "Développement détaillé (3 phrases min)",
                 "bullets": ["Point A", "Point B"],
-                "note": "Note présentateur riche exploitant les documents",
+                "note": "Note présentateur riche",
                 "icon": "emoji",
                 "highlight": "chiffre clé"
               }
             ]
           }`;
-        const raw = await aiService.generateWithClaude(prompt, `Return ONLY valid JSON for ${batchLabel}`, apiKey);
+        const raw = await aiService.generateWithClaude(prompt, `Return ONLY valid JSON for ${batchLabel} (Méthode 360°)`, apiKey);
         return aiService.parseJson(raw, batchLabel).slides || [];
       };
 
-      const [batch1, batch2, batch3] = await Promise.all([
-        generatePresentationBatch('B1', 'Slides 1-6', 1),
-        generatePresentationBatch('B2', 'Slides 7-12', 7),
-        generatePresentationBatch('B3', 'Slides 13-17+', 13)
+      const batch1Desc = `
+        Slide 1: Titre et Accroche - Slogan fort lié au Job.
+        Slide 2: Contexte du marché et enjeux actuels - Chiffres clés.
+        Slide 3: Concepts fondamentaux et définitions - Base technique.
+        Slide 4: Évolution du métier/secteur - Timeline ou faits marquants.
+        Slide 5: Fonctionnement et Mécanismes - Processus métier.
+        Slide 6: Différenciation et comparaison - Positionnement.
+      `;
+
+      const batch2Desc = `
+        Slide 7: Typologies et segments clients/projets.
+        Slide 8: Catalogue de services et offres (extraits des docs).
+        Slide 9: Bénéfices et Valeur Ajoutée (ROI, efficacité).
+        Slide 10: Défis et Limites du terrain - Réalisme.
+        Slide 11: Étude de cas / Processus exemplaire - Détail technique.
+      `;
+
+      const batch3Desc = `
+        Slide 12: Écosystème et partenaires - Relations métier.
+        Slide 13: Spécificités locales et réglementaires (ex: Maroc).
+        Slide 14: Futur et Innovations - IA, Digitalisation du poste.
+        Slide 15: Synthèse des compétences clés.
+        Slide 16: Call to Action - Prochaines étapes opérationnelles.
+        Slide 17: Quiz de validation - 4 questions techniques MCQs.
+      `;
+
+      const [slides1, slides2, slides3] = await Promise.all([
+        generatePresentationBatch('B1', batch1Desc, 1),
+        generatePresentationBatch('B2', batch2Desc, 7),
+        generatePresentationBatch('B3', batch3Desc, 12)
       ]);
 
-      const allSlides = [...batch1, ...batch2, ...batch3].map((s, i) => ({ ...s, id: i + 1 }));
+      const allSlides = [...slides1, ...slides2, ...slides3].map((s, i) => ({ ...s, id: i + 1 }));
 
       // ── Final Assembly & Persistence ────────────────────────────────────
       const journeyData: Partial<ITrainingJourney> = {
