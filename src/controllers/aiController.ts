@@ -231,13 +231,16 @@ export const generatePresentation = async (
   next: NextFunction
 ) => {
   try {
-    const { curriculum } = req.body;
+    const { curriculum, gigId, useKnowledgeBase } = req.body || {};
     if (!curriculum) {
       return res.status(400).json({ error: 'Curriculum data is required' });
     }
 
     const anthropicKey = req.headers['x-anthropic-key'] as string;
-    const presentation = await documentAnalysisService.generatePresentation(curriculum, anthropicKey);
+    const presentation = await documentAnalysisService.generatePresentation(curriculum, anthropicKey, {
+      gigId: gigId != null && gigId !== '' ? String(gigId) : undefined,
+      useKnowledgeBase: useKnowledgeBase === true
+    });
 
     return res.status(200).json({
       success: true,

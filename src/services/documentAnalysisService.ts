@@ -1,6 +1,7 @@
 import documentParserService from './documentParserService';
 import aiService from './aiService';
 import { AppError } from '../middleware/errorHandler';
+import Document from '../models/Document';
 
 interface DocumentAnalysisResult {
   extractedContent: {
@@ -237,20 +238,119 @@ class DocumentAnalysisService {
     }
   }
 
-  async generatePresentation(program: any, apiKey?: string): Promise<any> {
+  /**
+   * Texte pédagogique exploitable (sections) — évite JSON.stringify tronqué qui noie le contenu KB.
+   */
+  private buildProgramNarrativeContext(program: any, maxChars: number): string {
+    const lines: string[] = [];
+    lines.push(`TITRE PROGRAMME: ${program.title || program.name || ''}`);
+    if (program.description) lines.push(`DESCRIPTION: ${program.description}`);
+    if (Array.isArray(program.objectives) && program.objectives.length) {
+      lines.push(`OBJECTIFS: ${program.objectives.join(' | ')}`);
+    }
+    const mods = program.modules || [];
+    for (let i = 0; i < mods.length; i++) {
+      const m = mods[i];
+      lines.push(`\n—— MODULE ${i + 1}: ${m.title || ''} ——`);
+      if (m.description) lines.push(`Résumé module: ${m.description}`);
+      if (Array.isArray(m.learningObjectives) && m.learningObjectives.length) {
+        lines.push(`Objectifs module: ${m.learningObjectives.join('; ')}`);
+      }
+      const sections = m.sections || [];
+      for (const s of sections) {
+        const st = s.title || s.type || 'Section';
+        let body = '';
+        if (typeof s.content === 'string') body = s.content;
+        else if (s.content && typeof s.content === 'object') {
+          const c = s.content as Record<string, unknown>;
+          body =
+            (typeof c.text === 'string' && c.text) ||
+            (typeof c.markdown === 'string' && c.markdown) ||
+            '';
+          if (!body) body = JSON.stringify(s.content).slice(0, 4000);
+        }
+        lines.push(`\n[${st}]\n${body}`);
+      }
+    }
+    let text = lines.join('\n');
+    if (text.length > maxChars) {
+      text = text.slice(0, maxChars) + '\n[…tronqué — priorité au début du programme…]';
+    }
+    return text;
+  }
+
+  /** Même logique que la génération Gig, avec extraits texte source larges pour les slides. */
+  private async buildKbContextForGig(gigId: string): Promise<string> {
+    const documents = await Document.find({ gigId }).sort({ createdAt: -1 });
+    if (!documents.length) return '';
+    const maxTotal = 48000;
+    const chunks: string[] = [];
+    let total = 0;
+    documents.forEach((doc, idx) => {
+      if (total >= maxTotal) return;
+      const analysis = doc.analysis;
+      const summary = analysis?.summary || '';
+      const points = (analysis?.mainPoints || []).join('\n- ');
+      const terms = (analysis?.keyTerms || []).join(', ');
+      const raw = doc.content || '';
+      const remaining = maxTotal - total - 500;
+      const excerptLen = Math.min(12000, Math.max(0, remaining - summary.length - (points?.length || 0)));
+      const excerpt = raw.slice(0, excerptLen);
+      let block =
+        `[DOCUMENT ${idx + 1}: ${doc.name}]\n` +
+        `SYNTHÈSE (analyse) : ${summary}\n` +
+        (excerpt
+          ? `EXTRAIT TEXTE SOURCE (définitions, articles, exemples — à citer ou paraphraser) :\n${excerpt}\n`
+          : '') +
+        (points ? `POINTS CLÉS :\n- ${points}\n` : '') +
+        (terms ? `MOTS CLÉS : ${terms}\n` : '');
+      if (total + block.length > maxTotal) {
+        block = block.slice(0, Math.max(0, maxTotal - total));
+      }
+      total += block.length;
+      if (block.trim()) chunks.push(block);
+    });
+    return chunks.join('\n---\n');
+  }
+
+  async generatePresentation(
+    program: any,
+    apiKey?: string,
+    options?: { gigId?: string; useKnowledgeBase?: boolean }
+  ): Promise<any> {
     try {
       console.log('🚀 Starting Full-Claude MÉTHODE 360° Presentation Generation (17 slides, 3 batches)');
+
+      let kbPromptFragment = '';
+      if (options?.gigId && options?.useKnowledgeBase === true) {
+        try {
+          kbPromptFragment = await this.buildKbContextForGig(String(options.gigId));
+          console.log(
+            `📚 generate-presentation: KB injectée pour gig ${options.gigId} (${kbPromptFragment.length} caractères)`
+          );
+        } catch (e) {
+          console.error('❌ generate-presentation: échec chargement KB gig:', e);
+        }
+      }
+
+      const narrative = this.buildProgramNarrativeContext(program, 26000);
       const programInfo = `
-        PROGRAMME : ${program.title || ''}
+        PROGRAMME : ${program.title || program.name || ''}
         OBJECTIFS : ${(program.objectives || []).join(', ')}
-        STRUCTURE : ${(program.modules || []).map((m: any) => `${m.id}: ${m.title}`).join(' | ')}
-        CONTENU DÉTAILLÉ : ${JSON.stringify(program.modules || []).slice(0, 8000)}
+        STRUCTURE (modules) : ${(program.modules || []).map((m: any) => `${m.id ?? ''}: ${m.title}`).join(' | ')}
+
+        CONTENU PÉDAGOGIQUE DÉTAILLÉ (modules et sections — utiliser comme squelette, complété par la KB si fournie) :
+        ${narrative}
       `;
+
+      const kbBlock = kbPromptFragment
+        ? `BASE DE CONNAISSANCES — PRIORITÉ ABSOLUE pour les faits, définitions, exemples, vocabulaire et chiffres des slides :\n${kbPromptFragment}\n\n`
+        : '';
 
       const generateBatch = async (label: string, slideDescriptions: string, startId: number) => {
         const prompt = `Tu es le LEAD INSTRUCTIONAL DESIGNER chez HARX. Ta mission est de créer une présentation de classe mondiale en utilisant la MÉTHODE 360°.
-          
-          CONTEXTE DU PROGRAMME :
+
+          ${kbBlock}CONTEXTE DU PROGRAMME :
           ${programInfo}
 
           MISSION SPÉCIFIQUE :
@@ -262,7 +362,8 @@ class DocumentAnalysisService {
           - Chaque slide doit inclure des éléments visuels structurés (voir ci-dessous).
 
           RÈGLES D'OR :
-          1. EXPERTISE : Contenu de niveau consultant, BASÉ SUR LE PROGRAMME.
+          0. Si une BASE DE CONNAISSANCES est fournie plus haut, le contenu rédigé de chaque slide (titres, sous-titres, texte, puces, quiz) doit refléter ces documents. Si le titre du programme ci-dessus (ex. fiche job) ne correspond pas au domaine de la KB, fais primer la KB pour le fond : n'invente pas un autre métier ou secteur. Les exemples et notions viennent des documents.
+          1. EXPERTISE : Contenu de niveau consultant, BASÉ SUR LE PROGRAMME ET LA KB SI PRÉSENTE.
           2. DESIGNER : Choisis le meilleur 'visualConfig' (split, minimal, highlight).
           3. VISUELS : Ajoute TOUJOURS "visualElements" : 2 à 6 formes géométriques par slide (rectangle, rounded-rectangle, circle, ellipse, triangle, line, arrow) pour cadres, accents, schémas simples ou flèches. Coordonnées en pourcentages de la slide (0–100) : x,y = position (coin haut-gauche ou centre pour circle), w,h = taille. Utilise fill/stroke en hex (#RRGGBB), opacity 0.15–0.5 pour les fonds décoratifs.
           4. ILLUSTRATIONS : Remplis "imageDescription" avec une description précise d’une image ou illustration conceptuelle (style, sujet, ambiance) — utile pour une génération d’image ultérieure. Ne mets "illustrationUrl" que si tu simules une URL de démo, sinon omets-le ou laisse vide.
