@@ -131,12 +131,11 @@ class DocumentAnalysisService {
     try {
       console.log('🚀 Starting Multiphase Program Generation (program-generator method)');
       const analysisContext = typeof analysis === 'string' ? analysis : JSON.stringify(analysis);
-      const contextCap = 20000;
-
+      
       // ── Call 1: Program metadata + module plan (no sessions yet) ──────────
       const metaPrompt = `Tu es un expert en conception pédagogique.
         CONTEXTE D'ANALYSE:
-        ${analysisContext.slice(0, contextCap)}
+        ${analysisContext.slice(0, 5000)}
 
         Génère UNIQUEMENT les métadonnées du programme et la liste des modules (sans détailler les sessions).
         Réponds en JSON valide uniquement, sans markdown :

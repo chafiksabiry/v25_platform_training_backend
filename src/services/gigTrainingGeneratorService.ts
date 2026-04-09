@@ -5,41 +5,6 @@ import aiService from './aiService';
 import { AppError } from '../middleware/errorHandler';
 
 class GigTrainingGeneratorService {
-  /** Plain-text KB excerpt for prompts (document-backed analyses linked to a gig). */
-  formatDocumentsAsKnowledgeBase(documents: Array<{ name: string; analysis?: unknown; content?: string }>): string {
-    if (!documents.length) return '';
-    return documents
-      .map((doc, idx) => {
-        const analysis = doc.analysis as
-          | { summary?: string; mainPoints?: string[]; keyTerms?: string[] }
-          | undefined;
-        const summary = analysis?.summary || '';
-        const points = (analysis?.mainPoints || []).join('\n- ');
-        const terms = (analysis?.keyTerms || []).join(', ');
-        const technicalBase = summary || (doc as { content?: string }).content?.slice(0, 3000) || '';
-        return (
-          `[DOCUMENT ${idx + 1}: ${doc.name}]\n` +
-          `SYNTHÈSE : ${technicalBase}\n` +
-          (points ? `POINTS CLÉS :\n- ${points}\n` : '') +
-          (terms ? `MOTS CLÉS : ${terms}\n` : '')
-        );
-      })
-      .join('\n---\n');
-  }
-
-  async buildKnowledgeBaseContext(gigId: string): Promise<string> {
-    try {
-      const documents = await Document.find({ gigId }).sort({ createdAt: -1 });
-      if (documents.length > 0) {
-        console.log(`📚 buildKnowledgeBaseContext: ${documents.length} document(s) for gig ${gigId}`);
-      }
-      return this.formatDocumentsAsKnowledgeBase(documents);
-    } catch (err) {
-      console.error('❌ buildKnowledgeBaseContext failed:', err);
-      return '';
-    }
-  }
-
   async generateTrainingFromGig(gigId: string, apiKey?: string): Promise<ITrainingJourney> {
     const gig = await Gig.findById(gigId);
     if (!gig) {
@@ -51,11 +16,25 @@ class GigTrainingGeneratorService {
     // ── Knowledge Base Retrieval ───────────────────────────────────────
     let kbContext = '';
     try {
+      // Fetch documents linked to this Gig
       const documents = await Document.find({ gigId }).sort({ createdAt: -1 });
-
+      
       if (documents.length > 0) {
         console.log(`📚 Found ${documents.length} documents in KB for this Gig.`);
-        kbContext = this.formatDocumentsAsKnowledgeBase(documents);
+        kbContext = documents.map((doc, idx) => {
+          const analysis = doc.analysis;
+          const summary = analysis?.summary || '';
+          const points = (analysis?.mainPoints || []).join('\n- ');
+          const terms = (analysis?.keyTerms || []).join(', ');
+          
+          // Use AI analysis if available, otherwise fallback to start of content
+          const technicalBase = summary || doc.content?.slice(0, 3000) || '';
+          
+          return `[DOCUMENT ${idx + 1}: ${doc.name}]\n` +
+                 `SYNTHÈSE : ${technicalBase}\n` +
+                 (points ? `POINTS CLÉS :\n- ${points}\n` : '') +
+                 (terms ? `MOTS CLÉS : ${terms}\n` : '');
+        }).join('\n---\n');
       } else {
         console.log('⚠️ No specific documents found for this Gig. Using only Gig description.');
       }

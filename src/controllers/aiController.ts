@@ -140,23 +140,14 @@ export const generateProgramFromAnalysis = async (
   next: NextFunction
 ) => {
   try {
-    const { analysis, gigId: bodyGigId, useKnowledgeBase } = req.body;
+    const { analysis } = req.body;
     if (!analysis) {
       return res.status(400).json({ error: 'Analysis data is required' });
     }
 
     const anthropicKey = req.headers['x-anthropic-key'] as string;
 
-    let programInput: unknown = analysis;
-    if (useKnowledgeBase === true && bodyGigId) {
-      const kb = await gigTrainingGeneratorService.buildKnowledgeBaseContext(String(bodyGigId));
-      programInput = {
-        sourceAnalysis: analysis,
-        gigLinkedKnowledgeBase: kb || '(Aucun document indexé pour ce gig — s’appuyer sur l’analyse des fichiers et le contexte gig si fourni.)'
-      };
-    }
-
-    const program = await documentAnalysisService.generateTrainingProgram(programInput, anthropicKey);
+    const program = await documentAnalysisService.generateTrainingProgram(analysis, anthropicKey);
     const presentation = await documentAnalysisService.generatePresentation(program, anthropicKey);
 
     const parseDuration = (val: any): number => {
