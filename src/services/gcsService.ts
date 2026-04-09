@@ -51,15 +51,29 @@ export async function uploadToGCS(
   const destFileName = `${folder}/${uniqueId}${ext}`;
 
   const file = bucket.file(destFileName);
-  await file.save(fileBuffer, {
-    metadata: {
-      contentType: mimeType,
-    },
-    resumable: false,
-  });
 
-  // Make the file public
-  await file.makePublic();
+  const saveFile = async () => {
+    await file.save(fileBuffer, {
+      metadata: { contentType: mimeType },
+      resumable: false,
+    });
+    await file.makePublic();
+  };
+
+  try {
+    await saveFile();
+  } catch (err: any) {
+    // Auto-create bucket if it doesn't exist
+    const notFound = err?.code === 404 || err?.message?.includes('does not exist') || err?.message?.includes('Not Found');
+    if (notFound) {
+      console.log(`🪣 GCS bucket "${BUCKET_NAME}" not found, creating it...`);
+      await bucket.create({ location: 'US', storageClass: 'STANDARD' });
+      console.log(`✅ GCS bucket "${BUCKET_NAME}" created.`);
+      await saveFile();
+    } else {
+      throw err;
+    }
+  }
 
   const publicUrl = `https://storage.googleapis.com/${BUCKET_NAME}/${destFileName}`;
   return {
