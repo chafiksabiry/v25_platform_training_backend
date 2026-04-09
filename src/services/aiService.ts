@@ -19,13 +19,28 @@ class AIService {
       let cleaned = raw.trim();
       
       // Remove markdown code blocks if present
-      cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+      cleaned = cleaned
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
       
-      // Extract the main JSON structure (object or array)
-      const match = cleaned.match(/\{[\s\S]*\}/) || cleaned.match(/\[[\s\S]*\]/);
-      if (!match) throw new Error(`Aucun JSON valide trouvé (${label})`);
-      
-      let jsonString = match[0];
+      // Extract the main JSON structure by choosing the earliest opening token.
+      const firstObject = cleaned.indexOf('{');
+      const firstArray = cleaned.indexOf('[');
+      const hasObject = firstObject !== -1;
+      const hasArray = firstArray !== -1;
+      if (!hasObject && !hasArray) throw new Error(`Aucun JSON valide trouvé (${label})`);
+
+      let jsonString = '';
+      if (hasArray && (!hasObject || firstArray < firstObject)) {
+        const end = cleaned.lastIndexOf(']');
+        if (end === -1) throw new Error(`JSON array tronqué (${label})`);
+        jsonString = cleaned.substring(firstArray, end + 1);
+      } else {
+        const end = cleaned.lastIndexOf('}');
+        if (end === -1) throw new Error(`JSON object tronqué (${label})`);
+        jsonString = cleaned.substring(firstObject, end + 1);
+      }
       
       // 1. Remove JS-style comments
       jsonString = jsonString
@@ -42,6 +57,14 @@ class AIService {
       try {
         return JSON.parse(jsonString);
       } catch (firstError) {
+        // Some models return over-escaped JSON blocks like \"key\": \"value\"
+        try {
+          const unescapedQuotes = jsonString.replace(/\\"/g, '"');
+          return JSON.parse(unescapedQuotes);
+        } catch (_escapedError) {
+          // Continue to newline-escape fallback
+        }
+
         // Try one more aggressive cleanup: remove actual newlines inside strings
         // This is complex, so we'll just try to escape them if they look like they're inside quotes
         const escapedJson = jsonString.replace(/(?<=[:\s])"([\s\S]*?)"(?=[,\s\}\]])/g, (m, p1) => {

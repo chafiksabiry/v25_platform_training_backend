@@ -5,6 +5,7 @@ import { generatePPTX } from '../services/pptxExportService';
 import { PythonPPTService } from '../services/pythonPPTService';
 import cloudinaryService from '../services/cloudinaryService';
 import { AppError } from '../middleware/errorHandler';
+import Document from '../models/Document';
 import fs from 'fs';
 import { promisify } from 'util';
 
@@ -45,6 +46,7 @@ export const analyzeDocument = async (
     }
 
     const anthropicKey = req.headers['x-anthropic-key'] as string;
+    const { gigId, companyId } = req.body || {};
 
     const analysis = await documentAnalysisService.analyzeDocument(
       req.file.path,
@@ -54,10 +56,12 @@ export const analyzeDocument = async (
 
     // Upload to Cloudinary
     let fileUrl = '';
+    let cloudinaryPublicId = '';
     try {
       if (req.file) {
         const uploadResult = await cloudinaryService.uploadDocument(req.file, 'training-content');
         fileUrl = uploadResult.url;
+        cloudinaryPublicId = uploadResult.publicId || '';
       }
     } catch (uploadError: any) {
       if (uploadError.http_code === 401) {
@@ -65,6 +69,50 @@ export const analyzeDocument = async (
       } else {
         console.error('❌ Cloudinary upload error:', uploadError);
       }
+    }
+
+    // Persist analyzed document so KB retrieval by gigId can work.
+    // If companyId is missing, we skip persistence to avoid invalid records.
+    try {
+      const normalizedCompanyId = companyId || '';
+      if (normalizedCompanyId) {
+        const aiAnalysis = (analysis as any)?.aiAnalysis || {};
+        await Document.create({
+          name: req.file.originalname,
+          description: '',
+          fileUrl,
+          cloudinaryPublicId,
+          fileType: req.file.mimetype,
+          content: (analysis as any)?.extractedContent?.text || '',
+          tags: [],
+          uploadedBy: '',
+          companyId: normalizedCompanyId,
+          gigId: gigId || undefined,
+          isProcessed: true,
+          processingStatus: 'completed',
+          chunks: [],
+          analysis: {
+            summary: Array.isArray(aiAnalysis.suggestedLearningObjectives)
+              ? aiAnalysis.suggestedLearningObjectives.join(' | ')
+              : '',
+            domain: '',
+            theme: '',
+            mainPoints: Array.isArray(aiAnalysis.keyConceptsExtracted)
+              ? aiAnalysis.keyConceptsExtracted.slice(0, 10)
+              : [],
+            technicalLevel: '',
+            targetAudience: '',
+            keyTerms: Array.isArray(aiAnalysis.keyTopics)
+              ? aiAnalysis.keyTopics.slice(0, 15)
+              : [],
+            recommendations: []
+          }
+        });
+      } else {
+        console.warn('⚠️ Skipping document persistence: missing companyId');
+      }
+    } catch (persistError) {
+      console.error('❌ Failed to persist analyzed document:', persistError);
     }
 
     // Cleanup local file
