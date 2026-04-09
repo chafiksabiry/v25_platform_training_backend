@@ -15,6 +15,8 @@ export const createJourney = asyncHandler(async (req: AuthRequest, res: Response
     } catch (error) {
       console.error('Failed to upload presentation to Cloudinary:', error);
     }
+    // Assurer la persistance du style de la présentation IA dans la base de données
+    journeyData.presentation = presentationData;
   }
 
   const journey = await trainingJourneyService.saveJourney(journeyData);
@@ -35,6 +37,8 @@ export const updateJourney = asyncHandler(async (req: AuthRequest, res: Response
     } catch (error) {
       console.error('Failed to upload presentation to Cloudinary:', error);
     }
+    // Assurer la persistance du style de la présentation IA dans la base de données
+    journeyData.presentation = presentationData;
   }
 
   const journey = await trainingJourneyService.saveJourney({

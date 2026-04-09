@@ -102,6 +102,7 @@ export interface ITrainingJourney extends Document {
   gigId?: string | mongoose.Types.ObjectId;
   industry?: string | mongoose.Types.ObjectId;
   presentationUrl?: string;
+  filetraining?: string;
   presentation?: IPresentation;
   name: string;
   title: string;
@@ -216,6 +217,9 @@ const trainingJourneySchema = new Schema<ITrainingJourney>(
       ref: 'Industry'
     },
     presentationUrl: {
+      type: String
+    },
+    filetraining: {
       type: String
     },
     name: {
