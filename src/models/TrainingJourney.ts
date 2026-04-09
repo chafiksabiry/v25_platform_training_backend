@@ -265,8 +265,7 @@ const trainingJourneySchema = new Schema<ITrainingJourney>(
     },
     // Store entire AI-generated presentation as-is (Mixed allows any structure)
     presentation: {
-      type: Schema.Types.Mixed,
-      default: { slides: [] }
+      type: Schema.Types.Mixed
     },
     visualTheme: {
       primaryColor: { type: String },

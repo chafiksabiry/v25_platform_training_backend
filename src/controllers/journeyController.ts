@@ -5,9 +5,11 @@ import { asyncHandler } from '../middleware/errorHandler';
 import cloudinaryService from '../services/cloudinaryService';
 
 export const createJourney = asyncHandler(async (req: AuthRequest, res: Response) => {
+  console.log('📦 [createJourney] Received body keys:', Object.keys(req.body));
   const { presentationData, filetraining, ...journeyData } = req.body;
   
   if (presentationData) {
+    console.log('📊 [createJourney] presentationData found, slides count:', presentationData.slides?.length);
     try {
       const fileName = `presentation_${Date.now()}`;
       const uploadResult = await cloudinaryService.uploadJsonData(presentationData, fileName);
@@ -21,6 +23,7 @@ export const createJourney = asyncHandler(async (req: AuthRequest, res: Response
 
   // Persist the PPTX file URL
   if (filetraining) {
+    console.log('📎 [createJourney] filetraining URL found:', filetraining);
     journeyData.filetraining = filetraining;
   }
 
@@ -32,9 +35,11 @@ export const createJourney = asyncHandler(async (req: AuthRequest, res: Response
 });
 
 export const updateJourney = asyncHandler(async (req: AuthRequest, res: Response) => {
+  console.log('📦 [updateJourney] Received body keys:', Object.keys(req.body));
   const { presentationData, filetraining, ...journeyData } = req.body;
   
   if (presentationData) {
+    console.log('📊 [updateJourney] presentationData found, slides count:', presentationData.slides?.length);
     try {
       const fileName = `presentation_${Date.now()}`;
       const uploadResult = await cloudinaryService.uploadJsonData(presentationData, fileName);
@@ -46,6 +51,7 @@ export const updateJourney = asyncHandler(async (req: AuthRequest, res: Response
   }
 
   if (filetraining) {
+    console.log('📎 [updateJourney] filetraining URL found:', filetraining);
     journeyData.filetraining = filetraining;
   }
 
