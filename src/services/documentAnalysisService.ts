@@ -319,7 +319,7 @@ class DocumentAnalysisService {
     options?: { gigId?: string; useKnowledgeBase?: boolean }
   ): Promise<any> {
     try {
-      console.log('🚀 Starting Full-Claude MÉTHODE 360° Presentation Generation (17 slides, 3 batches)');
+      console.log('🚀 Starting Full-Claude MÉTHODE 360° Presentation Generation (17 slides, 4 batches)');
 
       let kbPromptFragment = '';
       if (options?.gigId && options?.useKnowledgeBase === true) {
@@ -365,12 +365,12 @@ class DocumentAnalysisService {
           0. Si une BASE DE CONNAISSANCES est fournie plus haut, le contenu rédigé de chaque slide (titres, sous-titres, texte, puces, quiz) doit refléter ces documents. Si le titre du programme ci-dessus (ex. fiche job) ne correspond pas au domaine de la KB, fais primer la KB pour le fond : n'invente pas un autre métier ou secteur. Les exemples et notions viennent des documents.
           1. EXPERTISE : Contenu de niveau consultant, BASÉ SUR LE PROGRAMME ET LA KB SI PRÉSENTE.
           2. DESIGNER : Choisis le meilleur 'visualConfig' (split, minimal, highlight).
-          3. VISUELS : Ajoute TOUJOURS "visualElements" : 2 à 6 formes géométriques par slide (rectangle, rounded-rectangle, circle, ellipse, triangle, line, arrow) pour cadres, accents, schémas simples ou flèches. Coordonnées en pourcentages de la slide (0–100) : x,y = position (coin haut-gauche ou centre pour circle), w,h = taille. Utilise fill/stroke en hex (#RRGGBB), opacity 0.15–0.5 pour les fonds décoratifs.
+          3. VISUELS : Ajoute TOUJOURS "visualElements" : 2 à 3 formes simples par slide (rectangle, circle, line, arrow) pour cadres ou accents. Coordonnées en % (0–100). Hex #RRGGBB, opacity 0.15–0.45. Reste concis pour tenir dans la limite de sortie.
           4. ILLUSTRATIONS : Remplis "imageDescription" avec une description précise d’une image ou illustration conceptuelle (style, sujet, ambiance) — utile pour une génération d’image ultérieure. Ne mets "illustrationUrl" que si tu simules une URL de démo, sinon omets-le ou laisse vide.
           5. NOTES : Script court pour le présentateur.
-          6. FORMAT : JSON valide uniquement.
+          6. FORMAT : Réponds UNIQUEMENT avec un objet JSON (aucun markdown, aucun titre, aucun \`\`\`) : {"slides":[ ... ]} où "slides" est un tableau d'objets slide dans l'ordre demandé.
 
-          Structure JSON pour chaque slide :
+          Structure de chaque élément du tableau "slides" :
           {
             "id": number,
             "type": "cover|agenda|content|quote|conclusion|quiz",
@@ -390,9 +390,15 @@ class DocumentAnalysisService {
           }`;
         
         try {
-          const raw = await aiService.generateWithClaude(prompt, `Génère le ${label} (MÉTHODE 360°).`, apiKey);
+          const raw = await aiService.generateWithClaude(
+            prompt,
+            `Tu réponds uniquement par un objet JSON valide : {"slides":[...]}. Aucun texte avant ou après, pas de bloc markdown. Génère le ${label} (MÉTHODE 360°).`,
+            apiKey,
+            16384
+          );
           const parsed = aiService.parseJson(raw, label);
-          return parsed.slides || [];
+          const slides = Array.isArray(parsed) ? parsed : parsed?.slides;
+          return Array.isArray(slides) ? slides : [];
         } catch (e: any) {
           console.error(`❌ Batch generation failed for ${label}:`, e.message);
           return [];
@@ -418,23 +424,26 @@ class DocumentAnalysisService {
         Slide 11 : Cas pratique — exemple réel ou simulé avec chiffres concrets.
       `;
 
-      // ── LOT 3 : L'ACTION & FUTUR (6 slides) ─────────────────────────────
-      const batch3Desc = `
+      // ── LOT 3a / 3b : ACTION & FUTUR (3+3 slides) — évite la troncature max_tokens ──
+      const batch3aDesc = `
         Slide 12 : Rôle dans l'écosystème global — lien avec le système global et la société.
         Slide 13 : Contexte local/régional (Maroc ou pays cible) — données locales, spécificités.
         Slide 14 : Enjeux actuels et Innovations — IA, digitalisation, nouvelles technologies.
+      `;
+      const batch3bDesc = `
         Slide 15 : Conclusion synthétique — récapitulatif, messages clés, perspectives.
         Slide 16 : Prochaines étapes (Call to Action) — que faire après cette formation.
         Slide 17 : Quiz interactif — 4 questions (3 options chacune) avec réponses et explications.
       `;
 
-      const [slides1, slides2, slides3] = await Promise.all([
+      const [slides1, slides2, slides3a, slides3b] = await Promise.all([
         generateBatch('B1 (Fondations)', batch1Desc, 1),
         generateBatch('B2 (Expertise)', batch2Desc, 7),
-        generateBatch('B3 (Action/Futur)', batch3Desc, 12)
+        generateBatch('B3a (Action 1/2)', batch3aDesc, 12),
+        generateBatch('B3b (Action 2/2)', batch3bDesc, 15)
       ]);
 
-      const allSlides = [...slides1, ...slides2, ...slides3].map((s, i) => ({ ...s, id: i + 1 }));
+      const allSlides = [...slides1, ...slides2, ...slides3a, ...slides3b].map((s, i) => ({ ...s, id: i + 1 }));
 
       return {
         title: program.title || 'Formation 360° HARX',

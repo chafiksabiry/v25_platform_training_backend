@@ -14,6 +14,38 @@ class AIService {
     });
   }
 
+  /** Extrait le premier objet ou tableau JSON équilibré (évite lastIndexOf sur ] internes ex. visualElements). */
+  private extractBalancedJsonFragment(s: string, open: '{' | '['): string | null {
+    const start = s.indexOf(open);
+    if (start === -1) return null;
+    const close = open === '{' ? '}' : ']';
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    for (let i = start; i < s.length; i++) {
+      const c = s[i];
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (inString) {
+        if (c === '\\') escape = true;
+        else if (c === '"') inString = false;
+        continue;
+      }
+      if (c === '"') {
+        inString = true;
+        continue;
+      }
+      if (c === open) depth++;
+      else if (c === close) {
+        depth--;
+        if (depth === 0) return s.slice(start, i + 1);
+      }
+    }
+    return null;
+  }
+
   public parseJson(raw: string, label: string = 'JSON'): any {
     try {
       let cleaned = raw.trim();
@@ -28,8 +60,11 @@ class AIService {
         .replace(/^```(?:json)?\s*/i, '')
         .replace(/\s*```$/i, '')
         .trim();
-      
-      // Extract the main JSON structure by choosing the earliest opening token.
+
+      // Supprimer tout préambule (# titre, prose…) avant le premier { ou [
+      const braceOrBracket = cleaned.search(/[\{\[]/);
+      if (braceOrBracket > 0) cleaned = cleaned.slice(braceOrBracket);
+
       const firstObject = cleaned.indexOf('{');
       const firstArray = cleaned.indexOf('[');
       const hasObject = firstObject !== -1;
@@ -38,13 +73,13 @@ class AIService {
 
       let jsonString = '';
       if (hasArray && (!hasObject || firstArray < firstObject)) {
-        const end = cleaned.lastIndexOf(']');
-        if (end === -1) throw new Error(`JSON array tronqué (${label})`);
-        jsonString = cleaned.substring(firstArray, end + 1);
+        const balanced = this.extractBalancedJsonFragment(cleaned, '[');
+        if (!balanced) throw new Error(`JSON array tronqué ou mal formé (${label})`);
+        jsonString = balanced;
       } else {
-        const end = cleaned.lastIndexOf('}');
-        if (end === -1) throw new Error(`JSON object tronqué (${label})`);
-        jsonString = cleaned.substring(firstObject, end + 1);
+        const balanced = this.extractBalancedJsonFragment(cleaned, '{');
+        if (!balanced) throw new Error(`JSON object tronqué ou mal formé (${label})`);
+        jsonString = balanced;
       }
       
       // 1. Remove JS-style comments
