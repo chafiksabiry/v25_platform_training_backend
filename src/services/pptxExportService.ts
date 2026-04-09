@@ -1,5 +1,5 @@
 import PptxGenJS from 'pptxgenjs';
-import { IPresentation, ISlide } from '../models/TrainingJourney';
+import { IPresentation, ISlide, ISlideVisualElement } from '../models/TrainingJourney';
 
 // Color palette — HARX Brand identity (Rose/Purple/Slate)
 const C = {
@@ -19,6 +19,103 @@ function makeShadow() {
   return { type: 'outer' as const, color: '000000', opacity: 0.12, blur: 8, offset: 3, angle: 135 };
 }
 
+function hexNoHash(h?: string): string {
+  if (!h || typeof h !== 'string') return 'CBD5E1';
+  const s = h.replace(/^#/, '').trim();
+  return (s.length >= 6 ? s.slice(0, 6) : s.padEnd(6, '0')).toUpperCase();
+}
+
+/** Formes IA (% slide → pouces 16:9) */
+function addVisualElementsToPptxSlide(s: PptxGenJS.Slide, slide: ISlide) {
+  const raw = (slide as ISlide & { visualElements?: ISlideVisualElement[] }).visualElements;
+  if (!Array.isArray(raw) || raw.length === 0) return;
+
+  for (const el of raw) {
+    if (!el?.type) continue;
+    const x = ((el.x ?? 0) / 100) * SLIDE_W;
+    const y = ((el.y ?? 0) / 100) * SLIDE_H;
+    let w = ((el.w ?? 12) / 100) * SLIDE_W;
+    let h = ((el.h ?? 10) / 100) * SLIDE_H;
+    const fillC = hexNoHash(el.fill);
+    const strokeC = hexNoHash(el.stroke);
+    const transparency =
+      el.opacity != null ? Math.max(0, Math.min(100, Math.round((1 - Number(el.opacity)) * 100))) : 0;
+    const lineW = Math.max(1, Number(el.strokeWidth) || 2);
+
+    try {
+      switch (el.type) {
+        case 'rectangle':
+          s.addShape('rect' as any, {
+            x,
+            y,
+            w,
+            h,
+            fill: { color: fillC, transparency },
+            line: el.stroke ? { color: strokeC, width: lineW } : undefined,
+            rotate: el.rotation ? Number(el.rotation) : 0
+          });
+          break;
+        case 'rounded-rectangle':
+          s.addShape('roundRect' as any, {
+            x,
+            y,
+            w,
+            h,
+            fill: { color: fillC, transparency },
+            rectRadius: Math.min(w, h) * 0.08,
+            line: el.stroke ? { color: strokeC, width: lineW } : undefined,
+            rotate: el.rotation ? Number(el.rotation) : 0
+          });
+          break;
+        case 'circle':
+        case 'ellipse': {
+          const ew = el.type === 'circle' ? Math.min(w, h) : w;
+          const eh = el.type === 'circle' ? Math.min(w, h) : h;
+          s.addShape('ellipse' as any, {
+            x,
+            y,
+            w: ew,
+            h: eh,
+            fill: { color: fillC, transparency },
+            line: el.stroke ? { color: strokeC, width: lineW } : undefined,
+            rotate: el.rotation ? Number(el.rotation) : 0
+          });
+          break;
+        }
+        case 'triangle':
+          s.addShape('triangle' as any, {
+            x,
+            y,
+            w,
+            h,
+            fill: { color: fillC, transparency },
+            line: el.stroke ? { color: strokeC, width: lineW } : undefined,
+            rotate: el.rotation ? Number(el.rotation) : 0
+          });
+          break;
+        case 'line':
+        case 'arrow':
+          s.addShape('line' as any, {
+            x,
+            y,
+            w: Math.max(0.05, w),
+            h: Math.max(0.05, h),
+            line: {
+              color: strokeC || fillC,
+              width: lineW,
+              endArrowType: el.type === 'arrow' ? 'triangle' : undefined
+            }
+          });
+          break;
+        default:
+          break;
+      }
+    } catch (e) {
+      console.warn('[pptx] visualElement skip:', el.type, e);
+    }
+  }
+}
+
 /**
  * Slide generator for Cover type
  */
@@ -28,6 +125,7 @@ function makeShadow() {
 function addDynamicSlide(pres: PptxGenJS, slide: ISlide, cfg: { bg: string, accent: string, layout: string, isDark?: boolean, title?: string }) {
   const s = pres.addSlide();
   s.background = { color: cfg.bg };
+  addVisualElementsToPptxSlide(s, slide);
   const textColor = cfg.isDark ? C.WHITE : C.DARK;
 
   if (cfg.layout === 'cover' || cfg.layout === 'module') {

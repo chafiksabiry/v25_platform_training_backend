@@ -259,13 +259,15 @@ class DocumentAnalysisService {
 
           CHARTE GRAPHIQUE HARX :
           - Style : Moderne, épuré, Premium, Corporate.
-          - Utilise des visuels suggestifs (imageDescription) pour chaque slide.
+          - Chaque slide doit inclure des éléments visuels structurés (voir ci-dessous).
 
           RÈGLES D'OR :
           1. EXPERTISE : Contenu de niveau consultant, BASÉ SUR LE PROGRAMME.
           2. DESIGNER : Choisis le meilleur 'visualConfig' (split, minimal, highlight).
-          3. NOTES : Script court pour le présentateur.
-          4. FORMAT : JSON valide uniquement.
+          3. VISUELS : Ajoute TOUJOURS "visualElements" : 2 à 6 formes géométriques par slide (rectangle, rounded-rectangle, circle, ellipse, triangle, line, arrow) pour cadres, accents, schémas simples ou flèches. Coordonnées en pourcentages de la slide (0–100) : x,y = position (coin haut-gauche ou centre pour circle), w,h = taille. Utilise fill/stroke en hex (#RRGGBB), opacity 0.15–0.5 pour les fonds décoratifs.
+          4. ILLUSTRATIONS : Remplis "imageDescription" avec une description précise d’une image ou illustration conceptuelle (style, sujet, ambiance) — utile pour une génération d’image ultérieure. Ne mets "illustrationUrl" que si tu simules une URL de démo, sinon omets-le ou laisse vide.
+          5. NOTES : Script court pour le présentateur.
+          6. FORMAT : JSON valide uniquement.
 
           Structure JSON pour chaque slide :
           {
@@ -277,7 +279,13 @@ class DocumentAnalysisService {
             "bullets": ["Point clé 1", "Point clé 2", "Point clé 3"],
             "note": "Note présentateur",
             "visualConfig": { "layout": "split|gradient|minimal|highlight", "theme": "dark|light", "backgroundHex": "#HEX", "textHex": "#HEX", "accentHex": "#HEX", "icon": "emoji" },
-            "imageDescription": "Description pour DALL-E"
+            "imageDescription": "Description détaillée pour une image / illustration (prompt visuel)",
+            "illustrationUrl": "",
+            "visualElements": [
+              { "type": "rectangle", "x": 5, "y": 10, "w": 30, "h": 4, "fill": "#F43F5E", "opacity": 0.25 },
+              { "type": "circle", "x": 80, "y": 15, "w": 12, "h": 12, "fill": "#6D28D9", "opacity": 0.3 },
+              { "type": "arrow", "x": 20, "y": 50, "w": 25, "h": 0, "stroke": "#FFFFFF", "strokeWidth": 2, "opacity": 0.9 }
+            ]
           }`;
         
         try {
@@ -355,11 +363,13 @@ class DocumentAnalysisService {
         "${prompt}"
         
         CONSIGNES DE MODIFICATION :
-        1. Tu peux TOUT modifier : le titre, le contenu, les puces (bullets), ainsi que le style visuel (visualConfig).
-        2. Le résultat doit rester strictement compatible avec la structure JSON d'origine.
+        1. Tu peux TOUT modifier : le titre, le contenu, les puces (bullets), le style (visualConfig), les formes (visualElements), et les champs liés aux images.
+        2. Le résultat doit rester strictement compatible avec la structure JSON d'origine (tu peux AJOUTER ou MODIFIER des champs, ne supprime pas les clés utiles sans raison).
         3. SI l'utilisateur demande un changement de style (ex: "plus moderne", "en mode sombre", "couleur bleue"), modifie 'visualConfig' en conséquence (backgroundHex, textHex, accentHex, layout, etc.).
-        4. SI l'utilisateur demande un changement de contenu, assure-toi que la pédagogie reste de haute qualité.
-        5. Réponds UNIQUEMENT avec l'objet JSON de la slide modifiée, sans texte avant ni après.
+        4. SI l'utilisateur demande des formes (rectangle, cercle, flèche, schéma…), mets à jour ou crée "visualElements" : types autorisés rectangle | rounded-rectangle | circle | ellipse | triangle | line | arrow ; x,y,w,h en pourcentages 0–100 sur la slide ; fill, stroke, strokeWidth, opacity, rotation, label optionnels.
+        5. SI l'utilisateur demande une image ou illustration : enrichis "imageDescription" (prompt visuel détaillé). Si une URL réelle n'est pas disponible, laisse "illustrationUrl" vide ou absent ; ne fabrique pas d'URL fictive sauf demande explicite de placeholder.
+        6. SI l'utilisateur demande un changement de contenu, assure-toi que la pédagogie reste de haute qualité.
+        7. Réponds UNIQUEMENT avec l'objet JSON de la slide modifiée, sans texte avant ni après.
         
         RAPPEL Structure JSON :
         {
@@ -378,7 +388,11 @@ class DocumentAnalysisService {
             "accentHex": "#HEX",
             "icon": "lucide-icon-name"
           },
-          "imageDescription": "..."
+          "imageDescription": "...",
+          "illustrationUrl": "",
+          "visualElements": [
+            { "type": "rectangle", "x": 0, "y": 70, "w": 100, "h": 30, "fill": "#1e293b", "opacity": 0.4 }
+          ]
         }`;
 
       const raw = await aiService.generateWithClaude(editPrompt, "Tu es un expert HARX. Réponds uniquement en JSON valide pour la slide modifiée.", apiKey);

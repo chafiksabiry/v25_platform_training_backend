@@ -150,7 +150,10 @@ class GigTrainingGeneratorService {
           RÈGLES : 
           1. Les slides doivent être extrêmement techniques et précises.
           2. Extrais les chiffres, processus ou définitions des documents.
-          3. Réponds en JSON valide uniquement.
+          3. Chaque slide doit inclure "visualElements" (2 à 6 formes : rectangle, rounded-rectangle, circle, ellipse, triangle, line, arrow) avec x,y,w,h en % (0–100), fill/stroke en hex, opacity pour les fonds décoratifs.
+          4. Remplis "imageDescription" (prompt visuel pour une illustration) ; "illustrationUrl" seulement si URL réelle, sinon omets.
+          5. Inclus "visualConfig" : layout, theme, backgroundHex, textHex, accentHex quand pertinent.
+          6. Réponds en JSON valide uniquement.
 
           Structure JSON :
           {
@@ -159,11 +162,17 @@ class GigTrainingGeneratorService {
                 "id": number,
                 "type": "cover|agenda|content|quote|conclusion|quiz",
                 "title": "Titre",
+                "subtitle": "optionnel",
                 "content": "Développement détaillé (3 phrases min)",
                 "bullets": ["Point A", "Point B"],
                 "note": "Note présentateur riche",
                 "icon": "emoji",
-                "highlight": "chiffre clé"
+                "highlight": "chiffre clé",
+                "visualConfig": { "layout": "split|gradient|minimal|highlight", "theme": "dark|light", "backgroundHex": "#HEX", "textHex": "#HEX", "accentHex": "#HEX" },
+                "imageDescription": "description illustration / image",
+                "visualElements": [
+                  { "type": "circle", "x": 75, "y": 10, "w": 15, "h": 15, "fill": "#F43F5E", "opacity": 0.25 }
+                ]
               }
             ]
           }`;

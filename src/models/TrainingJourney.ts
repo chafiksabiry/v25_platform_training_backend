@@ -57,6 +57,26 @@ export interface IFinalExam {
   duration?: number;
 }
 
+/** Géométries décoratives générées par l’IA (coordonnées en % de la slide 0–100). */
+export interface ISlideVisualElement {
+  type: 'rectangle' | 'rounded-rectangle' | 'circle' | 'ellipse' | 'triangle' | 'line' | 'arrow';
+  /** Coin supérieur gauche ou centre (selon type), % depuis la gauche */
+  x?: number;
+  /** % depuis le haut */
+  y?: number;
+  /** Largeur en % de la slide */
+  w?: number;
+  /** Hauteur en % de la slide */
+  h?: number;
+  fill?: string;
+  stroke?: string;
+  strokeWidth?: number;
+  /** 0 = transparent, 1 = opaque */
+  opacity?: number;
+  rotation?: number;
+  label?: string;
+}
+
 export interface ISlide {
   id: number;
   type: string;
@@ -67,7 +87,12 @@ export interface ISlide {
   note?: string;
   icon?: string;
   highlight?: string;
+  /** Prompt / description pour une image illustrative (aucun binaire ici) */
   imageDescription?: string;
+  /** Si une URL d’image existe (upload ou service externe), affichage direct */
+  illustrationUrl?: string;
+  /** Formes décoratives (rectangles, cercles, flèches, etc.) */
+  visualElements?: ISlideVisualElement[];
   visualConfig?: {
     layout?: string;
     theme?: string;
