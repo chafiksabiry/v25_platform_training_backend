@@ -31,6 +31,11 @@ router.post(
 );
 
 router.post(
+  '/edit-slide',
+  aiController.editSlide
+);
+
+router.post(
   '/synthesize-programs',
   aiController.synthesizePrograms
 );

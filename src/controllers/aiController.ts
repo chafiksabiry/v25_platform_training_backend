@@ -159,6 +159,29 @@ export const generatePresentation = async (
   }
 };
 
+export const editSlide = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { slide, prompt } = req.body;
+    if (!slide || !prompt) {
+      return res.status(400).json({ error: 'Slide data and prompt are required' });
+    }
+
+    const anthropicKey = req.headers['x-anthropic-key'] as string;
+    const updatedSlide = await documentAnalysisService.editSlide(slide, prompt, anthropicKey);
+
+    return res.status(200).json({
+      success: true,
+      slide: updatedSlide
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 export const synthesizePrograms = async (
   req: Request,
   res: Response,

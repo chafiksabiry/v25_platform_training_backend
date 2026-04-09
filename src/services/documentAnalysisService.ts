@@ -335,6 +335,61 @@ class DocumentAnalysisService {
     }
   }
 
+  async editSlide(slide: any, prompt: string, apiKey?: string): Promise<any> {
+    try {
+      console.log('✨ AI Slide Content/Style Modification via Prompt');
+      
+      const editPrompt = `Tu es un Expert en Design de Présentations et en Ingénierie Pédagogique chez HARX.
+        
+        MISSION : Modifier la slide suivante selon l'INSTRUCTION DE L'UTILISATEUR.
+        
+        SLIDE ACTUELLE :
+        ${JSON.stringify(slide, null, 2)}
+        
+        INSTRUCTION DE L'UTILISATEUR :
+        "${prompt}"
+        
+        CONSIGNES DE MODIFICATION :
+        1. Tu peux TOUT modifier : le titre, le contenu, les puces (bullets), ainsi que le style visuel (visualConfig).
+        2. Le résultat doit rester strictement compatible avec la structure JSON d'origine.
+        3. SI l'utilisateur demande un changement de style (ex: "plus moderne", "en mode sombre", "couleur bleue"), modifie 'visualConfig' en conséquence (backgroundHex, textHex, accentHex, layout, etc.).
+        4. SI l'utilisateur demande un changement de contenu, assure-toi que la pédagogie reste de haute qualité.
+        5. Réponds UNIQUEMENT avec l'objet JSON de la slide modifiée, sans texte avant ni après.
+        
+        RAPPEL Structure JSON :
+        {
+          "id": ${slide.id},
+          "type": "${slide.type}",
+          "title": "...",
+          "subtitle": "...",
+          "content": "...",
+          "bullets": ["...", "..."],
+          "note": "...",
+          "visualConfig": {
+            "layout": "split|gradient|minimal|highlight",
+            "theme": "dark|light",
+            "backgroundHex": "#HEX",
+            "textHex": "#HEX",
+            "accentHex": "#HEX",
+            "icon": "lucide-icon-name"
+          },
+          "imageDescription": "..."
+        }`;
+
+      const raw = await aiService.generateWithClaude(editPrompt, "Tu es un expert HARX. Réponds uniquement en JSON valide pour la slide modifiée.", apiKey);
+      const updatedSlide = aiService.parseJson(raw, `edit_slide_${slide.id}`);
+      
+      return { 
+        ...slide, 
+        ...updatedSlide, 
+        id: slide.id // Ensure ID remains consistent
+      };
+    } catch (error: any) {
+      console.error('❌ Slide edit failed:', error);
+      throw new AppError(`Failed to edit slide: ${error.message || String(error)}`, 500);
+    }
+  }
+
   async synthesizeMultipleAnalyses(analyses: any[], apiKey?: string): Promise<any> {
     console.log(`🧠 Synthesizing ${analyses.length} document analyses into one unified journey...`);
     
