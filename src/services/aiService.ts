@@ -16,31 +16,42 @@ class AIService {
 
   public parseJson(raw: string, label: string = 'JSON'): any {
     try {
-      let cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+      let cleaned = raw.trim();
       
-      // If it doesn't start with { or [ but seems to be JSON content, wrap it
-      if (!cleaned.startsWith('{') && !cleaned.startsWith('[')) {
-        if (cleaned.includes('"')) {
-          cleaned = '{' + cleaned;
-          if (!cleaned.endsWith('}')) cleaned += '}';
-        }
-      }
-
-      // Extract the JSON object or array
+      // Remove markdown code blocks if present
+      cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+      
+      // Extract the main JSON structure (object or array)
       const match = cleaned.match(/\{[\s\S]*\}/) || cleaned.match(/\[[\s\S]*\]/);
       if (!match) throw new Error(`Aucun JSON valide trouvé (${label})`);
       
       let jsonString = match[0];
       
-      // Remove JS-style comments (// comment and /* comment */) before parsing
+      // 1. Remove JS-style comments
       jsonString = jsonString
         .replace(/\/\*[\s\S]*?\*\//g, '') // remove multi-line comments
         .replace(/\/\/.*$/gm, '');        // remove single-line comments
 
-      return JSON.parse(jsonString);
+      // 2. Remove trailing commas in arrays and objects
+      // This regex looks for a comma followed by optional whitespace and a closing bracket or brace
+      jsonString = jsonString.replace(/,(\s*[\]\}])/g, '$1');
+
+      // 3. Fix potential unescaped newlines in strings (common in LLM outputs)
+      // This is a bit risky but often necessary for large content blocks
+      // We only do this if standard parsing fails initially
+      try {
+        return JSON.parse(jsonString);
+      } catch (firstError) {
+        // Try one more aggressive cleanup: remove actual newlines inside strings
+        // This is complex, so we'll just try to escape them if they look like they're inside quotes
+        const escapedJson = jsonString.replace(/(?<=[:\s])"([\s\S]*?)"(?=[,\s\}\]])/g, (m, p1) => {
+          return '"' + p1.replace(/\n/g, '\\n').replace(/\r/g, '\\r') + '"';
+        });
+        return JSON.parse(escapedJson);
+      }
     } catch (e: any) {
       console.error(`❌ JSON Parsing Error (${label}):`, e.message);
-      console.error(`📄 Raw content was:`, raw.slice(0, 500) + '...');
+      console.error(`📄 Raw content was:`, raw.slice(0, 1000) + (raw.length > 1000 ? '...' : ''));
       throw new Error(`Failed to parse AI response: ${e.message}`);
     }
   }

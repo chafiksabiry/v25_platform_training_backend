@@ -66,10 +66,20 @@ export async function uploadToGCS(
     // Auto-create bucket if it doesn't exist
     const notFound = err?.code === 404 || err?.message?.includes('does not exist') || err?.message?.includes('Not Found');
     if (notFound) {
-      console.log(`🪣 GCS bucket "${BUCKET_NAME}" not found, creating it...`);
-      await bucket.create({ location: 'US', storageClass: 'STANDARD' });
-      console.log(`✅ GCS bucket "${BUCKET_NAME}" created.`);
-      await saveFile();
+      try {
+        console.log(`🪣 GCS bucket "${BUCKET_NAME}" not found, attempting to create it...`);
+        await bucket.create({ location: 'US', storageClass: 'STANDARD' });
+        console.log(`✅ GCS bucket "${BUCKET_NAME}" created successfully.`);
+        await saveFile();
+      } catch (createErr: any) {
+        const isPermissionError = createErr?.code === 403 || createErr?.message?.includes('denied') || createErr?.message?.includes('permission');
+        if (isPermissionError) {
+          console.error(`❌ GCS Bucket Creation Failed: Permission denied. Please manually create the bucket "${BUCKET_NAME}" in your Google Cloud Console.`);
+        } else {
+          console.error(`❌ GCS Bucket Creation Failed: ${createErr.message}`);
+        }
+        throw createErr;
+      }
     } else {
       throw err;
     }
