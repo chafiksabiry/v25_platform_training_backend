@@ -17,8 +17,13 @@ class AIService {
   public parseJson(raw: string, label: string = 'JSON'): any {
     try {
       let cleaned = raw.trim();
-      
-      // Remove markdown code blocks if present
+
+      // Strip markdown fences (models often wrap JSON in ```json ... ```)
+      if (cleaned.startsWith('```')) {
+        cleaned = cleaned.replace(/^```(?:json)?\s*\n?/i, '');
+        const fenceEnd = cleaned.lastIndexOf('```');
+        if (fenceEnd !== -1) cleaned = cleaned.slice(0, fenceEnd).trimEnd();
+      }
       cleaned = cleaned
         .replace(/^```(?:json)?\s*/i, '')
         .replace(/\s*```$/i, '')
@@ -104,7 +109,12 @@ class AIService {
     }
   }
 
-  async generateWithClaude(prompt: string, systemPrompt?: string, apiKey?: string): Promise<string> {
+  async generateWithClaude(
+    prompt: string,
+    systemPrompt?: string,
+    apiKey?: string,
+    maxTokensOverride?: number
+  ): Promise<string> {
     const client = apiKey ? new Anthropic({ apiKey }) : this.anthropic;
 
     const modelsToTry = [
@@ -118,9 +128,11 @@ class AIService {
     for (const model of modelsToTry) {
       try {
         console.log(`🤖 Attempting analysis with Claude model: ${model}${apiKey ? ' (using custom API key)' : ''}`);
-        // Ensure max_tokens is high enough to handle complex presentations
-        const envMaxTokens = parseInt(process.env.ANTHROPIC_MAX_TOKENS || '8192');
-        const maxTokens = Math.max(envMaxTokens, 8192);
+        const envMaxTokens = parseInt(process.env.ANTHROPIC_MAX_TOKENS || '8192', 10);
+        const maxTokens =
+          maxTokensOverride != null
+            ? maxTokensOverride
+            : Math.max(envMaxTokens, 8192);
         
         const response = await client.messages.create({
           model,

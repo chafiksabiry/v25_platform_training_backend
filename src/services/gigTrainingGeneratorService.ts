@@ -83,40 +83,59 @@ class GigTrainingGeneratorService {
       const metaRaw = await aiService.generateWithClaude(metaPrompt, "Return ONLY valid JSON metadata metadata.", apiKey);
       const meta = aiService.parseJson(metaRaw, 'gig_metadata');
 
-      // ── Phase 2: Detailed Sessions for Each Module ──────────────────────
+      // ── Phase 2: Detailed sessions per module (parallel) ───────────────
+      // One API call per module avoids max_tokens truncation on large programs.
       const modulePlan = meta.modules || [];
-      const sessionPrompt = `Tu es un expert pédagogique.
-        Thème : ${meta.title}
+
+      const makeSessionPrompt = (m: any) => {
+        const moduleHeader = [
+          `ID: ${m.id}`,
+          `Titre: ${m.title}`,
+          `Durée (plan): ${m.duration ?? 'non précisée'}`,
+          `Résumé (plan): ${m.description ?? ''}`
+        ].join('\n');
+
+        return `Tu es un expert pédagogique.
+        Thème du programme : ${meta.title}
         ${kbPromptFragment}
-        
-        Pour chacun des modules suivants, génère les sessions détaillées.
+
+        Pour le module décrit ci-dessous UNIQUEMENT, génère les sessions détaillées.
         TRÈS IMPORTANT : Inspire-toi DIRECTEMENT des détails techniques de la BASE DE CONNAISSANCES pour le contenu des sections.
-        
-        Réponds en JSON valide uniquement :
-        {
-          "modules": [
-            {
-              "id": 1,
-              "title": "Titre",
-              "duration": 60,
-              "description": "Description",
-              "learningObjectives": ["Obj 1"],
-              "sections": [
-                { "title": "Section 1", "content": "Contenu riche en Markdown (300+ mots) basé sur les documents", "type": "text", "duration": 20, "imageDescription": "Description visuelle" }
-              ],
-              "quizzes": [
-                { "title": "Quiz", "questions": [ { "question": "?", "options": ["A", "B"], "correctAnswer": 0, "explanation": "..." } ] }
-              ],
-              "imageDescription": "Description visuelle"
-            }
-          ]
-        }
 
-        Modules :
-        ${modulePlan.map((m: any) => `- ${m.id}: ${m.title}`).join('\n')}`;
+        CONTRAINTES (obligatoires pour tenir dans la limite de tokens) :
+        - Maximum 3 sections par module.
+        - Maximum 150 mots par section (Markdown concis).
+        - Un seul quiz avec exactement 3 questions à choix multiples.
 
-      const sessionsRaw = await aiService.generateWithClaude(sessionPrompt, "Return ONLY valid JSON detailed modules.", apiKey);
-      const sessionsData = aiService.parseJson(sessionsRaw, 'gig_sessions');
+        Réponds en JSON valide uniquement, sans markdown ni texte hors JSON. Racine : { "module": { ... } }.
+        Le champ "module" doit inclure : id (nombre), title (string, le titre exact du module ci-dessous), duration (minutes, nombre),
+        description, learningObjectives (tableau), sections (tableau d'objets avec title, content, type "text", duration, imageDescription),
+        quizzes (tableau d'un objet avec title et questions : question, options (3 choix), correctAnswer (index 0-based), explanation),
+        imageDescription (string).
+
+        Module à détailler :
+        ${moduleHeader}`;
+      };
+
+      const detailedModules = await Promise.all(
+        modulePlan.map(async (m: any) => {
+          try {
+            const raw = await aiService.generateWithClaude(
+              makeSessionPrompt(m),
+              'Return ONLY valid JSON for this single module. No markdown fences, no commentary.',
+              apiKey,
+              8192
+            );
+            const parsed = aiService.parseJson(raw, `gig_session_module_${m.id}`);
+            return parsed.module ?? m;
+          } catch (e) {
+            console.error(`⚠️ Gig session fallback for module ${m.id}:`, e);
+            return m;
+          }
+        })
+      );
+
+      const sessionsData = { modules: detailedModules.length > 0 ? detailedModules : modulePlan };
 
       // ── Phase 3: Batched Presentation Generation ────────────────────────
       const generatePresentationBatch = async (batchLabel: string, slideDescriptions: string, startId: number) => {
