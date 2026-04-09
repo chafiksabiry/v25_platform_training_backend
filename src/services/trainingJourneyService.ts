@@ -97,15 +97,23 @@ class TrainingJourneyService {
     await this.populateImages(journeyData);
 
     if (journeyData._id) {
-      const updated = await TrainingJourney.findByIdAndUpdate(
-        journeyData._id,
-        { ...journeyData, updatedAt: new Date() },
-        { new: true, runValidators: true }
-      );
-      if (!updated) {
+      const existing = await TrainingJourney.findById(journeyData._id);
+      if (!existing) {
         throw new AppError('Journey not found', 404);
       }
-      return updated;
+
+      Object.assign(existing, journeyData);
+      existing.updatedAt = new Date();
+
+      if (journeyData.presentation) {
+        existing.markModified('presentation');
+      }
+      if (journeyData.modules) {
+        existing.markModified('modules');
+      }
+
+      await existing.save();
+      return existing;
     }
 
     const journey = await TrainingJourney.create(journeyData);
