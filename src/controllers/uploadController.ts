@@ -22,11 +22,23 @@ export const uploadVideo = asyncHandler(async (req: Request, res: Response) => {
 
 export const uploadDocument = asyncHandler(async (req: Request, res: Response) => {
   if (!req.file) {
-    return res.status(400).json({ success: false, error: 'No file uploaded' });
+    res.status(400).json({ success: false, error: 'No file uploaded' });
+    return;
   }
   const folder = req.body.folder || 'trainings/documents';
-  const result = await cloudinaryService.uploadDocument(req.file, folder);
-  return res.status(200).json({ success: true, ...result });
+  try {
+    const result = await cloudinaryService.uploadDocument(req.file, folder);
+    return res.status(200).json({ success: true, ...result });
+  } catch (uploadError: any) {
+    // Cloudinary account may be disabled or credentials invalid
+    const isAuthError = uploadError?.http_code === 401 || uploadError?.message?.includes('disabled') || uploadError?.message?.includes('invalid');
+    if (isAuthError) {
+      console.warn('⚠️ Cloudinary upload skipped (auth error):', uploadError?.message);
+      // Return graceful response so frontend doesn't crash
+      return res.status(200).json({ success: false, url: '', secureUrl: '', publicId: '', error: 'Cloudinary unavailable' });
+    }
+    throw uploadError; // Re-throw other errors
+  }
 });
 
 export const deleteFile = asyncHandler(async (req: Request, res: Response) => {
