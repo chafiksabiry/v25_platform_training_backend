@@ -9,6 +9,11 @@ router.post(
   aiController.generateTrainingFromGig
 );
 
+router.get(
+  '/gig/:gigId/knowledge-documents',
+  aiController.listGigKnowledgeDocuments
+);
+
 router.post(
   '/analyze-document',
   upload.single('file'),

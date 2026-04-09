@@ -22,14 +22,55 @@ export const generateTrainingFromGig = async (
       return res.status(400).json({ error: 'gigId is required' });
     }
 
+    const useKnowledgeBase =
+      req.body == null || typeof req.body !== 'object'
+        ? true
+        : (req.body as { useKnowledgeBase?: boolean }).useKnowledgeBase !== false;
+
     const anthropicKey = req.headers['x-anthropic-key'] as string;
-    const journey = await gigTrainingGeneratorService.generateTrainingFromGig(gigId, anthropicKey);
-    
+    const journey = await gigTrainingGeneratorService.generateTrainingFromGig(gigId, anthropicKey, {
+      useKnowledgeBase
+    });
+
     return res.status(201).json({
       message: 'Training journey generated successfully',
       journeyId: journey._id,
-      journey
+      journey,
+      useKnowledgeBase
     });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/** Liste les documents KB rattachés à un Gig (métadonnées + résumé court). */
+export const listGigKnowledgeDocuments = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { gigId } = req.params;
+    if (!gigId) {
+      return res.status(400).json({ success: false, error: 'gigId is required' });
+    }
+
+    const docs = await Document.find({ gigId })
+      .sort({ createdAt: -1 })
+      .select('name fileType description createdAt analysis.summary analysis.keyTerms gigId')
+      .lean();
+
+    const documents = docs.map((d: any) => ({
+      _id: String(d._id),
+      name: d.name,
+      fileType: d.fileType,
+      description: d.description,
+      createdAt: d.createdAt,
+      summary: d.analysis?.summary,
+      keyTerms: d.analysis?.keyTerms
+    }));
+
+    return res.json({ success: true, documents });
   } catch (error) {
     return next(error);
   }

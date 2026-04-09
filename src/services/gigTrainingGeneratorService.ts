@@ -4,46 +4,61 @@ import TrainingJourney, { ITrainingJourney } from '../models/TrainingJourney';
 import aiService from './aiService';
 import { AppError } from '../middleware/errorHandler';
 
+export type GenerateFromGigOptions = {
+  /** When false, programme + présentation sont basés uniquement sur le Gig (titre, description…), sans documents KB. */
+  useKnowledgeBase?: boolean;
+};
+
 class GigTrainingGeneratorService {
-  async generateTrainingFromGig(gigId: string, apiKey?: string): Promise<ITrainingJourney> {
+  async generateTrainingFromGig(
+    gigId: string,
+    apiKey?: string,
+    options?: GenerateFromGigOptions
+  ): Promise<ITrainingJourney> {
     const gig = await Gig.findById(gigId);
     if (!gig) {
       throw new AppError('Gig not found', 404);
     }
 
-    console.log(`🚀 Starting KB-Grounded Iterative Generation for Gig: ${gig.title}`);
+    const useKb = options?.useKnowledgeBase !== false;
+
+    console.log(
+      `🚀 Starting ${useKb ? 'KB-Grounded' : 'Gig-only (no KB docs)'} Iterative Generation for Gig: ${gig.title}`
+    );
 
     // ── Knowledge Base Retrieval ───────────────────────────────────────
     let kbContext = '';
-    try {
-      // Fetch documents linked to this Gig
-      const documents = await Document.find({ gigId }).sort({ createdAt: -1 });
-      
-      if (documents.length > 0) {
-        console.log(`📚 Found ${documents.length} documents in KB for this Gig.`);
-        kbContext = documents.map((doc, idx) => {
-          const analysis = doc.analysis;
-          const summary = analysis?.summary || '';
-          const points = (analysis?.mainPoints || []).join('\n- ');
-          const terms = (analysis?.keyTerms || []).join(', ');
-          
-          // Use AI analysis if available, otherwise fallback to start of content
-          const technicalBase = summary || doc.content?.slice(0, 3000) || '';
-          
-          return `[DOCUMENT ${idx + 1}: ${doc.name}]\n` +
-                 `SYNTHÈSE : ${technicalBase}\n` +
-                 (points ? `POINTS CLÉS :\n- ${points}\n` : '') +
-                 (terms ? `MOTS CLÉS : ${terms}\n` : '');
-        }).join('\n---\n');
-      } else {
-        console.log('⚠️ No specific documents found for this Gig. Using only Gig description.');
+    if (useKb) {
+      try {
+        const documents = await Document.find({ gigId }).sort({ createdAt: -1 });
+
+        if (documents.length > 0) {
+          console.log(`📚 Found ${documents.length} documents in KB for this Gig.`);
+          kbContext = documents.map((doc, idx) => {
+            const analysis = doc.analysis;
+            const summary = analysis?.summary || '';
+            const points = (analysis?.mainPoints || []).join('\n- ');
+            const terms = (analysis?.keyTerms || []).join(', ');
+
+            const technicalBase = summary || doc.content?.slice(0, 3000) || '';
+
+            return `[DOCUMENT ${idx + 1}: ${doc.name}]\n` +
+              `SYNTHÈSE : ${technicalBase}\n` +
+              (points ? `POINTS CLÉS :\n- ${points}\n` : '') +
+              (terms ? `MOTS CLÉS : ${terms}\n` : '');
+          }).join('\n---\n');
+        } else {
+          console.log('⚠️ No specific documents found for this Gig. Using only Gig description.');
+        }
+      } catch (err) {
+        console.error('❌ Failed to fetch documents for KB grounding:', err);
       }
-    } catch (err) {
-      console.error('❌ Failed to fetch documents for KB grounding:', err);
+    } else {
+      console.log('⏭️ useKnowledgeBase=false — skipping KB document retrieval.');
     }
 
-    const kbPromptFragment = kbContext 
-      ? `\nBASE DE CONNAISSANCES (SOURCE DE VÉRITÉ) :\n${kbContext}\n` 
+    const kbPromptFragment = kbContext
+      ? `\nBASE DE CONNAISSANCES (SOURCE DE VÉRITÉ) :\n${kbContext}\n`
       : '';
 
     try {
