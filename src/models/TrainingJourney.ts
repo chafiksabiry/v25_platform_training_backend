@@ -263,42 +263,10 @@ const trainingJourneySchema = new Schema<ITrainingJourney>(
     launchDate: {
       type: Date
     },
+    // Store entire AI-generated presentation as-is (Mixed allows any structure)
     presentation: {
-      title: { type: String },
-      totalSlides: { type: Number },
-      slides: [{
-        id: { type: Number },
-        type: { type: String },
-        title: { type: String },
-        subtitle: { type: String },
-        content: { type: String },
-        bullets: [{ type: String }],
-        note: { type: String },
-        icon: { type: String },
-        highlight: { type: String },
-        imageDescription: { type: String },
-        visualConfig: {
-          layout: { type: String },
-          theme: { type: String },
-          accent: { type: String },
-          backgroundHex: { type: String },
-          textHex: { type: String },
-          accentHex: { type: String }
-        }
-      }],
-      theme: {
-        primary: { type: String },
-        accent: { type: String },
-        style: { type: String }
-      },
-      visualTheme: {
-        primaryColor: { type: String },
-        secondaryColor: { type: String },
-        accentColor: { type: String },
-        fontFamily: { type: String },
-        layoutStyle: { type: String, enum: ['modern', 'corporate', 'creative'] }
-      },
-      estimatedTime: { type: String }
+      type: Schema.Types.Mixed,
+      default: { slides: [] }
     },
     visualTheme: {
       primaryColor: { type: String },

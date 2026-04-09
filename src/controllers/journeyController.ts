@@ -5,7 +5,7 @@ import { asyncHandler } from '../middleware/errorHandler';
 import cloudinaryService from '../services/cloudinaryService';
 
 export const createJourney = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { presentationData, ...journeyData } = req.body;
+  const { presentationData, filetraining, ...journeyData } = req.body;
   
   if (presentationData) {
     try {
@@ -15,8 +15,13 @@ export const createJourney = asyncHandler(async (req: AuthRequest, res: Response
     } catch (error) {
       console.error('Failed to upload presentation to Cloudinary:', error);
     }
-    // Assurer la persistance du style de la présentation IA dans la base de données
+    // Persist the full AI-generated presentation in the database
     journeyData.presentation = presentationData;
+  }
+
+  // Persist the PPTX file URL
+  if (filetraining) {
+    journeyData.filetraining = filetraining;
   }
 
   const journey = await trainingJourneyService.saveJourney(journeyData);
@@ -27,7 +32,7 @@ export const createJourney = asyncHandler(async (req: AuthRequest, res: Response
 });
 
 export const updateJourney = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { presentationData, ...journeyData } = req.body;
+  const { presentationData, filetraining, ...journeyData } = req.body;
   
   if (presentationData) {
     try {
@@ -37,8 +42,11 @@ export const updateJourney = asyncHandler(async (req: AuthRequest, res: Response
     } catch (error) {
       console.error('Failed to upload presentation to Cloudinary:', error);
     }
-    // Assurer la persistance du style de la présentation IA dans la base de données
     journeyData.presentation = presentationData;
+  }
+
+  if (filetraining) {
+    journeyData.filetraining = filetraining;
   }
 
   const journey = await trainingJourneyService.saveJourney({
