@@ -449,24 +449,24 @@ class DocumentAnalysisService {
       const skipImg =
         String(process.env.SKIP_PRESENTATION_ILLUSTRATION_URLS || '').toLowerCase() === 'true' ||
         String(process.env.SKIP_PRESENTATION_ILLUSTRATION_URLS || '') === '1';
-      const allSlides = skipImg
-        ? merged.map((s, i) => ({ ...s, id: i + 1 }))
-        : await Promise.all(
-            merged.map(async (s, i) => {
-              const slide = { ...s, id: i + 1 };
-              const desc = slide.imageDescription;
-              const hasUrl =
-                slide.illustrationUrl != null && String(slide.illustrationUrl).trim().length > 0;
-              if (typeof desc === 'string' && desc.trim().length > 0 && !hasUrl) {
-                try {
-                  slide.illustrationUrl = await ImageGenerationService.generateImage(desc);
-                } catch (e) {
-                  console.warn(`[generatePresentation] illustration URL failed slide ${i + 1}:`, e);
-                }
-              }
-              return slide;
-            })
-          );
+      let allSlides = merged.map((s, i) => ({ ...s, id: i + 1 }));
+      if (!skipImg) {
+        // Séquentiel : évite rate limits (DALL·E / nanobanana) et surcharge Cloudinary
+        for (let i = 0; i < allSlides.length; i++) {
+          const slide = allSlides[i];
+          const desc = slide.imageDescription;
+          const hasUrl =
+            slide.illustrationUrl != null && String(slide.illustrationUrl).trim().length > 0;
+          if (typeof desc === 'string' && desc.trim().length > 0 && !hasUrl) {
+            try {
+              const url = await ImageGenerationService.generateImage(desc);
+              allSlides[i] = { ...slide, illustrationUrl: url };
+            } catch (e) {
+              console.warn(`[generatePresentation] illustration failed slide ${i + 1}:`, e);
+            }
+          }
+        }
+      }
 
       return {
         title: program.title || 'Formation 360° HARX',
