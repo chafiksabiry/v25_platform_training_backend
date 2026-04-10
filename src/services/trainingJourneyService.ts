@@ -63,6 +63,22 @@ class TrainingJourneyService {
   }
 
   private async populateImages(journey: any): Promise<void> {
+    const pres = journey.presentation;
+    if (pres?.slides && Array.isArray(pres.slides)) {
+      for (let i = 0; i < pres.slides.length; i++) {
+        const slide = pres.slides[i];
+        const desc = slide?.imageDescription;
+        const hasUrl = slide?.illustrationUrl && String(slide.illustrationUrl).trim().length > 0;
+        if (typeof desc === 'string' && desc.trim().length > 0 && !hasUrl) {
+          try {
+            slide.illustrationUrl = await ImageGenerationService.generateImage(desc);
+          } catch (error) {
+            console.error(`[TrainingJourneyService] Failed slide illustration ${i + 1}:`, error);
+          }
+        }
+      }
+    }
+
     if (!journey.modules) return;
 
     for (const module of journey.modules) {

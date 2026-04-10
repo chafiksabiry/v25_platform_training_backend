@@ -1,5 +1,6 @@
 import documentParserService from './documentParserService';
 import aiService from './aiService';
+import { ImageGenerationService } from './imageGenerationService';
 import { AppError } from '../middleware/errorHandler';
 import Document from '../models/Document';
 
@@ -443,7 +444,29 @@ class DocumentAnalysisService {
         generateBatch('B3b (Action 2/2)', batch3bDesc, 15)
       ]);
 
-      const allSlides = [...slides1, ...slides2, ...slides3a, ...slides3b].map((s, i) => ({ ...s, id: i + 1 }));
+      const merged = [...slides1, ...slides2, ...slides3a, ...slides3b];
+      // Claude ne génère pas de pixels : seulement imageDescription. On résout illustrationUrl via stock/placeholder (voir ImageGenerationService).
+      const skipImg =
+        String(process.env.SKIP_PRESENTATION_ILLUSTRATION_URLS || '').toLowerCase() === 'true' ||
+        String(process.env.SKIP_PRESENTATION_ILLUSTRATION_URLS || '') === '1';
+      const allSlides = skipImg
+        ? merged.map((s, i) => ({ ...s, id: i + 1 }))
+        : await Promise.all(
+            merged.map(async (s, i) => {
+              const slide = { ...s, id: i + 1 };
+              const desc = slide.imageDescription;
+              const hasUrl =
+                slide.illustrationUrl != null && String(slide.illustrationUrl).trim().length > 0;
+              if (typeof desc === 'string' && desc.trim().length > 0 && !hasUrl) {
+                try {
+                  slide.illustrationUrl = await ImageGenerationService.generateImage(desc);
+                } catch (e) {
+                  console.warn(`[generatePresentation] illustration URL failed slide ${i + 1}:`, e);
+                }
+              }
+              return slide;
+            })
+          );
 
       return {
         title: program.title || 'Formation 360° HARX',
