@@ -148,16 +148,24 @@ class AIService {
     prompt: string,
     systemPrompt?: string,
     apiKey?: string,
-    maxTokensOverride?: number
+    maxTokensOverride?: number,
+    options?: { temperature?: number; preferredModels?: string[] }
   ): Promise<string> {
     const client = apiKey ? new Anthropic({ apiKey }) : this.anthropic;
 
-    const modelsToTry = [
+    const defaultChain = [
       process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5',
       'claude-3-5-sonnet-20241022',
       'claude-3-5-sonnet-20240620',
       'claude-3-haiku-20240307',
     ];
+    const preferred = (options?.preferredModels || []).filter(Boolean);
+    const modelsToTry = [...new Set([...preferred, ...defaultChain])];
+
+    const temperature =
+      options?.temperature != null
+        ? options.temperature
+        : parseFloat(process.env.OPENAI_TEMPERATURE || '0.7');
 
     let lastError: any;
     for (const model of modelsToTry) {
@@ -174,7 +182,7 @@ class AIService {
           max_tokens: maxTokens,
           system: systemPrompt || 'You are an expert training content creator.',
           messages: [{ role: 'user', content: prompt }],
-          temperature: parseFloat(process.env.OPENAI_TEMPERATURE || '0.7')
+          temperature
         }, {
           headers: { 'anthropic-beta': 'max-tokens-3-5-sonnet-2024-07-15' }
         });

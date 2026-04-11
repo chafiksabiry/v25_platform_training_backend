@@ -348,54 +348,70 @@ class DocumentAnalysisService {
         ? `BASE DE CONNAISSANCES — PRIORITÉ ABSOLUE pour les faits, définitions, exemples, vocabulaire et chiffres des slides :\n${kbPromptFragment}\n\n`
         : '';
 
-      const generateBatch = async (label: string, slideDescriptions: string, startId: number) => {
-        const prompt = `Tu es le LEAD INSTRUCTIONAL DESIGNER chez HARX. Ta mission est de créer une présentation de classe mondiale en utilisant la MÉTHODE 360°.
+      const presentationMaxTokens = parseInt(process.env.ANTHROPIC_PRESENTATION_MAX_TOKENS || '16384', 10);
+      const presentationTemperature = parseFloat(process.env.ANTHROPIC_PRESENTATION_TEMPERATURE || '0.5');
+      const presentationModelEnv = process.env.ANTHROPIC_PRESENTATION_MODEL?.trim();
+      const presentationClaudeOptions = {
+        temperature: presentationTemperature,
+        ...(presentationModelEnv ? { preferredModels: [presentationModelEnv] } : {})
+      };
+
+      /** Style « artefact » proche de l’expérience Claude.app : clarté, densité, pas de remplissage. */
+      const presentationSystemPrompt = `Tu produis des slides au niveau d’un artefact Claude (application Claude) : rédaction impeccable, structurée, professionnelle, sans phrases creuses ni clichés « corporate » vides.
+
+STYLE & QUALITÉ (comme un document Claude de référence) :
+- Une seule idée dominante par slide ; titre fort et court (≤ 14 mots) qui porte cette idée.
+- Corps : soit 2 à 4 phrases courtes et informatives, soit 3 à 5 puces au parallélisme grammatical ; ne répète pas le titre.
+- Précision : termes métier corrects, exemples et chiffres tirés du contexte (programme / KB), pas de généralités interchangeables.
+- Ton : expert accessible, confiant, légèrement chaleureux — comme une excellente réponse Claude.
+- Quiz : question claire, 4 choix dont un seul correct, explication pédagogique utile.
+
+SORTIE : uniquement un objet JSON valide {"slides":[...]} — aucun markdown, aucun \`\`\`, aucun commentaire avant ou après.`;
+
+      const generateBatch = async (label: string, slideDescriptions: string, _startId: number) => {
+        const prompt = `Rôle : LEAD INSTRUCTIONAL DESIGNER HARX — présentation méthode 360°, qualité « artefact Claude ».
 
           ${kbBlock}CONTEXTE DU PROGRAMME :
           ${programInfo}
 
-          MISSION SPÉCIFIQUE :
-          Génère UNIQUEMENT les slides suivantes avec une PROFONDEUR PÉDAGOGIQUE EXPERTE :
+          LOT À GÉNÉRER (${label}) — slides dans cet ordre exact, contenu expert et concis :
           ${slideDescriptions}
 
-          CHARTE GRAPHIQUE HARX :
-          - Style : Moderne, épuré, Premium, Corporate.
-          - Chaque slide doit inclure des éléments visuels structurés (voir ci-dessous).
+          CHARTE VISUELLE HARX :
+          - Moderne, épuré, premium ; varie légèrement les layouts (split, minimal, highlight, gradient) pour le rythme visuel.
+          - Garde une palette cohérente sur ce lot (accent rose #F43F5E et violet #6D28D9 ou tons dérivés du thème du programme).
 
-          RÈGLES D'OR :
-          0. Si une BASE DE CONNAISSANCES est fournie plus haut, le contenu rédigé de chaque slide (titres, sous-titres, texte, puces, quiz) doit refléter ces documents. Si le titre du programme ci-dessus (ex. fiche job) ne correspond pas au domaine de la KB, fais primer la KB pour le fond : n'invente pas un autre métier ou secteur. Les exemples et notions viennent des documents.
-          1. EXPERTISE : Contenu de niveau consultant, BASÉ SUR LE PROGRAMME ET LA KB SI PRÉSENTE.
-          2. DESIGNER : Choisis le meilleur 'visualConfig' (split, minimal, highlight).
-          3. VISUELS : Ajoute TOUJOURS "visualElements" : 2 à 3 formes simples par slide (rectangle, circle, line, arrow) pour cadres ou accents. Coordonnées en % (0–100). Hex #RRGGBB, opacity 0.15–0.45. Reste concis pour tenir dans la limite de sortie.
-          4. ILLUSTRATIONS : Remplis "imageDescription" avec une description précise d’une image ou illustration conceptuelle (style, sujet, ambiance) — utile pour une génération d’image ultérieure. Ne mets "illustrationUrl" que si tu simules une URL de démo, sinon omets-le ou laisse vide.
-          5. NOTES : Script court pour le présentateur.
-          6. FORMAT : Réponds UNIQUEMENT avec un objet JSON (aucun markdown, aucun titre, aucun \`\`\`) : {"slides":[ ... ]} où "slides" est un tableau d'objets slide dans l'ordre demandé.
+          RÈGLES :
+          0. KB : si fournie, tout le fond factuel (définitions, articles, chiffres) vient d’elle. Si le titre programme (ex. fiche job) diverge du domaine KB, la KB prime sur le fond.
+          1. Chaque slide : "visualElements" avec 2–3 formes (rectangle, circle, line, arrow), coords 0–100 %, opacity 0.15–0.45 ; JSON compact.
+          2. "imageDescription" : prompt visuel précis (style, sujet, lumière) pour illustration ultérieure ; "illustrationUrl" vide sauf URL réelle.
+          3. "note" : script oral 1–3 phrases pour le présentateur (ton naturel, comme Claude).
+          4. Types : cover | agenda | content | quote | conclusion | quiz selon le rôle de la slide.
 
-          Structure de chaque élément du tableau "slides" :
+          FORMAT STRICT : un seul objet JSON {"slides":[ ... ]} — tableau dans l’ordre ci-dessus, sans texte hors JSON.
+
+          Schéma d’un élément de "slides" :
           {
             "id": number,
             "type": "cover|agenda|content|quote|conclusion|quiz",
-            "title": "Titre",
-            "subtitle": "Sous-titre",
-            "content": "Développement riche (3 phrases min)",
-            "bullets": ["Point clé 1", "Point clé 2", "Point clé 3"],
-            "note": "Note présentateur",
+            "title": "string",
+            "subtitle": "string",
+            "content": "string (paragraphe) OU laisser plus léger si bullets portent le message",
+            "bullets": ["string", "..."],
+            "note": "script présentateur",
             "visualConfig": { "layout": "split|gradient|minimal|highlight", "theme": "dark|light", "backgroundHex": "#HEX", "textHex": "#HEX", "accentHex": "#HEX", "icon": "emoji" },
-            "imageDescription": "Description détaillée pour une image / illustration (prompt visuel)",
+            "imageDescription": "prompt illustration",
             "illustrationUrl": "",
-            "visualElements": [
-              { "type": "rectangle", "x": 5, "y": 10, "w": 30, "h": 4, "fill": "#F43F5E", "opacity": 0.25 },
-              { "type": "circle", "x": 80, "y": 15, "w": 12, "h": 12, "fill": "#6D28D9", "opacity": 0.3 },
-              { "type": "arrow", "x": 20, "y": 50, "w": 25, "h": 0, "stroke": "#FFFFFF", "strokeWidth": 2, "opacity": 0.9 }
-            ]
+            "visualElements": [ { "type": "rectangle", "x": 5, "y": 10, "w": 30, "h": 4, "fill": "#F43F5E", "opacity": 0.25 } ]
           }`;
         
         try {
           const raw = await aiService.generateWithClaude(
             prompt,
-            `Tu réponds uniquement par un objet JSON valide : {"slides":[...]}. Aucun texte avant ou après, pas de bloc markdown. Génère le ${label} (MÉTHODE 360°).`,
+            `${presentationSystemPrompt}\n\nLot : ${label} (MÉTHODE 360° HARX).`,
             apiKey,
-            16384
+            presentationMaxTokens,
+            presentationClaudeOptions
           );
           const parsed = aiService.parseJson(raw, label);
           const slides = Array.isArray(parsed) ? parsed : parsed?.slides;
@@ -449,24 +465,24 @@ class DocumentAnalysisService {
       const skipImg =
         String(process.env.SKIP_PRESENTATION_ILLUSTRATION_URLS || '').toLowerCase() === 'true' ||
         String(process.env.SKIP_PRESENTATION_ILLUSTRATION_URLS || '') === '1';
-      let allSlides = merged.map((s, i) => ({ ...s, id: i + 1 }));
-      if (!skipImg) {
-        // Séquentiel : évite rate limits (DALL·E / nanobanana) et surcharge Cloudinary
-        for (let i = 0; i < allSlides.length; i++) {
-          const slide = allSlides[i];
-          const desc = slide.imageDescription;
-          const hasUrl =
-            slide.illustrationUrl != null && String(slide.illustrationUrl).trim().length > 0;
-          if (typeof desc === 'string' && desc.trim().length > 0 && !hasUrl) {
-            try {
-              const url = await ImageGenerationService.generateImage(desc);
-              allSlides[i] = { ...slide, illustrationUrl: url };
-            } catch (e) {
-              console.warn(`[generatePresentation] illustration failed slide ${i + 1}:`, e);
-            }
-          }
-        }
-      }
+      const allSlides = skipImg
+        ? merged.map((s, i) => ({ ...s, id: i + 1 }))
+        : await Promise.all(
+            merged.map(async (s, i) => {
+              const slide = { ...s, id: i + 1 };
+              const desc = slide.imageDescription;
+              const hasUrl =
+                slide.illustrationUrl != null && String(slide.illustrationUrl).trim().length > 0;
+              if (typeof desc === 'string' && desc.trim().length > 0 && !hasUrl) {
+                try {
+                  slide.illustrationUrl = await ImageGenerationService.generateImage(desc);
+                } catch (e) {
+                  console.warn(`[generatePresentation] illustration URL failed slide ${i + 1}:`, e);
+                }
+              }
+              return slide;
+            })
+          );
 
       return {
         title: program.title || 'Formation 360° HARX',
@@ -528,7 +544,18 @@ class DocumentAnalysisService {
           ]
         }`;
 
-      const raw = await aiService.generateWithClaude(editPrompt, "Tu es un expert HARX. Réponds uniquement en JSON valide pour la slide modifiée.", apiKey);
+      const editTemp = parseFloat(process.env.ANTHROPIC_PRESENTATION_TEMPERATURE || '0.5');
+      const editModel = process.env.ANTHROPIC_PRESENTATION_MODEL?.trim();
+      const raw = await aiService.generateWithClaude(
+        editPrompt,
+        'Tu es un expert HARX (qualité artefact Claude). Réponds uniquement en JSON valide pour la slide modifiée.',
+        apiKey,
+        8192,
+        {
+          temperature: editTemp,
+          ...(editModel ? { preferredModels: [editModel] } : {}),
+        }
+      );
       const updatedSlide = aiService.parseJson(raw, `edit_slide_${slide.id}`);
       
       return { 

@@ -61,45 +61,6 @@ class CloudinaryService {
     await cloudinary.uploader.destroy(publicId);
   }
 
-  /** Upload image bytes (PNG/JPEG/WebP) — utilisé après génération IA (DALL·E, nanobanana, etc.) */
-  async uploadImageBuffer(
-    buffer: Buffer,
-    folder: string = 'training-slide-illustrations',
-    publicId?: string
-  ): Promise<{ url: string; publicId: string }> {
-    if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_SECRET) {
-      throw new Error('Cloudinary is not configured (CLOUDINARY_* env vars)');
-    }
-    return new Promise((resolve, reject) => {
-      const opts: Record<string, string> = { folder, resource_type: 'image' };
-      if (publicId) opts.public_id = publicId;
-      const stream = cloudinary.uploader.upload_stream(opts, (error, result) => {
-        if (error) return reject(error);
-        if (!result?.secure_url) return reject(new Error('Cloudinary: missing secure_url'));
-        resolve({ url: result.secure_url, publicId: result.public_id });
-      });
-      stream.end(buffer);
-    });
-  }
-
-  /** Upload depuis une data-URL ou chaîne base64 brute (sans préfixe) */
-  async uploadImageBase64(
-    base64OrDataUrl: string,
-    folder: string = 'training-slide-illustrations',
-    publicId?: string
-  ): Promise<{ url: string; publicId: string }> {
-    const payload = base64OrDataUrl.startsWith('data:')
-      ? base64OrDataUrl
-      : `data:image/png;base64,${base64OrDataUrl}`;
-    if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_SECRET) {
-      throw new Error('Cloudinary is not configured (CLOUDINARY_* env vars)');
-    }
-    const opts: Record<string, string> = { folder, resource_type: 'image' };
-    if (publicId) opts.public_id = publicId;
-    const result = await cloudinary.uploader.upload(payload, opts);
-    return { url: result.secure_url, publicId: result.public_id };
-  }
-
   async uploadJsonData(
     data: any,
     fileName: string,
