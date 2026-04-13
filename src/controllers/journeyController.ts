@@ -158,7 +158,7 @@ RESPONSE FORMAT (strict JSON only):
     description: nextDescription as any
   });
 
-  res.status(200).json({
+  return res.status(200).json({
     success: true,
     journey: updatedJourney,
     applied: {
