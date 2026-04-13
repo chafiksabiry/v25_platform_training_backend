@@ -1,6 +1,10 @@
 import mongoose from 'mongoose';
 import TrainingJourney, { ITrainingJourney } from '../models/TrainingJourney';
 import RepProgress from '../models/RepProgress';
+import RepTrainingTracking, {
+  REP_TRAINING_TRACKING_EVENTS,
+  RepTrainingTrackingEventKind
+} from '../models/RepTrainingTracking';
 import Rep from '../models/Rep';
 import { AppError } from '../middleware/errorHandler';
 import { ImageGenerationService } from './imageGenerationService';
@@ -499,6 +503,56 @@ class TrainingJourneyService {
     const jid = String(journeyId || '').trim();
     if (!jid) return [];
     return await RepProgress.find({ journeyId: jid }).sort({ updatedAt: -1 });
+  }
+
+  async recordTrainingTrackingEvent(input: {
+    repId: string;
+    journeyId: string;
+    moduleId?: string;
+    slideIndex?: number;
+    event: RepTrainingTrackingEventKind | string;
+    durationMs?: number;
+    sessionId?: string;
+    meta?: Record<string, unknown>;
+  }) {
+    const rid = String(input.repId || '').trim();
+    const jid = String(input.journeyId || '').trim();
+    if (!rid || !jid) throw new AppError('repId and journeyId are required', 400);
+
+    const ev = String(input.event || '').trim() as RepTrainingTrackingEventKind;
+    if (!REP_TRAINING_TRACKING_EVENTS.includes(ev)) {
+      throw new AppError(`event must be one of: ${REP_TRAINING_TRACKING_EVENTS.join(', ')}`, 400);
+    }
+
+    return await RepTrainingTracking.create({
+      repId: rid,
+      journeyId: jid,
+      moduleId: input.moduleId ? String(input.moduleId).trim() : undefined,
+      slideIndex:
+        typeof input.slideIndex === 'number' && Number.isFinite(input.slideIndex) && input.slideIndex >= 0
+          ? Math.floor(input.slideIndex)
+          : undefined,
+      event: ev,
+      durationMs:
+        typeof input.durationMs === 'number' && Number.isFinite(input.durationMs) && input.durationMs >= 0
+          ? Math.floor(input.durationMs)
+          : undefined,
+      sessionId: input.sessionId ? String(input.sessionId).trim() : undefined,
+      meta: input.meta && typeof input.meta === 'object' && !Array.isArray(input.meta) ? input.meta : undefined
+    });
+  }
+
+  async listTrainingTrackingEvents(opts: { repId: string; journeyId: string; limit?: number; skip?: number }) {
+    const rid = String(opts.repId || '').trim();
+    const jid = String(opts.journeyId || '').trim();
+    if (!rid || !jid) throw new AppError('repId and journeyId are required', 400);
+    const limit = Math.min(200, Math.max(1, Math.floor(Number(opts.limit) || 50)));
+    const skip = Math.max(0, Math.floor(Number(opts.skip) || 0));
+    return await RepTrainingTracking.find({ repId: rid, journeyId: jid })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
   }
 }
 

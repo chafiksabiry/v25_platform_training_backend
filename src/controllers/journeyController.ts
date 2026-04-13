@@ -263,3 +263,33 @@ export const getRepProgressByTraining = asyncHandler(async (req: AuthRequest, re
   const rows = await trainingJourneyService.getRepProgressByTraining(journeyId);
   res.status(200).json({ success: true, data: rows });
 });
+
+/** POST /training_journeys/tracking-events — append-only activity log */
+export const postTrainingTrackingEvent = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const payload = req.body || {};
+  const doc = await trainingJourneyService.recordTrainingTrackingEvent({
+    repId: String(payload.repId || ''),
+    journeyId: String(payload.journeyId || ''),
+    moduleId: payload.moduleId != null ? String(payload.moduleId) : undefined,
+    slideIndex: typeof payload.slideIndex === 'number' ? payload.slideIndex : undefined,
+    event: String(payload.event || ''),
+    durationMs: typeof payload.durationMs === 'number' ? payload.durationMs : undefined,
+    sessionId: payload.sessionId != null ? String(payload.sessionId) : undefined,
+    meta: payload.meta && typeof payload.meta === 'object' ? payload.meta : undefined
+  });
+  res.status(201).json({ success: true, data: doc });
+});
+
+/** GET /training_journeys/tracking-events?repId=&journeyId=&limit=&skip= */
+export const listTrainingTrackingEvents = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const repId = String(req.query.repId || '').trim();
+  const journeyId = String(req.query.journeyId || '').trim();
+  if (!repId || !journeyId) {
+    res.status(400).json({ success: false, error: 'repId and journeyId are required' });
+    return;
+  }
+  const limit = req.query.limit != null ? Number(req.query.limit) : undefined;
+  const skip = req.query.skip != null ? Number(req.query.skip) : undefined;
+  const rows = await trainingJourneyService.listTrainingTrackingEvents({ repId, journeyId, limit, skip });
+  res.status(200).json({ success: true, data: rows });
+});

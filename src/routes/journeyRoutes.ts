@@ -15,6 +15,8 @@ router.get('/status/:status', journeyController.getJourneysByStatus);
 // Must be before /:id so static segments are not parsed as Mongo ids
 router.get('/rep-progress', journeyController.getRepProgress);
 router.post('/rep-progress', journeyController.upsertRepProgress);
+router.post('/tracking-events', journeyController.postTrainingTrackingEvent);
+router.get('/tracking-events', journeyController.listTrainingTrackingEvents);
 router.get('/rep/:repId/trainings-progress', journeyController.getTrainingProgressByRep);
 router.get('/journey/:journeyId/reps-progress', journeyController.getRepProgressByTraining);
 router.get('/gig/:gigId', journeyController.listJourneysByGig);
