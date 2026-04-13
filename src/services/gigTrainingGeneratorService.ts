@@ -278,8 +278,19 @@ class GigTrainingGeneratorService {
               }
             ]
           }`;
-        const raw = await aiService.generateWithClaude(prompt, `Return ONLY valid JSON for ${batchLabel} (Méthode 360°)`, apiKey);
-        return aiService.parseJson(raw, batchLabel).slides || [];
+        try {
+          const raw = await aiService.generateWithClaude(
+            prompt,
+            `Return ONLY valid JSON for ${batchLabel} (Méthode 360°)`,
+            apiKey
+          );
+          const parsed = aiService.parseJson(raw, batchLabel);
+          const slides = parsed?.slides;
+          return Array.isArray(slides) ? slides : [];
+        } catch (error: any) {
+          console.error(`⚠️ Presentation batch fallback for ${batchLabel}:`, error?.message || error);
+          return [];
+        }
       };
 
       const batch1Desc = `
