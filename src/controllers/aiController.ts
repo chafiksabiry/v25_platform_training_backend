@@ -68,25 +68,20 @@ export const listGigKnowledgeDocuments = async (
 
     const docs = await Document.find({ gigId })
       .sort({ createdAt: -1 })
-      .select(
-        'name fileType description createdAt analysis.summary analysis.keyTerms gigId fileUrl cloudinaryPublicId'
-      )
+      .select('name fileType description createdAt analysis.summary analysis.keyTerms gigId')
       .lean();
 
     // One logical KB file can exist as multiple Mongo rows (re-uploads, retries, legacy sync).
-    // Dedupe by stable file identity so the training UI matches "2 files in the gig".
-    const normalizeName = (n: string) => String(n || '').trim().toLowerCase();
-    const dedupeKey = (d: any) => {
-      const pid = d.cloudinaryPublicId && String(d.cloudinaryPublicId).trim();
-      if (pid) return `pid:${pid}`;
-      const url = d.fileUrl && String(d.fileUrl).trim();
-      if (url) return `url:${url}`;
-      return `name:${normalizeName(d.name)}`;
+    // Prefer one row per display filename: same name + different cloudinaryPublicId still counts as one file for the UI.
+    const normalizeBasename = (n: string) => {
+      const s = String(n || '').trim().toLowerCase();
+      const base = s.split(/[/\\]/).pop() || s;
+      return base;
     };
 
     const byKey = new Map<string, any>();
     for (const d of docs) {
-      const key = dedupeKey(d);
+      const key = `name:${normalizeBasename(d.name)}`;
       if (!byKey.has(key)) byKey.set(key, d);
     }
 
