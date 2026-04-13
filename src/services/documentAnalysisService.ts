@@ -348,6 +348,23 @@ class DocumentAnalysisService {
       const uploadAnalyses = Array.isArray(sourceContext?.uploadAnalyses) ? sourceContext.uploadAnalyses : [];
       const knowledgeDocuments = Array.isArray(sourceContext?.knowledgeDocuments) ? sourceContext.knowledgeDocuments : [];
       const callRecordings = Array.isArray(sourceContext?.callRecordings) ? sourceContext.callRecordings : [];
+      const isCallRecordingUsable = (call: any): boolean => {
+        const status = String(call?.transcriptionStatus || '').toLowerCase();
+        const hasFailedTranscription = status === 'failed';
+        const summary = String(call?.summaryText || '').toLowerCase();
+        const keyIdeas = Array.isArray(call?.keyIdeas) ? call.keyIdeas : [];
+        const keyIdeasText = keyIdeas
+          .map((k: any) => `${k?.title || ''} ${k?.description || ''}`)
+          .join(' ')
+          .toLowerCase();
+        const text = `${summary} ${keyIdeasText}`;
+        const hasInsuranceSignal = /(assurance|mutuelle|contrat|sant[eé]|prospect|objection|closing|garantie|remboursement)/i.test(text);
+        const obviouslyOffTopic = /(bakery|croissant|baguette|pain au chocolat|seller|6 euros)/i.test(text);
+        if (obviouslyOffTopic) return false;
+        if (hasFailedTranscription && !hasInsuranceSignal) return false;
+        return text.trim().length > 0;
+      };
+      const usableCallRecordings = callRecordings.filter(isCallRecordingUsable);
 
       const uploadContextBlock = uploadAnalyses.length
         ? `ANALYSES DES DOCUMENTS UPLOADÉS (source explicite):\n${uploadAnalyses
@@ -368,8 +385,8 @@ class DocumentAnalysisService {
             .join('\n')}\n`
         : '';
 
-      const callRecordingsBlock = callRecordings.length
-        ? `CALL RECORDINGS LIÉS AU GIG (source explicite):\n${callRecordings
+      const callRecordingsBlock = usableCallRecordings.length
+        ? `CALL RECORDINGS LIÉS AU GIG (source explicite, filtrés qualité):\n${usableCallRecordings
             .map((c: any, i: number) => {
               const keyIdeas = Array.isArray(c?.keyIdeas)
                 ? c.keyIdeas
@@ -383,7 +400,7 @@ class DocumentAnalysisService {
 
       const sourceContextBlock =
         uploadContextBlock || kbDocsContextBlock || callRecordingsBlock
-          ? `\nSOURCE CONTEXT (PRIORITY DATASET FOR THIS GENERATION)\n- sourceMode: ${sourceMode || 'unspecified'}\n- includeCallRecordings: ${options?.includeCallRecordings === true ? 'true' : 'false'}\n${uploadContextBlock}${kbDocsContextBlock}${callRecordingsBlock}\n`
+          ? `\nSOURCE CONTEXT (PRIORITY DATASET FOR THIS GENERATION)\n- sourceMode: ${sourceMode || 'unspecified'}\n- includeCallRecordings: ${options?.includeCallRecordings === true ? 'true' : 'false'}\n- usableCallRecordings: ${usableCallRecordings.length}/${callRecordings.length}\n${uploadContextBlock}${kbDocsContextBlock}${callRecordingsBlock}\n`
           : '';
 
       const narrative = this.buildProgramNarrativeContext(program, 26000);
@@ -417,6 +434,8 @@ STYLE & QUALITÉ (comme un document Claude de référence) :
 - Précision : termes métier corrects, exemples et chiffres tirés du contexte (programme / KB), pas de généralités interchangeables.
 - Ton : expert accessible, confiant, légèrement chaleureux — comme une excellente réponse Claude.
 - Quiz : question claire, 4 choix dont un seul correct, explication pédagogique utile.
+- Langue : écrire dans la langue dominante des sources (ici privilégier le français si les sources sont majoritairement en français). Interdiction de mélange FR/EN dans une même slide.
+- Interdiction de contenu hors domaine : ignorer toute source hors sujet (ex. commerce alimentaire/bakery) même si présente dans un enregistrement.
 
 SORTIE : uniquement un objet JSON valide {"slides":[...]} — aucun markdown, aucun \`\`\`, aucun commentaire avant ou après.`;
 
@@ -439,6 +458,7 @@ SORTIE : uniquement un objet JSON valide {"slides":[...]} — aucun markdown, au
              - kb: n'utilise que KB docs + call recordings.
              - uploads+kb: fusionne les deux, sans contradiction ; si conflit factuel, privilégie la KB.
              Si une sourceContext est fournie, elle prime sur tout contexte implicite.
+             Si une source semble hors sujet métier, NE PAS l'utiliser.
           1. Chaque slide : "visualElements" avec 2–3 formes (rectangle, circle, line, arrow), coords 0–100 %, opacity 0.15–0.45 ; JSON compact.
           2. "imageDescription" : prompt visuel précis (style, sujet, lumière) pour illustration ultérieure ; "illustrationUrl" vide sauf URL réelle.
           3. "note" : script oral 1–3 phrases pour le présentateur (ton naturel, comme Claude).
