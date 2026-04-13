@@ -176,7 +176,13 @@ class TrainingJourneyService {
   }
 
   async getJourneysForRep(repId: string): Promise<ITrainingJourney[]> {
-    return await TrainingJourney.find({ enrolledRepIds: repId });
+    const id = String(repId || '').trim();
+    if (!id) return [];
+    const variants = [id];
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      variants.push(new mongoose.Types.ObjectId(id).toString());
+    }
+    return await TrainingJourney.find({ enrolledRepIds: { $in: [...new Set(variants)] } });
   }
 
   async getAllAvailableJourneysForTrainees(): Promise<ITrainingJourney[]> {

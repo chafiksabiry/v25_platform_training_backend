@@ -183,3 +183,14 @@ export const getTrainerDashboard = asyncHandler(async (req: AuthRequest, res: Re
     data: dashboard
   });
 });
+
+/** Trainings (journeys) where this rep is enrolled — linked to gig via journey.gigId when set. */
+export const getJourneysForRep = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const repId = String(req.params.repId || '').trim();
+  if (!repId) {
+    res.status(400).json({ success: false, error: 'repId is required' });
+    return;
+  }
+  const journeys = await trainingJourneyService.getJourneysForRep(repId);
+  res.status(200).json(journeys);
+});

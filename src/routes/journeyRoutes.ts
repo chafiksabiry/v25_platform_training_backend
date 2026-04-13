@@ -12,6 +12,8 @@ router.get('/', journeyController.getAllJourneys);
 router.get('/dashboard', journeyController.getTrainerDashboard);
 router.get('/trainer/companyId/:companyId', journeyController.getTrainerDashboard); // Legacy compatibility route
 router.get('/status/:status', journeyController.getJourneysByStatus);
+// Must be before /:id so "rep" is not parsed as a journey id
+router.get('/rep/:repId', journeyController.getJourneysForRep);
 router.get('/:id', journeyController.getJourneyById);
 router.put('/:id', journeyController.updateJourney);
 router.post('/:id/edit-with-prompt', journeyController.editJourneyWithPrompt);
