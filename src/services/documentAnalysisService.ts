@@ -1,6 +1,5 @@
 import documentParserService from './documentParserService';
 import aiService from './aiService';
-import { ImageGenerationService } from './imageGenerationService';
 import { AppError } from '../middleware/errorHandler';
 import Document from '../models/Document';
 
@@ -460,7 +459,7 @@ SORTIE : uniquement un objet JSON valide {"slides":[...]} — aucun markdown, au
              Si une sourceContext est fournie, elle prime sur tout contexte implicite.
              Si une source semble hors sujet métier, NE PAS l'utiliser.
           1. Chaque slide : "visualElements" avec 2–3 formes (rectangle, circle, line, arrow), coords 0–100 %, opacity 0.15–0.45 ; JSON compact.
-          2. "imageDescription" : prompt visuel précis (style, sujet, lumière) pour illustration ultérieure ; "illustrationUrl" vide sauf URL réelle.
+          2. IMAGES DÉSACTIVÉES : ne génère PAS d'image. Mets "imageDescription" à "" et "illustrationUrl" à "".
           3. "note" : script oral 1–3 phrases pour le présentateur (ton naturel, comme Claude).
           4. Types : cover | agenda | content | quote | conclusion | quiz selon le rôle de la slide.
 
@@ -476,7 +475,7 @@ SORTIE : uniquement un objet JSON valide {"slides":[...]} — aucun markdown, au
             "bullets": ["string", "..."],
             "note": "script présentateur",
             "visualConfig": { "layout": "split|gradient|minimal|highlight", "theme": "dark|light", "backgroundHex": "#HEX", "textHex": "#HEX", "accentHex": "#HEX", "icon": "emoji" },
-            "imageDescription": "prompt illustration",
+            "imageDescription": "",
             "illustrationUrl": "",
             "visualElements": [ { "type": "rectangle", "x": 5, "y": 10, "w": 30, "h": 4, "fill": "#F43F5E", "opacity": 0.25 } ]
           }`;
@@ -537,28 +536,12 @@ SORTIE : uniquement un objet JSON valide {"slides":[...]} — aucun markdown, au
       ]);
 
       const merged = [...slides1, ...slides2, ...slides3a, ...slides3b];
-      // Claude ne génère pas de pixels : seulement imageDescription. On résout illustrationUrl via stock/placeholder (voir ImageGenerationService).
-      const skipImg =
-        String(process.env.SKIP_PRESENTATION_ILLUSTRATION_URLS || '').toLowerCase() === 'true' ||
-        String(process.env.SKIP_PRESENTATION_ILLUSTRATION_URLS || '') === '1';
-      const allSlides = skipImg
-        ? merged.map((s, i) => ({ ...s, id: i + 1 }))
-        : await Promise.all(
-            merged.map(async (s, i) => {
-              const slide = { ...s, id: i + 1 };
-              const desc = slide.imageDescription;
-              const hasUrl =
-                slide.illustrationUrl != null && String(slide.illustrationUrl).trim().length > 0;
-              if (typeof desc === 'string' && desc.trim().length > 0 && !hasUrl) {
-                try {
-                  slide.illustrationUrl = await ImageGenerationService.generateImage(desc);
-                } catch (e) {
-                  console.warn(`[generatePresentation] illustration URL failed slide ${i + 1}:`, e);
-                }
-              }
-              return slide;
-            })
-          );
+      const allSlides = merged.map((s, i) => ({
+        ...s,
+        id: i + 1,
+        imageDescription: '',
+        illustrationUrl: '',
+      }));
 
       return {
         title: program.title || 'Formation 360° HARX',
