@@ -178,34 +178,41 @@ class AIService {
         }
         return parsed;
       } catch (firstError) {
-        // Some models return over-escaped JSON blocks like \"key\": \"value\"
-        try {
-          const unescapedQuotes = jsonString.replace(/\\"/g, '"');
-          return JSON.parse(unescapedQuotes);
-        } catch (_escapedError) {
-          // Continue to newline-escape fallback
-        }
-
-        // Some models output a pseudo-JSON blob with escaped sequences everywhere:
-        // {\n  \"id\": 1, ...}
-        // Decode common escaped tokens and parse again.
-        try {
-          const decodedEscapes = jsonString
+        const parseCandidates = [
+          // 1) Common case: over-escaped quotes
+          jsonString.replace(/\\"/g, '"'),
+          // 2) Some providers return an escaped blob where visible formatting escapes are literal
+          jsonString
             .replace(/\\"/g, '"')
             .replace(/\\n/g, '\n')
             .replace(/\\r/g, '\r')
-            .replace(/\\t/g, '\t');
-          return JSON.parse(decodedEscapes);
-        } catch (_decodedEscapesError) {
-          // Continue to aggressive fallback
+            .replace(/\\t/g, '\t'),
+          // 3) Aggressive: drop any backslash directly before a quote
+          // (handles patterns like {\"id\":1} that still survive previous steps)
+          jsonString.replace(/\\(?=")/g, ''),
+          // 4) Aggressive + visible escapes decode
+          jsonString
+            .replace(/\\(?=")/g, '')
+            .replace(/\\n/g, '\n')
+            .replace(/\\r/g, '\r')
+            .replace(/\\t/g, '\t'),
+          // 5) Final fallback: escape raw newlines in quoted values
+          jsonString.replace(/(?<=[:\s])"([\s\S]*?)"(?=[,\s\}\]])/g, (m, p1) => {
+            return '"' + p1.replace(/\n/g, '\\n').replace(/\r/g, '\\r') + '"';
+          }),
+        ];
+
+        let lastCandidateError: any = firstError;
+        for (const candidate of parseCandidates) {
+          try {
+            const normalizedCandidate = this.normalizeInvalidJsonEscapes(candidate);
+            return JSON.parse(normalizedCandidate);
+          } catch (candidateError) {
+            lastCandidateError = candidateError;
+          }
         }
 
-        // Try one more aggressive cleanup: remove actual newlines inside strings
-        // This is complex, so we'll just try to escape them if they look like they're inside quotes
-        const escapedJson = jsonString.replace(/(?<=[:\s])"([\s\S]*?)"(?=[,\s\}\]])/g, (m, p1) => {
-          return '"' + p1.replace(/\n/g, '\\n').replace(/\r/g, '\\r') + '"';
-        });
-        return JSON.parse(escapedJson);
+        throw lastCandidateError;
       }
     } catch (e: any) {
       console.error(`❌ JSON Parsing Error (${label}):`, e.message);
