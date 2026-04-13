@@ -14,6 +14,7 @@ router.get('/trainer/companyId/:companyId', journeyController.getTrainerDashboar
 router.get('/status/:status', journeyController.getJourneysByStatus);
 router.get('/:id', journeyController.getJourneyById);
 router.put('/:id', journeyController.updateJourney);
+router.post('/:id/edit-with-prompt', journeyController.editJourneyWithPrompt);
 router.post('/:id/launch', journeyController.launchJourney);
 router.delete('/:id', journeyController.deleteJourney);
 router.patch('/:id/archive', journeyController.archiveJourney);
