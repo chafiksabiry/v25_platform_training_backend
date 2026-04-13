@@ -6,6 +6,7 @@ import { PythonPPTService } from '../services/pythonPPTService';
 import cloudinaryService from '../services/cloudinaryService';
 import { AppError } from '../middleware/errorHandler';
 import Document from '../models/Document';
+import mongoose from 'mongoose';
 import fs from 'fs';
 import { promisify } from 'util';
 
@@ -81,6 +82,50 @@ export const listGigKnowledgeDocuments = async (
     }));
 
     return res.json({ success: true, documents });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/** Liste les call recordings rattachés à un Gig. */
+export const listGigCallRecordings = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { gigId } = req.params;
+    if (!gigId) {
+      return res.status(400).json({ success: false, error: 'gigId is required' });
+    }
+
+    const callRecordingsCollection = mongoose.connection.collection('callrecordings');
+    const objectIdFilter = mongoose.Types.ObjectId.isValid(gigId)
+      ? [{ gigId: new mongoose.Types.ObjectId(gigId) }]
+      : [];
+
+    const recordings = await callRecordingsCollection
+      .find({
+        $or: [
+          ...objectIdFilter,
+          { gigId },
+        ],
+      })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    return res.json({
+      success: true,
+      callRecordings: recordings.map((rec: any) => ({
+        _id: String(rec._id),
+        recordingUrl: rec.recordingUrl,
+        duration: rec.duration,
+        analysis: rec.analysis,
+        transcription: rec.transcription,
+        summary: rec.summary || rec.analysis?.summaryText || '',
+        createdAt: rec.createdAt,
+      })),
+    });
   } catch (error) {
     return next(error);
   }

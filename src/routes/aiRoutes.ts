@@ -14,6 +14,11 @@ router.get(
   aiController.listGigKnowledgeDocuments
 );
 
+router.get(
+  '/gig/:gigId/call-recordings',
+  aiController.listGigCallRecordings
+);
+
 router.post(
   '/analyze-document',
   upload.single('file'),
