@@ -525,7 +525,6 @@ SORTIE : uniquement un objet JSON valide {"slides":[...]} — aucun markdown, au
       const batch3bDesc = `
         Slide 15 : Conclusion synthétique — récapitulatif, messages clés, perspectives.
         Slide 16 : Prochaines étapes (Call to Action) — que faire après cette formation.
-        Slide 17 : Quiz interactif — 4 questions (3 options chacune) avec réponses et explications.
       `;
 
       const [slides1, slides2, slides3a, slides3b] = await Promise.all([
@@ -536,7 +535,10 @@ SORTIE : uniquement un objet JSON valide {"slides":[...]} — aucun markdown, au
       ]);
 
       const merged = [...slides1, ...slides2, ...slides3a, ...slides3b];
-      const allSlides = merged.map((s, i) => ({
+      const withoutQuizSlides = merged.filter(
+        (s: any) => String(s?.type || '').toLowerCase() !== 'quiz'
+      );
+      const allSlides = withoutQuizSlides.map((s, i) => ({
         ...s,
         id: i + 1,
         imageDescription: '',

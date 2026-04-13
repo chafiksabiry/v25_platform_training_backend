@@ -316,7 +316,6 @@ class GigTrainingGeneratorService {
         Slide 14: Futur et Innovations - IA, Digitalisation du poste.
         Slide 15: Synthèse des compétences clés.
         Slide 16: Call to Action - Prochaines étapes opérationnelles.
-        Slide 17: Quiz de validation - 4 questions techniques MCQs.
       `;
 
       const [slides1, slides2, slides3] = await Promise.all([
@@ -325,7 +324,10 @@ class GigTrainingGeneratorService {
         generatePresentationBatch('B3', batch3Desc, 12)
       ]);
 
-      const allSlides = [...slides1, ...slides2, ...slides3].map((s, i) => ({
+      const mergedSlides = [...slides1, ...slides2, ...slides3].filter(
+        (s: any) => String(s?.type || '').toLowerCase() !== 'quiz'
+      );
+      const allSlides = mergedSlides.map((s, i) => ({
         ...s,
         id: i + 1,
         imageDescription: '',
