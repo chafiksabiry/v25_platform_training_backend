@@ -7,6 +7,10 @@ import { AppError } from '../middleware/errorHandler';
 export type GenerateFromGigOptions = {
   /** When false, programme + présentation sont basés uniquement sur le Gig (titre, description…), sans documents KB. */
   useKnowledgeBase?: boolean;
+  /** If true, recordings linked to gig should be considered in prompts when available. */
+  includeCallRecordings?: boolean;
+  /** Explicit source context from frontend (uploads/KB/call recordings). */
+  sourceContext?: any;
 };
 
 class GigTrainingGeneratorService {
@@ -21,6 +25,8 @@ class GigTrainingGeneratorService {
     }
 
     const useKb = options?.useKnowledgeBase !== false;
+    const includeCallRecordings = options?.includeCallRecordings === true;
+    const sourceContext = options?.sourceContext && typeof options.sourceContext === 'object' ? options.sourceContext : null;
 
     console.log(
       `🚀 Starting ${useKb ? 'KB-Grounded' : 'Gig-only (no KB docs)'} Iterative Generation for Gig: ${gig.title}`
@@ -57,6 +63,32 @@ class GigTrainingGeneratorService {
       console.log('⏭️ useKnowledgeBase=false — skipping KB document retrieval.');
     }
 
+    const sourceMode = sourceContext?.sourceMode ? String(sourceContext.sourceMode) : '';
+    const uploadAnalyses = Array.isArray(sourceContext?.uploadAnalyses) ? sourceContext.uploadAnalyses : [];
+    const kbDocumentsFromContext = Array.isArray(sourceContext?.knowledgeDocuments) ? sourceContext.knowledgeDocuments : [];
+    const callRecordingsFromContext = Array.isArray(sourceContext?.callRecordings) ? sourceContext.callRecordings : [];
+
+    const explicitSourceContextBlock =
+      sourceContext != null
+        ? `\nSOURCE CONTEXT (explicit input)\n` +
+          `sourceMode: ${sourceMode || 'unspecified'}\n` +
+          (uploadAnalyses.length
+            ? `UPLOAD ANALYSES:\n${uploadAnalyses
+                .map((u: any, i: number) => `[UPLOAD ${i + 1}] ${u?.fileName || 'Untitled'} | topics: ${(u?.keyTopics || []).join(', ')}`)
+                .join('\n')}\n`
+            : '') +
+          (kbDocumentsFromContext.length
+            ? `KB DOCUMENTS:\n${kbDocumentsFromContext
+                .map((d: any, i: number) => `[KB ${i + 1}] ${d?.name || 'Untitled'} | summary: ${d?.summary || ''}`)
+                .join('\n')}\n`
+            : '') +
+          (callRecordingsFromContext.length
+            ? `CALL RECORDINGS:\n${callRecordingsFromContext
+                .map((c: any, i: number) => `[CALL ${i + 1}] summary: ${c?.summaryText || ''} | keyIdeas: ${(c?.keyIdeas || []).map((k: any) => k?.title || '').join(', ')}`)
+                .join('\n')}\n`
+            : '')
+        : '';
+
     const kbPromptFragment = kbContext
       ? `\nBASE DE CONNAISSANCES (SOURCE DE VÉRITÉ) :\n${kbContext}\n`
       : '';
@@ -70,6 +102,8 @@ class GigTrainingGeneratorService {
         DESCRIPTION : ${gig.description}
         INDUSTRIE : ${gig.industry}
         ${kbPromptFragment}
+        ${explicitSourceContextBlock}
+        ${includeCallRecordings ? '\nIMPORTANT: si des call recordings sont fournis dans SOURCE CONTEXT, utilise-les pour enrichir objections, ton, scénarios et exemples concrets.\n' : ''}
 
         MISSION : Crée une structure pédagogique basée sur la Taxonomie de Bloom.
         IMPORTANT : Utilise les termes techniques et les concepts spécifiques trouvés dans la BASE DE CONNAISSANCES.
@@ -113,6 +147,7 @@ class GigTrainingGeneratorService {
         return `Tu es un expert pédagogique.
         Thème du programme : ${meta.title}
         ${kbPromptFragment}
+        ${explicitSourceContextBlock}
 
         Pour le module décrit ci-dessous UNIQUEMENT, génère les sessions détaillées.
         TRÈS IMPORTANT : Inspire-toi DIRECTEMENT des détails techniques de la BASE DE CONNAISSANCES pour le contenu des sections.
@@ -157,6 +192,7 @@ class GigTrainingGeneratorService {
         const prompt = `Tu es un expert en formation chez HARX. Génère UNIQUEMENT les slides suivantes pour la présentation "${meta.title}" en utilisant la MÉTHODE 360°.
           GIG : ${gig.title}
           ${kbPromptFragment}
+          ${explicitSourceContextBlock}
 
           MISSION :
           Génère ces slides avec une précision technique maximale basée sur la BASE DE CONNAISSANCES :

@@ -26,10 +26,20 @@ export const generateTrainingFromGig = async (
       req.body == null || typeof req.body !== 'object'
         ? true
         : (req.body as { useKnowledgeBase?: boolean }).useKnowledgeBase !== false;
+    const includeCallRecordings =
+      req.body != null &&
+      typeof req.body === 'object' &&
+      (req.body as { includeCallRecordings?: boolean }).includeCallRecordings === true;
+    const sourceContext =
+      req.body != null && typeof req.body === 'object'
+        ? (req.body as { sourceContext?: unknown }).sourceContext
+        : undefined;
 
     const anthropicKey = req.headers['x-anthropic-key'] as string;
     const journey = await gigTrainingGeneratorService.generateTrainingFromGig(gigId, anthropicKey, {
-      useKnowledgeBase
+      useKnowledgeBase,
+      includeCallRecordings,
+      sourceContext
     });
 
     return res.status(201).json({
@@ -231,7 +241,7 @@ export const generatePresentation = async (
   next: NextFunction
 ) => {
   try {
-    const { curriculum, gigId, useKnowledgeBase } = req.body || {};
+    const { curriculum, gigId, useKnowledgeBase, includeCallRecordings, sourceContext, sourceMode } = req.body || {};
     if (!curriculum) {
       return res.status(400).json({ error: 'Curriculum data is required' });
     }
@@ -239,7 +249,10 @@ export const generatePresentation = async (
     const anthropicKey = req.headers['x-anthropic-key'] as string;
     const presentation = await documentAnalysisService.generatePresentation(curriculum, anthropicKey, {
       gigId: gigId != null && gigId !== '' ? String(gigId) : undefined,
-      useKnowledgeBase: useKnowledgeBase === true
+      useKnowledgeBase: useKnowledgeBase === true,
+      includeCallRecordings: includeCallRecordings === true,
+      sourceContext: sourceContext || undefined,
+      sourceMode: sourceMode || undefined
     });
 
     return res.status(200).json({

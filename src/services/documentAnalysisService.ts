@@ -317,7 +317,13 @@ class DocumentAnalysisService {
   async generatePresentation(
     program: any,
     apiKey?: string,
-    options?: { gigId?: string; useKnowledgeBase?: boolean }
+    options?: {
+      gigId?: string;
+      useKnowledgeBase?: boolean;
+      includeCallRecordings?: boolean;
+      sourceContext?: any;
+      sourceMode?: string;
+    }
   ): Promise<any> {
     try {
       console.log('🚀 Starting Full-Claude MÉTHODE 360° Presentation Generation (17 slides, 4 batches)');
@@ -333,6 +339,52 @@ class DocumentAnalysisService {
           console.error('❌ generate-presentation: échec chargement KB gig:', e);
         }
       }
+
+      const sourceContext = options?.sourceContext && typeof options.sourceContext === 'object'
+        ? options.sourceContext
+        : null;
+      const sourceMode = (options?.sourceMode || sourceContext?.sourceMode || '').toString();
+
+      const uploadAnalyses = Array.isArray(sourceContext?.uploadAnalyses) ? sourceContext.uploadAnalyses : [];
+      const knowledgeDocuments = Array.isArray(sourceContext?.knowledgeDocuments) ? sourceContext.knowledgeDocuments : [];
+      const callRecordings = Array.isArray(sourceContext?.callRecordings) ? sourceContext.callRecordings : [];
+
+      const uploadContextBlock = uploadAnalyses.length
+        ? `ANALYSES DES DOCUMENTS UPLOADÉS (source explicite):\n${uploadAnalyses
+            .map((u: any, i: number) => {
+              const topics = Array.isArray(u?.keyTopics) ? u.keyTopics.join(', ') : '';
+              const objectives = Array.isArray(u?.learningObjectives) ? u.learningObjectives.join(' | ') : '';
+              return `[UPLOAD ${i + 1}] ${u?.fileName || 'Untitled'} (${u?.fileType || 'unknown'})\n- Topics: ${topics}\n- Learning objectives: ${objectives}`;
+            })
+            .join('\n')}\n`
+        : '';
+
+      const kbDocsContextBlock = knowledgeDocuments.length
+        ? `DOCUMENTS KB (source explicite):\n${knowledgeDocuments
+            .map((d: any, i: number) => {
+              const terms = Array.isArray(d?.keyTerms) ? d.keyTerms.join(', ') : '';
+              return `[KB ${i + 1}] ${d?.name || 'Untitled'} (${d?.fileType || 'unknown'})\n- Summary: ${d?.summary || ''}\n- Key terms: ${terms}`;
+            })
+            .join('\n')}\n`
+        : '';
+
+      const callRecordingsBlock = callRecordings.length
+        ? `CALL RECORDINGS LIÉS AU GIG (source explicite):\n${callRecordings
+            .map((c: any, i: number) => {
+              const keyIdeas = Array.isArray(c?.keyIdeas)
+                ? c.keyIdeas
+                    .map((k: any) => `${k?.title || ''}${k?.description ? `: ${k.description}` : ''}`)
+                    .join(' | ')
+                : '';
+              return `[CALL ${i + 1}] id=${c?._id || 'unknown'} duration=${c?.duration ?? 'n/a'}s transcriptionStatus=${c?.transcriptionStatus || 'unknown'}\n- Summary: ${c?.summaryText || ''}\n- Key ideas: ${keyIdeas}`;
+            })
+            .join('\n')}\n`
+        : '';
+
+      const sourceContextBlock =
+        uploadContextBlock || kbDocsContextBlock || callRecordingsBlock
+          ? `\nSOURCE CONTEXT (PRIORITY DATASET FOR THIS GENERATION)\n- sourceMode: ${sourceMode || 'unspecified'}\n- includeCallRecordings: ${options?.includeCallRecordings === true ? 'true' : 'false'}\n${uploadContextBlock}${kbDocsContextBlock}${callRecordingsBlock}\n`
+          : '';
 
       const narrative = this.buildProgramNarrativeContext(program, 26000);
       const programInfo = `
@@ -371,7 +423,7 @@ SORTIE : uniquement un objet JSON valide {"slides":[...]} — aucun markdown, au
       const generateBatch = async (label: string, slideDescriptions: string, _startId: number) => {
         const prompt = `Rôle : LEAD INSTRUCTIONAL DESIGNER HARX — présentation méthode 360°, qualité « artefact Claude ».
 
-          ${kbBlock}CONTEXTE DU PROGRAMME :
+          ${kbBlock}${sourceContextBlock}CONTEXTE DU PROGRAMME :
           ${programInfo}
 
           LOT À GÉNÉRER (${label}) — slides dans cet ordre exact, contenu expert et concis :
@@ -382,7 +434,11 @@ SORTIE : uniquement un objet JSON valide {"slides":[...]} — aucun markdown, au
           - Garde une palette cohérente sur ce lot (accent rose #F43F5E et violet #6D28D9 ou tons dérivés du thème du programme).
 
           RÈGLES :
-          0. KB : si fournie, tout le fond factuel (définitions, articles, chiffres) vient d’elle. Si le titre programme (ex. fiche job) diverge du domaine KB, la KB prime sur le fond.
+          0. SOURCES : respecte STRICTEMENT sourceMode (${sourceMode || 'default'}). 
+             - uploads: n'utilise que les analyses upload comme fond principal.
+             - kb: n'utilise que KB docs + call recordings.
+             - uploads+kb: fusionne les deux, sans contradiction ; si conflit factuel, privilégie la KB.
+             Si une sourceContext est fournie, elle prime sur tout contexte implicite.
           1. Chaque slide : "visualElements" avec 2–3 formes (rectangle, circle, line, arrow), coords 0–100 %, opacity 0.15–0.45 ; JSON compact.
           2. "imageDescription" : prompt visuel précis (style, sujet, lumière) pour illustration ultérieure ; "illustrationUrl" vide sauf URL réelle.
           3. "note" : script oral 1–3 phrases pour le présentateur (ton naturel, comme Claude).
