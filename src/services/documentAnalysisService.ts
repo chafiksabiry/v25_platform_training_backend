@@ -279,6 +279,67 @@ class DocumentAnalysisService {
     return text;
   }
 
+  /**
+   * Nombre de slides à générer : dérivé du curriculum (modules / sections), pas une constante fixe.
+   * Surcharge possible via options.targetSlideCount (bornée 8–40).
+   */
+  private computePresentationSlideTarget(
+    program: any,
+    options?: { targetSlideCount?: number }
+  ): number {
+    const explicit = options?.targetSlideCount;
+    if (typeof explicit === 'number' && Number.isFinite(explicit)) {
+      return Math.max(8, Math.min(40, Math.round(explicit)));
+    }
+    const mods = Array.isArray(program?.modules) ? program.modules : [];
+    if (mods.length === 0) return 14;
+    let sectionCount = 0;
+    for (const m of mods) {
+      sectionCount += Array.isArray(m?.sections) ? m.sections.length : 0;
+    }
+    const raw = 10 + mods.length * 2 + Math.min(12, Math.ceil(sectionCount / 2));
+    return Math.max(10, Math.min(30, raw));
+  }
+
+  /** Une consigne par slide, indices 1..n, alignée sur le programme (titres de modules quand disponibles). */
+  private buildSlideLineItems(n: number, program: any): string[] {
+    if (n < 4) {
+      return Array.from(
+        { length: n },
+        (_, i) =>
+          `Slide ${i + 1} : Synthèse de formation — message clair et professionnel, aligné sur le programme.`
+      );
+    }
+    const modules = Array.isArray(program?.modules) ? program.modules : [];
+    const titles = modules.map((m: any) => String(m?.title || 'Module').slice(0, 100));
+
+    const plan: string[] = [];
+    plan.push('Slide de titre — accroche impactante, slogan fort, chiffre clé du domaine.');
+    plan.push('Contexte et problématique — statistiques, enjeux actuels, chiffres de référence.');
+    const middle = Math.max(0, n - 4);
+    const expertiseLine = (idx: number): string => {
+      if (titles.length) {
+        const t = titles[idx % titles.length];
+        const phase = Math.floor(idx / titles.length) % 3;
+        if (phase === 0) return `Module « ${t} » — objectifs, définitions et points clés.`;
+        if (phase === 1) return `Module « ${t} » — exemples, données et mise en pratique.`;
+        return `Module « ${t} » — synthèse opérationnelle pour le terrain.`;
+      }
+      const pool = [
+        'Concepts et mécanismes — précision métier d’après le programme.',
+        'Comparatifs, typologies ou offres — structuration claire.',
+        'Bénéfices, limites et bonnes pratiques — équilibre pédagogique.',
+        'Cas pratique ou scénario — chiffres et étapes concrètes.',
+        'Contexte actuel, innovations ou perspectives — selon les sources.',
+      ];
+      return pool[idx % pool.length];
+    };
+    for (let i = 0; i < middle; i++) plan.push(expertiseLine(i));
+    plan.push('Conclusion synthétique — récapitulatif et messages clés.');
+    plan.push('Prochaines étapes (call to action) — ce que fait le public après la formation.');
+    return plan.map((desc, i) => `Slide ${i + 1} : ${desc}`);
+  }
+
   /** Même logique que la génération Gig, avec extraits texte source larges pour les slides. */
   private async buildKbContextForGig(gigId: string): Promise<string> {
     const documents = await Document.find({ gigId }).sort({ createdAt: -1 });
@@ -322,10 +383,18 @@ class DocumentAnalysisService {
       includeCallRecordings?: boolean;
       sourceContext?: any;
       sourceMode?: string;
+      /** Optional override; sinon le nombre de slides est déduit du curriculum. */
+      targetSlideCount?: number;
     }
   ): Promise<any> {
     try {
-      console.log('🚀 Starting Full-Claude MÉTHODE 360° Presentation Generation (17 slides, 4 batches)');
+      const slideTarget = this.computePresentationSlideTarget(program, options);
+      const lineItems = this.buildSlideLineItems(slideTarget, program);
+      const batchCount = Math.min(4, Math.max(1, lineItems.length));
+      const chunkSize = Math.ceil(lineItems.length / batchCount);
+      console.log(
+        `🚀 MÉTHODE 360° presentation: ${slideTarget} slides (from program), ${batchCount} parallel batches (chunk ~${chunkSize})`
+      );
 
       let kbPromptFragment = '';
       if (options?.gigId && options?.useKnowledgeBase === true) {

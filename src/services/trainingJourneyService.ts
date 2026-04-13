@@ -216,19 +216,28 @@ class TrainingJourneyService {
     companyId: string,
     gigId?: string
   ): Promise<ITrainingJourney[]> {
-    // Search by either companyId (string) or company (ObjectId/string field) 
-    // to handle variations in how the ID was stored
-    const query: any = { 
-      $or: [
-        { companyId },
-        { company: companyId }
-      ]
-    };
-    
-    if (gigId) {
-      query.gigId = gigId;
+    const cid = String(companyId || '').trim();
+    if (!cid) return [];
+
+    const companyClauses: Record<string, unknown>[] = [{ companyId: cid }];
+    if (mongoose.Types.ObjectId.isValid(cid)) {
+      companyClauses.push({ companyId: new mongoose.Types.ObjectId(cid) });
     }
-    return await TrainingJourney.find(query);
+    // Legacy payloads sometimes stored a string id on `company` (not in current schema)
+    companyClauses.push({ company: cid });
+
+    const gid = gigId != null ? String(gigId).trim() : '';
+    if (gid) {
+      const gigClauses: Record<string, unknown>[] = [{ gigId: gid }];
+      if (mongoose.Types.ObjectId.isValid(gid)) {
+        gigClauses.push({ gigId: new mongoose.Types.ObjectId(gid) });
+      }
+      return await TrainingJourney.find({
+        $and: [{ $or: companyClauses }, { $or: gigClauses }]
+      }).sort({ updatedAt: -1 });
+    }
+
+    return await TrainingJourney.find({ $or: companyClauses }).sort({ updatedAt: -1 });
   }
 
   async getJourneysByGigId(gigId: string): Promise<ITrainingJourney[]> {
