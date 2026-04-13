@@ -14,6 +14,51 @@ export type GenerateFromGigOptions = {
 };
 
 class GigTrainingGeneratorService {
+  private toMinutes(value: unknown, fallback = 60): number {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return Math.max(1, Math.round(value));
+    }
+    if (typeof value === 'string') {
+      const lower = value.trim().toLowerCase();
+      const num = parseFloat(lower.replace(',', '.'));
+      if (!Number.isFinite(num)) return fallback;
+      if (lower.includes('heure') || /\bh\b/.test(lower)) return Math.max(1, Math.round(num * 60));
+      if (lower.includes('min')) return Math.max(1, Math.round(num));
+      return Math.max(1, Math.round(num));
+    }
+    return fallback;
+  }
+
+  private normalizeModuleShape(moduleLike: any, index: number): any {
+    const baseDuration = this.toMinutes(moduleLike?.duration, 60);
+    const sections = Array.isArray(moduleLike?.sections)
+      ? moduleLike.sections.map((section: any, sectionIndex: number) => ({
+          ...section,
+          title: String(section?.title || `Section ${sectionIndex + 1}`),
+          content: String(section?.content || ''),
+          type: String(section?.type || 'text'),
+          duration: this.toMinutes(section?.duration, 20),
+        }))
+      : [];
+
+    const quizzes = Array.isArray(moduleLike?.quizzes)
+      ? moduleLike.quizzes.map((quiz: any) => ({
+          ...quiz,
+          duration: this.toMinutes(quiz?.duration, 10),
+        }))
+      : [];
+
+    return {
+      ...moduleLike,
+      id: typeof moduleLike?.id === 'number' ? moduleLike.id : index + 1,
+      title: String(moduleLike?.title || `Module ${index + 1}`),
+      description: String(moduleLike?.description || ''),
+      duration: baseDuration,
+      sections,
+      quizzes,
+    };
+  }
+
   async generateTrainingFromGig(
     gigId: string,
     apiKey?: string,
@@ -134,7 +179,8 @@ class GigTrainingGeneratorService {
 
       // ── Phase 2: Detailed sessions per module (parallel) ───────────────
       // One API call per module avoids max_tokens truncation on large programs.
-      const modulePlan = meta.modules || [];
+      const modulePlanRaw = Array.isArray(meta.modules) ? meta.modules : [];
+      const modulePlan = modulePlanRaw.map((m: any, i: number) => this.normalizeModuleShape(m, i));
 
       const makeSessionPrompt = (m: any) => {
         const moduleHeader = [
@@ -177,15 +223,19 @@ class GigTrainingGeneratorService {
               8192
             );
             const parsed = aiService.parseJson(raw, `gig_session_module_${m.id}`);
-            return parsed.module ?? m;
+            return this.normalizeModuleShape(parsed.module ?? m, Number(m?.id ?? 0) - 1 >= 0 ? Number(m.id) - 1 : 0);
           } catch (e) {
             console.error(`⚠️ Gig session fallback for module ${m.id}:`, e);
-            return m;
+            return this.normalizeModuleShape(m, Number(m?.id ?? 0) - 1 >= 0 ? Number(m.id) - 1 : 0);
           }
         })
       );
 
-      const sessionsData = { modules: detailedModules.length > 0 ? detailedModules : modulePlan };
+      const sessionsData = {
+        modules: (detailedModules.length > 0 ? detailedModules : modulePlan).map((m: any, i: number) =>
+          this.normalizeModuleShape(m, i)
+        ),
+      };
 
       // ── Phase 3: Batched Presentation Generation ────────────────────────
       const generatePresentationBatch = async (batchLabel: string, slideDescriptions: string, startId: number) => {
