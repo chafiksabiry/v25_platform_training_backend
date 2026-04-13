@@ -235,6 +235,24 @@ class TrainingJourneyService {
     return await TrainingJourney.find({ gigId });
   }
 
+  /** Trainee-facing: journeys tied to a gig and visible to enrolled reps (not draft/archived). */
+  async getPublishedJourneysByGigId(gigId: string): Promise<ITrainingJourney[]> {
+    const gid = String(gigId || '').trim();
+    if (!gid) return [];
+
+    const gigClauses: Record<string, unknown>[] = [{ gigId: gid }];
+    if (mongoose.Types.ObjectId.isValid(gid)) {
+      gigClauses.push({ gigId: new mongoose.Types.ObjectId(gid) });
+    }
+
+    return await TrainingJourney.find({
+      $and: [
+        { $or: gigClauses },
+        { status: { $in: ['active', 'rehearsal', 'completed'] } }
+      ]
+    }).sort({ updatedAt: -1 });
+  }
+
   async getTrainerDashboard(companyId: string, gigId?: string) {
     const journeys = await this.getJourneysByCompanyAndGig(companyId, gigId);
 
