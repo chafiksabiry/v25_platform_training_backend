@@ -46,6 +46,54 @@ class AIService {
     return null;
   }
 
+  /**
+   * LLM outputs sometimes include invalid JSON escapes inside strings (e.g. \').
+   * This normalizes those sequences so JSON.parse can succeed.
+   */
+  private normalizeInvalidJsonEscapes(input: string): string {
+    let out = '';
+    let inString = false;
+    let i = 0;
+
+    while (i < input.length) {
+      const c = input[i];
+
+      if (c === '"' && (i === 0 || input[i - 1] !== '\\')) {
+        inString = !inString;
+        out += c;
+        i += 1;
+        continue;
+      }
+
+      if (inString && c === '\\') {
+        const n = input[i + 1];
+        if (!n) {
+          out += c;
+          i += 1;
+          continue;
+        }
+
+        const validSimpleEscapes = new Set(['"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u']);
+        if (!validSimpleEscapes.has(n)) {
+          // Common invalid pattern from models: \' -> '
+          if (n === "'") {
+            i += 1; // drop backslash, keep apostrophe on next iteration
+            continue;
+          }
+          // Preserve literal backslash safely by escaping it.
+          out += '\\\\';
+          i += 1;
+          continue;
+        }
+      }
+
+      out += c;
+      i += 1;
+    }
+
+    return out;
+  }
+
   public parseJson(raw: string, label: string = 'JSON'): any {
     try {
       let cleaned = raw.trim();
@@ -116,7 +164,8 @@ class AIService {
       // This is a bit risky but often necessary for large content blocks
       // We only do this if standard parsing fails initially
       try {
-        const parsed = JSON.parse(jsonString);
+        const normalizedJson = this.normalizeInvalidJsonEscapes(jsonString);
+        const parsed = JSON.parse(normalizedJson);
         // If the model returned a JSON payload as a JSON string, parse one more time.
         if (typeof parsed === 'string') {
           const nested = parsed.trim();
