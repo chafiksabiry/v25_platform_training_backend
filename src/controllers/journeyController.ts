@@ -214,3 +214,52 @@ export const listJourneysByGig = asyncHandler(async (req: AuthRequest, res: Resp
   });
   res.status(200).json({ success: true, data: journeys });
 });
+
+/** GET /training_journeys/rep-progress?repId=...&journeyId=... */
+export const getRepProgress = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const repId = String(req.query.repId || '').trim();
+  const journeyId = String(req.query.journeyId || '').trim();
+  if (!repId || !journeyId) {
+    res.status(400).json({ success: false, error: 'repId and journeyId are required' });
+    return;
+  }
+  const progress = await trainingJourneyService.getRepProgress(repId, journeyId);
+  res.status(200).json({ success: true, data: progress });
+});
+
+/** POST /training_journeys/rep-progress */
+export const upsertRepProgress = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const payload = req.body || {};
+  const updated = await trainingJourneyService.upsertRepProgress({
+    repId: String(payload.repId || ''),
+    journeyId: String(payload.journeyId || ''),
+    moduleId: payload.moduleId ? String(payload.moduleId) : undefined,
+    progress: typeof payload.progress === 'number' ? payload.progress : undefined,
+    status: payload.status,
+    completedSections: Array.isArray(payload.completedSections) ? payload.completedSections : undefined,
+    engagementScore: typeof payload.engagementScore === 'number' ? payload.engagementScore : undefined
+  });
+  res.status(200).json({ success: true, data: updated });
+});
+
+/** GET /training_journeys/rep/:repId/trainings-progress */
+export const getTrainingProgressByRep = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const repId = String(req.params.repId || '').trim();
+  if (!repId) {
+    res.status(400).json({ success: false, error: 'repId is required' });
+    return;
+  }
+  const rows = await trainingJourneyService.getTrainingProgressByRep(repId);
+  res.status(200).json({ success: true, data: rows });
+});
+
+/** GET /training_journeys/journey/:journeyId/reps-progress */
+export const getRepProgressByTraining = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const journeyId = String(req.params.journeyId || '').trim();
+  if (!journeyId) {
+    res.status(400).json({ success: false, error: 'journeyId is required' });
+    return;
+  }
+  const rows = await trainingJourneyService.getRepProgressByTraining(journeyId);
+  res.status(200).json({ success: true, data: rows });
+});

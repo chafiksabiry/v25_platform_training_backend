@@ -405,6 +405,101 @@ class TrainingJourneyService {
       aiInsights: []
     };
   }
+
+  async getRepProgress(repId: string, journeyId: string) {
+    const rid = String(repId || '').trim();
+    const jid = String(journeyId || '').trim();
+    if (!rid || !jid) return null;
+    return await RepProgress.findOne({ repId: rid, journeyId: jid });
+  }
+
+  async upsertRepProgress(input: {
+    repId: string;
+    journeyId: string;
+    moduleId?: string;
+    progress?: number;
+    status?: 'not_started' | 'in_progress' | 'completed';
+    completedSections?: string[];
+    engagementScore?: number;
+  }) {
+    const rid = String(input.repId || '').trim();
+    const jid = String(input.journeyId || '').trim();
+    if (!rid || !jid) throw new AppError('repId and journeyId are required', 400);
+
+    const journey = await TrainingJourney.findById(jid).select('_id modules');
+    const moduleTotal = Array.isArray((journey as any)?.modules) ? (journey as any).modules.length : 0;
+
+    const doc = await RepProgress.findOneAndUpdate(
+      { repId: rid, journeyId: jid },
+      {
+        $setOnInsert: {
+          repId: rid,
+          journeyId: jid,
+          moduleTotal,
+          moduleFinished: 0,
+          moduleInProgress: 0,
+          modules: new Map()
+        }
+      },
+      { new: true, upsert: true }
+    );
+
+    const hasModuleUpdate = !!input.moduleId;
+    if (hasModuleUpdate) {
+      const mId = String(input.moduleId || '').trim();
+      if (mId) {
+        const current = (doc.modules?.get(mId) as any) || {
+          moduleId: mId,
+          progress: 0,
+          status: 'not_started',
+          completedSections: [],
+          quizScores: []
+        };
+        const nextProgress = Math.max(0, Math.min(100, Math.round(Number(input.progress ?? current.progress ?? 0))));
+        const nextStatus =
+          input.status ||
+          (nextProgress >= 100 ? 'completed' : nextProgress > 0 ? 'in_progress' : 'not_started');
+        const nextCompletedSections = Array.isArray(input.completedSections)
+          ? input.completedSections.map((s) => String(s))
+          : current.completedSections || [];
+
+        doc.modules.set(mId, {
+          ...current,
+          moduleId: mId,
+          progress: nextProgress,
+          status: nextStatus,
+          completedSections: nextCompletedSections
+        });
+      }
+    }
+
+    if (typeof input.engagementScore === 'number' && Number.isFinite(input.engagementScore)) {
+      doc.engagementScore = Math.max(0, Math.min(100, Math.round(input.engagementScore)));
+    }
+    doc.lastAccessed = new Date();
+
+    const modules = Array.from(doc.modules.values()) as any[];
+    doc.moduleInProgress = modules.filter((m) => m?.status === 'in_progress').length;
+    doc.moduleFinished = modules.filter((m) => m?.status === 'completed' || Number(m?.progress) >= 100).length;
+    if (doc.moduleTotal > 0 && doc.moduleFinished >= doc.moduleTotal) {
+      doc.completedAt = new Date();
+    }
+
+    await doc.save();
+    return doc;
+  }
+
+  async getTrainingProgressByRep(repId: string) {
+    const rid = String(repId || '').trim();
+    if (!rid) return [];
+    return await RepProgress.find({ repId: rid }).sort({ updatedAt: -1 });
+  }
+
+  async getRepProgressByTraining(journeyId: string) {
+    const jid = String(journeyId || '').trim();
+    if (!jid) return [];
+    return await RepProgress.find({ journeyId: jid }).sort({ updatedAt: -1 });
+  }
 }
 
 export default new TrainingJourneyService();

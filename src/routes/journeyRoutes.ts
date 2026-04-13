@@ -13,6 +13,10 @@ router.get('/dashboard', journeyController.getTrainerDashboard);
 router.get('/trainer/companyId/:companyId', journeyController.getTrainerDashboard); // Legacy compatibility route
 router.get('/status/:status', journeyController.getJourneysByStatus);
 // Must be before /:id so static segments are not parsed as Mongo ids
+router.get('/rep-progress', journeyController.getRepProgress);
+router.post('/rep-progress', journeyController.upsertRepProgress);
+router.get('/rep/:repId/trainings-progress', journeyController.getTrainingProgressByRep);
+router.get('/journey/:journeyId/reps-progress', journeyController.getRepProgressByTraining);
 router.get('/gig/:gigId', journeyController.listJourneysByGig);
 router.get('/rep/:repId', journeyController.getJourneysForRep);
 router.get('/:id', journeyController.getJourneyById);
