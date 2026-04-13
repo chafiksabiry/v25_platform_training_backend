@@ -186,6 +186,20 @@ class AIService {
           // Continue to newline-escape fallback
         }
 
+        // Some models output a pseudo-JSON blob with escaped sequences everywhere:
+        // {\n  \"id\": 1, ...}
+        // Decode common escaped tokens and parse again.
+        try {
+          const decodedEscapes = jsonString
+            .replace(/\\"/g, '"')
+            .replace(/\\n/g, '\n')
+            .replace(/\\r/g, '\r')
+            .replace(/\\t/g, '\t');
+          return JSON.parse(decodedEscapes);
+        } catch (_decodedEscapesError) {
+          // Continue to aggressive fallback
+        }
+
         // Try one more aggressive cleanup: remove actual newlines inside strings
         // This is complex, so we'll just try to escape them if they look like they're inside quotes
         const escapedJson = jsonString.replace(/(?<=[:\s])"([\s\S]*?)"(?=[,\s\}\]])/g, (m, p1) => {
