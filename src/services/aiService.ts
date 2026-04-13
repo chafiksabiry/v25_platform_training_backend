@@ -78,8 +78,29 @@ class AIService {
         jsonString = balanced;
       } else {
         const balanced = this.extractBalancedJsonFragment(cleaned, '{');
-        if (!balanced) throw new Error(`JSON object tronqué ou mal formé (${label})`);
-        jsonString = balanced;
+        if (balanced) {
+          jsonString = balanced;
+        } else {
+          // Some models return a JSON object encoded as a quoted string:
+          // "{\"key\":\"value\"}". In that case, decode once then parse again.
+          const quotedObjectStart = cleaned.indexOf('"{');
+          const quotedArrayStart = cleaned.indexOf('"[');
+          const quotedStartCandidates = [quotedObjectStart, quotedArrayStart].filter((v) => v !== -1);
+          if (quotedStartCandidates.length === 0) {
+            throw new Error(`JSON object tronqué ou mal formé (${label})`);
+          }
+          const quotedStart = Math.min(...quotedStartCandidates);
+          const quotedEnd = cleaned.lastIndexOf('"');
+          if (quotedEnd <= quotedStart) {
+            throw new Error(`JSON stringifié tronqué ou mal formé (${label})`);
+          }
+          const quotedJson = cleaned.slice(quotedStart, quotedEnd + 1);
+          const decoded = JSON.parse(quotedJson);
+          if (typeof decoded !== 'string') {
+            throw new Error(`Format JSON stringifié inattendu (${label})`);
+          }
+          jsonString = decoded.trim();
+        }
       }
       
       // 1. Remove JS-style comments
@@ -95,7 +116,18 @@ class AIService {
       // This is a bit risky but often necessary for large content blocks
       // We only do this if standard parsing fails initially
       try {
-        return JSON.parse(jsonString);
+        const parsed = JSON.parse(jsonString);
+        // If the model returned a JSON payload as a JSON string, parse one more time.
+        if (typeof parsed === 'string') {
+          const nested = parsed.trim();
+          if (
+            (nested.startsWith('{') && nested.endsWith('}')) ||
+            (nested.startsWith('[') && nested.endsWith(']'))
+          ) {
+            return JSON.parse(nested);
+          }
+        }
+        return parsed;
       } catch (firstError) {
         // Some models return over-escaped JSON blocks like \"key\": \"value\"
         try {
