@@ -207,18 +207,37 @@ class AIService {
     console.log('🔄 All Claude models failed. Falling back to OpenAI...');
     try {
       const isJsonRequested = prompt.toLowerCase().includes('json') || (systemPrompt || '').toLowerCase().includes('json');
-      const response = await this.openai.chat.completions.create({
-        model: process.env.OPENAI_MODEL || 'gpt-4o',
-        response_format: isJsonRequested ? { type: 'json_object' } : undefined,
+      const model = process.env.OPENAI_MODEL || 'gpt-4o';
+      const basePayload: any = {
+        model,
         messages: [
           { role: 'system', content: systemPrompt || 'You are an expert training content creator.' },
           { role: 'user', content: prompt }
         ],
         temperature: 0.7
-      });
+      };
 
-      console.log('✅ Analysis successful with OpenAI fallback');
-      return response.choices[0]?.message?.content || '';
+      try {
+        const response = await this.openai.chat.completions.create({
+          ...basePayload,
+          response_format: isJsonRequested ? { type: 'json_object' } : undefined
+        });
+        console.log('✅ Analysis successful with OpenAI fallback');
+        return response.choices[0]?.message?.content || '';
+      } catch (openAiErr: any) {
+        const message = String(openAiErr?.message || '');
+        const unsupportedResponseFormat =
+          message.includes("Invalid parameter: 'response_format'") ||
+          message.includes('response_format') ||
+          openAiErr?.param === 'response_format';
+
+        if (!unsupportedResponseFormat) throw openAiErr;
+
+        console.warn('⚠️ OpenAI model does not support response_format=json_object. Retrying without response_format...');
+        const retryResponse = await this.openai.chat.completions.create(basePayload);
+        console.log('✅ Analysis successful with OpenAI fallback (without response_format)');
+        return retryResponse.choices[0]?.message?.content || '';
+      }
     } catch (openaiError: any) {
       console.error('❌ ALL AI models failed (Claude & OpenAI):', openaiError);
       throw new Error(`AI Analysis failed: ${lastError?.message || openaiError.message}`);
