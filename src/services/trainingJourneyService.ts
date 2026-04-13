@@ -182,7 +182,9 @@ class TrainingJourneyService {
     if (mongoose.Types.ObjectId.isValid(id)) {
       variants.push(new mongoose.Types.ObjectId(id).toString());
     }
-    return await TrainingJourney.find({ enrolledRepIds: { $in: [...new Set(variants)] } });
+    return await TrainingJourney.find({ enrolledRepIds: { $in: [...new Set(variants)] } })
+      .populate('gigId', '_id title status companyId')
+      .sort({ updatedAt: -1 });
   }
 
   async getAllAvailableJourneysForTrainees(): Promise<ITrainingJourney[]> {
@@ -234,14 +236,20 @@ class TrainingJourneyService {
       }
       return await TrainingJourney.find({
         $and: [{ $or: companyClauses }, { $or: gigClauses }]
-      }).sort({ updatedAt: -1 });
+      })
+        .populate('gigId', '_id title status companyId')
+        .sort({ updatedAt: -1 });
     }
 
-    return await TrainingJourney.find({ $or: companyClauses }).sort({ updatedAt: -1 });
+    return await TrainingJourney.find({ $or: companyClauses })
+      .populate('gigId', '_id title status companyId')
+      .sort({ updatedAt: -1 });
   }
 
   async getJourneysByGigId(gigId: string): Promise<ITrainingJourney[]> {
-    return await TrainingJourney.find({ gigId });
+    return await TrainingJourney.find({ gigId })
+      .populate('gigId', '_id title status companyId')
+      .sort({ updatedAt: -1 });
   }
 
   /** Trainee-facing: journeys tied to a gig and visible to enrolled reps (not draft/archived). */
@@ -254,12 +262,33 @@ class TrainingJourneyService {
       gigClauses.push({ gigId: new mongoose.Types.ObjectId(gid) });
     }
 
-    return await TrainingJourney.find({
+    const query = {
       $and: [
         { $or: gigClauses },
         { status: { $in: ['active', 'rehearsal', 'completed'] } }
       ]
-    }).sort({ updatedAt: -1 });
+    };
+    console.log('[TrainingJourneyService:getPublishedJourneysByGigId] query', {
+      requestedGigId: gid,
+      hasObjectIdVariant: mongoose.Types.ObjectId.isValid(gid),
+      statuses: ['active', 'rehearsal', 'completed']
+    });
+
+    const journeys = await TrainingJourney.find(query)
+      .populate('gigId', '_id title status companyId')
+      .sort({ updatedAt: -1 });
+
+    console.log('[TrainingJourneyService:getPublishedJourneysByGigId] result', {
+      requestedGigId: gid,
+      count: journeys.length,
+      sample: journeys.slice(0, 3).map((j: any) => ({
+        id: String(j?._id || ''),
+        title: j?.title || j?.name || '',
+        status: j?.status || '',
+        gigId: String((j as any)?.gigId?._id || (j as any)?.gigId || '')
+      }))
+    });
+    return journeys;
   }
 
   async getTrainerDashboard(companyId: string, gigId?: string) {

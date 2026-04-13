@@ -198,10 +198,19 @@ export const getJourneysForRep = asyncHandler(async (req: AuthRequest, res: Resp
 /** Used by rep dashboard / gig details — { success, data } (same shape as GigDetails.tsx). */
 export const listJourneysByGig = asyncHandler(async (req: AuthRequest, res: Response) => {
   const gigId = String(req.params.gigId || '').trim();
+  console.log('[journeyController:listJourneysByGig] incoming request', {
+    gigId,
+    userId: req.user?.id || null
+  });
   if (!gigId) {
     res.status(400).json({ success: false, error: 'gigId is required' });
     return;
   }
   const journeys = await trainingJourneyService.getPublishedJourneysByGigId(gigId);
+  console.log('[journeyController:listJourneysByGig] response payload', {
+    gigId,
+    count: journeys.length,
+    journeyIds: journeys.map((j: any) => String(j?._id || j?.id || ''))
+  });
   res.status(200).json({ success: true, data: journeys });
 });
