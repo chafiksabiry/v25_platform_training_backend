@@ -53,6 +53,73 @@ function countCompletedInTrackingSlides(track: Record<string, unknown> | null | 
     .length;
 }
 
+function normalizeSlideIdForTracking(raw: unknown): string {
+  if (raw == null) return '';
+  if (typeof raw === 'object' && raw !== null && '$oid' in raw) {
+    const s = String((raw as { $oid: string }).$oid).trim();
+    return mongoose.Types.ObjectId.isValid(s) ? new mongoose.Types.ObjectId(s).toString() : '';
+  }
+  const s = String(raw).trim();
+  return mongoose.Types.ObjectId.isValid(s) ? new mongoose.Types.ObjectId(s).toString() : '';
+}
+
+function getSlideStateFromTrackingMap(
+  rawSlides: unknown,
+  slideIdHex: string
+): { completed?: boolean } | undefined {
+  if (!slideIdHex || !rawSlides || typeof rawSlides !== 'object') return undefined;
+  if (rawSlides instanceof Map) {
+    return rawSlides.get(slideIdHex) as { completed?: boolean } | undefined;
+  }
+  return (rawSlides as Record<string, { completed?: boolean }>)[slideIdHex];
+}
+
+function trackingSlidesMapHasEntries(rawSlides: unknown): boolean {
+  if (!rawSlides || typeof rawSlides !== 'object') return false;
+  if (rawSlides instanceof Map) return rawSlides.size > 0;
+  return Object.keys(rawSlides as object).length > 0;
+}
+
+/**
+ * Index 0-based de la slide à afficher au « Continue » : première slide non complétée,
+ * ou dernière slide si tout est complété ; sinon repli slideIndex legacy / engagementScore.
+ */
+function resolveCurrentSlideIndex(
+  doc: { presentation?: { slides?: unknown } } | null | undefined,
+  tr: Record<string, unknown> | null | undefined,
+  pr: { engagementScore?: number } | null | undefined,
+  slidesTotal: number
+): number {
+  if (slidesTotal <= 0) return 0;
+  const lastIdx = slidesTotal - 1;
+
+  if (tr && typeof tr.slideIndex === 'number' && Number.isFinite(tr.slideIndex)) {
+    const si = Math.floor(tr.slideIndex);
+    return Math.min(lastIdx, Math.max(0, si));
+  }
+
+  const slides = doc?.presentation?.slides;
+  if (Array.isArray(slides) && slides.length > 0 && tr && trackingSlidesMapHasEntries(tr.slides)) {
+    const rawMap = tr.slides as unknown;
+    for (let i = 0; i < slides.length; i++) {
+      const sid = normalizeSlideIdForTracking((slides[i] as { _id?: unknown })?._id);
+      const state = sid ? getSlideStateFromTrackingMap(rawMap, sid) : undefined;
+      if (!state || state.completed !== true) {
+        return Math.min(lastIdx, i);
+      }
+    }
+    return lastIdx;
+  }
+
+  if (pr && typeof pr.engagementScore === 'number' && Number.isFinite(pr.engagementScore)) {
+    const eng = Math.max(0, Math.min(100, Math.round(pr.engagementScore)));
+    const approx = Math.round((eng / 100) * slidesTotal);
+    return Math.min(lastIdx, Math.max(0, approx - 1));
+  }
+
+  return 0;
+}
+
 export type RepSlideProgressJourneyLine = {
   journeyId: string;
   journeyTitle: string;
@@ -60,6 +127,8 @@ export type RepSlideProgressJourneyLine = {
   slidesTotal: number;
   /** slidesSeen / slidesTotal (0 si pas de slides) */
   ratio: number;
+  /** Index 0-based dans `presentation.slides` pour reprendre le parcours */
+  currentSlideIndex: number;
 };
 
 export type RepSlideProgressSummary = {
@@ -681,12 +750,18 @@ class TrainingJourneyService {
       }
 
       const ratio = slidesTotal > 0 ? slidesSeen / slidesTotal : 0;
+      const pr = progressByJourney.get(jid) ?? null;
+      const currentSlideIndex =
+        slidesTotal > 0
+          ? resolveCurrentSlideIndex(doc, tr as Record<string, unknown> | undefined, pr, slidesTotal)
+          : 0;
       journeys.push({
         journeyId: jid,
         journeyTitle: String(doc?.title || 'Formation'),
         slidesSeen,
         slidesTotal,
-        ratio
+        ratio,
+        currentSlideIndex
       });
     }
 
