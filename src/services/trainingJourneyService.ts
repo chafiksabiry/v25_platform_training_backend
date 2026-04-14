@@ -9,6 +9,14 @@ import Rep from '../models/Rep';
 import { AppError } from '../middleware/errorHandler';
 import { ImageGenerationService } from './imageGenerationService';
 
+function requireObjectId(raw: unknown, label: string): mongoose.Types.ObjectId {
+  const s = String(raw ?? '').trim();
+  if (!mongoose.Types.ObjectId.isValid(s)) {
+    throw new AppError(`Invalid ${label} (expected a Mongo ObjectId)`, 400);
+  }
+  return new mongoose.Types.ObjectId(s);
+}
+
 class TrainingJourneyService {
   private ensureObjectIds(journey: any): void {
     if (!journey.modules) return;
@@ -515,9 +523,8 @@ class TrainingJourneyService {
     sessionId?: string;
     meta?: Record<string, unknown>;
   }) {
-    const rid = String(input.repId || '').trim();
-    const jid = String(input.journeyId || '').trim();
-    if (!rid || !jid) throw new AppError('repId and journeyId are required', 400);
+    const repOid = requireObjectId(input.repId, 'repId');
+    const journeyOid = requireObjectId(input.journeyId, 'journeyId');
 
     const ev = String(input.event || '').trim() as RepTrainingTrackingEventKind;
     if (!REP_TRAINING_TRACKING_EVENTS.includes(ev)) {
@@ -525,11 +532,13 @@ class TrainingJourneyService {
     }
 
     const $set: Record<string, unknown> = {
-      repId: rid,
-      journeyId: jid,
+      repId: repOid,
+      journeyId: journeyOid,
       event: ev
     };
-    if (input.moduleId) $set.moduleId = String(input.moduleId).trim();
+    if (input.moduleId != null && String(input.moduleId).trim()) {
+      $set.moduleId = requireObjectId(input.moduleId, 'moduleId');
+    }
     if (typeof input.slideIndex === 'number' && Number.isFinite(input.slideIndex) && input.slideIndex >= 0) {
       $set.slideIndex = Math.floor(input.slideIndex);
     }
@@ -542,18 +551,23 @@ class TrainingJourneyService {
     }
 
     return await RepTrainingTracking.findOneAndUpdate(
-      { repId: rid, journeyId: jid },
+      { repId: repOid, journeyId: journeyOid },
       { $set },
       { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
     );
   }
 
   async listTrainingTrackingEvents(opts: { repId: string; journeyId: string; limit?: number; skip?: number }) {
-    const rid = String(opts.repId || '').trim();
-    const jid = String(opts.journeyId || '').trim();
-    if (!rid || !jid) throw new AppError('repId and journeyId are required', 400);
-    const doc = await RepTrainingTracking.findOne({ repId: rid, journeyId: jid }).lean();
+    const repOid = requireObjectId(opts.repId, 'repId');
+    const journeyOid = requireObjectId(opts.journeyId, 'journeyId');
+    const doc = await RepTrainingTracking.findOne({ repId: repOid, journeyId: journeyOid }).lean();
     return doc ? [doc] : [];
+  }
+
+  /** Tous les suivis snapshot pour un rep (une ligne par formation suivie). */
+  async listTrainingTrackingByRep(repId: string) {
+    const repOid = requireObjectId(repId, 'repId');
+    return await RepTrainingTracking.find({ repId: repOid }).sort({ updatedAt: -1 }).lean();
   }
 }
 

@@ -264,7 +264,7 @@ export const getRepProgressByTraining = asyncHandler(async (req: AuthRequest, re
   res.status(200).json({ success: true, data: rows });
 });
 
-/** POST /training_journeys/tracking-events — append-only activity log */
+/** POST /training_journeys/tracking-events — upsert snapshot (repId + journeyId en ObjectId côté DB) */
 export const postTrainingTrackingEvent = asyncHandler(async (req: AuthRequest, res: Response) => {
   const payload = req.body || {};
   const doc = await trainingJourneyService.recordTrainingTrackingEvent({
@@ -291,5 +291,16 @@ export const listTrainingTrackingEvents = asyncHandler(async (req: AuthRequest, 
   const limit = req.query.limit != null ? Number(req.query.limit) : undefined;
   const skip = req.query.skip != null ? Number(req.query.skip) : undefined;
   const rows = await trainingJourneyService.listTrainingTrackingEvents({ repId, journeyId, limit, skip });
+  res.status(200).json({ success: true, data: rows });
+});
+
+/** GET /training_journeys/rep/:repId/training-tracking — toutes les formations suivies par ce rep */
+export const listTrainingTrackingByRep = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const repId = String(req.params.repId || '').trim();
+  if (!repId) {
+    res.status(400).json({ success: false, error: 'repId is required' });
+    return;
+  }
+  const rows = await trainingJourneyService.listTrainingTrackingByRep(repId);
   res.status(200).json({ success: true, data: rows });
 });

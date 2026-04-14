@@ -1,8 +1,10 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema, Document, Types } from 'mongoose';
 
 /**
  * Dernière position / dernier événement de suivi pour un couple rep + parcours.
- * Un seul document par (repId, journeyId), mis à jour (upsert) — pas un historique par slide.
+ * Un rep peut avoir plusieurs documents (un par formation / journeyId).
+ * Un seul document par (repId, journeyId), mis à jour (upsert).
+ * repId, journeyId et moduleId sont stockés en ObjectId BSON (pas en string).
  * Pour l’agrégat métier (modules, scores), voir {@link RepProgress}.
  */
 export const REP_TRAINING_TRACKING_EVENTS = [
@@ -19,9 +21,9 @@ export const REP_TRAINING_TRACKING_EVENTS = [
 export type RepTrainingTrackingEventKind = (typeof REP_TRAINING_TRACKING_EVENTS)[number];
 
 export interface IRepTrainingTracking extends Document {
-  repId: string;
-  journeyId: string;
-  moduleId?: string;
+  repId: Types.ObjectId;
+  journeyId: Types.ObjectId;
+  moduleId?: Types.ObjectId;
   slideIndex?: number;
   event: RepTrainingTrackingEventKind;
   durationMs?: number;
@@ -34,16 +36,16 @@ export interface IRepTrainingTracking extends Document {
 const repTrainingTrackingSchema = new Schema<IRepTrainingTracking>(
   {
     repId: {
-      type: String,
+      type: Schema.Types.ObjectId,
       required: true,
       ref: 'Rep'
     },
     journeyId: {
-      type: String,
+      type: Schema.Types.ObjectId,
       required: true,
       ref: 'TrainingJourney'
     },
-    moduleId: { type: String },
+    moduleId: { type: Schema.Types.ObjectId },
     slideIndex: { type: Number, min: 0 },
     event: {
       type: String,
