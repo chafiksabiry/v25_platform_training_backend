@@ -571,10 +571,11 @@ class TrainingJourneyService {
   }
 
   /**
-   * Progression globale slides : moyenne des ratios par formation.
-   * Ex. formation A 3/15, formation B 2/7 → (3/15 + 2/7) / 2 ≈ 24 % (arrondi).
+   * Moyenne des ratios slides / formation.
+   * Si `gigId` est fourni : uniquement les formations **publiées** (active / rehearsal / completed) rattachées à ce gig.
+   * Sinon : union des parcours présents dans le tracking ou rep_progress (comportement historique).
    */
-  async getRepSlideProgressSummary(repId: string): Promise<RepSlideProgressSummary> {
+  async getRepSlideProgressSummary(repId: string, gigId?: string): Promise<RepSlideProgressSummary> {
     const empty = (): RepSlideProgressSummary => ({
       trainingCount: 0,
       journeys: [],
@@ -588,37 +589,12 @@ class TrainingJourneyService {
     if (!rid || !mongoose.Types.ObjectId.isValid(rid)) return empty();
 
     const repOid = new mongoose.Types.ObjectId(rid);
+    const gid = String(gigId || '').trim();
 
     const [trackings, progresses] = await Promise.all([
       RepTrainingTracking.find({ repId: repOid }).lean(),
       RepProgress.find({ repId: rid }).lean()
     ]);
-
-    const journeyIds = new Set<string>();
-    for (const t of trackings) {
-      if (t?.journeyId) journeyIds.add(String(t.journeyId));
-    }
-    for (const p of progresses) {
-      if (p?.journeyId) journeyIds.add(String(p.journeyId));
-    }
-
-    if (journeyIds.size === 0) {
-      const e = empty();
-      e.formulaHuman = 'Aucune formation avec suivi pour ce rep.';
-      return e;
-    }
-
-    const oids = [...journeyIds]
-      .filter((id) => mongoose.Types.ObjectId.isValid(id))
-      .map((id) => new mongoose.Types.ObjectId(id));
-    const journeyDocs = await TrainingJourney.find({ _id: { $in: oids } })
-      .select('title presentation')
-      .lean();
-
-    const jMap = new Map<string, (typeof journeyDocs)[0]>();
-    for (const doc of journeyDocs) {
-      jMap.set(String(doc._id), doc);
-    }
 
     const trackingByJourney = new Map<string, (typeof trackings)[0]>();
     for (const t of trackings) {
@@ -629,9 +605,51 @@ class TrainingJourneyService {
       if (p?.journeyId) progressByJourney.set(String(p.journeyId), p);
     }
 
+    type JourneyDocLite = { _id: unknown; title?: unknown; presentation?: { slides?: unknown } };
+    let journeyDocs: JourneyDocLite[] = [];
+
+    if (gid) {
+      const published = await this.getPublishedJourneysByGigId(gid);
+      journeyDocs = published.map((j: any) => ({
+        _id: j._id,
+        title: j.title,
+        presentation: j.presentation
+      }));
+      if (journeyDocs.length === 0) {
+        const e = empty();
+        e.formulaHuman = 'Aucune formation publiée pour ce gig.';
+        return e;
+      }
+    } else {
+      const journeyIds = new Set<string>();
+      for (const t of trackings) {
+        if (t?.journeyId) journeyIds.add(String(t.journeyId));
+      }
+      for (const p of progresses) {
+        if (p?.journeyId) journeyIds.add(String(p.journeyId));
+      }
+
+      if (journeyIds.size === 0) {
+        const e = empty();
+        e.formulaHuman = 'Aucune formation avec suivi pour ce rep.';
+        return e;
+      }
+
+      const oids = [...journeyIds]
+        .filter((id) => mongoose.Types.ObjectId.isValid(id))
+        .map((id) => new mongoose.Types.ObjectId(id));
+      const found = await TrainingJourney.find({ _id: { $in: oids } }).select('title presentation').lean();
+      journeyDocs = found as JourneyDocLite[];
+    }
+
+    const jMap = new Map<string, JourneyDocLite>();
+    for (const doc of journeyDocs) {
+      jMap.set(String(doc._id), doc);
+    }
+
     const journeys: RepSlideProgressJourneyLine[] = [];
 
-    for (const jid of [...journeyIds].sort()) {
+    for (const jid of [...jMap.keys()].sort()) {
       const doc = jMap.get(jid) ?? null;
       let slidesTotal = countSlidesOnJourney(doc);
       const tr = trackingByJourney.get(jid);

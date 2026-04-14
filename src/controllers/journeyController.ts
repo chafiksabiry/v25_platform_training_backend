@@ -260,7 +260,8 @@ export const getRepSlideProgressSummary = asyncHandler(async (req: AuthRequest, 
     res.status(400).json({ success: false, error: 'repId is required' });
     return;
   }
-  const summary = await trainingJourneyService.getRepSlideProgressSummary(repId);
+  const gigId = req.query.gigId != null ? String(req.query.gigId).trim() : '';
+  const summary = await trainingJourneyService.getRepSlideProgressSummary(repId, gigId || undefined);
   res.status(200).json({ success: true, data: summary });
 });
 
