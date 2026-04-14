@@ -1,8 +1,9 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 /**
- * Granular training activity events (append-only).
- * Complements {@link RepProgress}, which stores rolled-up state per rep + journey.
+ * Dernière position / dernier événement de suivi pour un couple rep + parcours.
+ * Un seul document par (repId, journeyId), mis à jour (upsert) — pas un historique par slide.
+ * Pour l’agrégat métier (modules, scores), voir {@link RepProgress}.
  */
 export const REP_TRAINING_TRACKING_EVENTS = [
   'journey_open',
@@ -60,8 +61,8 @@ const repTrainingTrackingSchema = new Schema<IRepTrainingTracking>(
   }
 );
 
-repTrainingTrackingSchema.index({ repId: 1, journeyId: 1, createdAt: -1 });
-repTrainingTrackingSchema.index({ journeyId: 1, createdAt: -1 });
-repTrainingTrackingSchema.index({ sessionId: 1, createdAt: -1 }, { sparse: true });
+repTrainingTrackingSchema.index({ repId: 1, journeyId: 1 }, { unique: true });
+repTrainingTrackingSchema.index({ journeyId: 1 });
+repTrainingTrackingSchema.index({ sessionId: 1 }, { sparse: true });
 
 export default mongoose.model<IRepTrainingTracking>('RepTrainingTracking', repTrainingTrackingSchema);
