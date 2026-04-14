@@ -253,6 +253,17 @@ export const getTrainingProgressByRep = asyncHandler(async (req: AuthRequest, re
   res.status(200).json({ success: true, data: rows });
 });
 
+/** GET /training_journeys/rep/:repId/slide-progress-summary — moyenne (slides vus / slides total) par formation */
+export const getRepSlideProgressSummary = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const repId = String(req.params.repId || '').trim();
+  if (!repId) {
+    res.status(400).json({ success: false, error: 'repId is required' });
+    return;
+  }
+  const summary = await trainingJourneyService.getRepSlideProgressSummary(repId);
+  res.status(200).json({ success: true, data: summary });
+});
+
 /** GET /training_journeys/journey/:journeyId/reps-progress */
 export const getRepProgressByTraining = asyncHandler(async (req: AuthRequest, res: Response) => {
   const journeyId = String(req.params.journeyId || '').trim();

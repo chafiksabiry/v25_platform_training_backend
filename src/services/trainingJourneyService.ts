@@ -17,6 +17,34 @@ function requireObjectId(raw: unknown, label: string): mongoose.Types.ObjectId {
   return new mongoose.Types.ObjectId(s);
 }
 
+function countSlidesOnJourney(j: { presentation?: { slides?: unknown } } | null | undefined): number {
+  const slides = j?.presentation?.slides;
+  return Array.isArray(slides) ? slides.length : 0;
+}
+
+export type RepSlideProgressJourneyLine = {
+  journeyId: string;
+  journeyTitle: string;
+  slidesSeen: number;
+  slidesTotal: number;
+  /** slidesSeen / slidesTotal (0 si pas de slides) */
+  ratio: number;
+};
+
+export type RepSlideProgressSummary = {
+  /** Nombre de formations prises en compte (union tracking + rep_progress) */
+  trainingCount: number;
+  journeys: RepSlideProgressJourneyLine[];
+  /** Somme des ratios : ex. 3/15 + 2/7 */
+  sumOfRatios: number;
+  /** Moyenne arithmétique des ratios (score entre 0 et 1) */
+  averageRatio: number;
+  /** Math.round(averageRatio * 100), plafonné à 100 */
+  overallPercent: number;
+  /** Texte explicite pour l’UI */
+  formulaHuman: string;
+};
+
 class TrainingJourneyService {
   private ensureObjectIds(journey: any): void {
     if (!journey.modules) return;
@@ -505,6 +533,120 @@ class TrainingJourneyService {
     const rid = String(repId || '').trim();
     if (!rid) return [];
     return await RepProgress.find({ repId: rid }).sort({ updatedAt: -1 });
+  }
+
+  /**
+   * Progression globale slides : moyenne des ratios par formation.
+   * Ex. formation A 3/15, formation B 2/7 → (3/15 + 2/7) / 2 ≈ 24 % (arrondi).
+   */
+  async getRepSlideProgressSummary(repId: string): Promise<RepSlideProgressSummary> {
+    const empty = (): RepSlideProgressSummary => ({
+      trainingCount: 0,
+      journeys: [],
+      sumOfRatios: 0,
+      averageRatio: 0,
+      overallPercent: 0,
+      formulaHuman: ''
+    });
+
+    const rid = String(repId || '').trim();
+    if (!rid || !mongoose.Types.ObjectId.isValid(rid)) return empty();
+
+    const repOid = new mongoose.Types.ObjectId(rid);
+
+    const [trackings, progresses] = await Promise.all([
+      RepTrainingTracking.find({ repId: repOid }).lean(),
+      RepProgress.find({ repId: rid }).lean()
+    ]);
+
+    const journeyIds = new Set<string>();
+    for (const t of trackings) {
+      if (t?.journeyId) journeyIds.add(String(t.journeyId));
+    }
+    for (const p of progresses) {
+      if (p?.journeyId) journeyIds.add(String(p.journeyId));
+    }
+
+    if (journeyIds.size === 0) {
+      const e = empty();
+      e.formulaHuman = 'Aucune formation avec suivi pour ce rep.';
+      return e;
+    }
+
+    const oids = [...journeyIds]
+      .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+    const journeyDocs = await TrainingJourney.find({ _id: { $in: oids } })
+      .select('title presentation')
+      .lean();
+
+    const jMap = new Map<string, (typeof journeyDocs)[0]>();
+    for (const doc of journeyDocs) {
+      jMap.set(String(doc._id), doc);
+    }
+
+    const trackingByJourney = new Map<string, (typeof trackings)[0]>();
+    for (const t of trackings) {
+      if (t?.journeyId) trackingByJourney.set(String(t.journeyId), t);
+    }
+    const progressByJourney = new Map<string, (typeof progresses)[0]>();
+    for (const p of progresses) {
+      if (p?.journeyId) progressByJourney.set(String(p.journeyId), p);
+    }
+
+    const journeys: RepSlideProgressJourneyLine[] = [];
+
+    for (const jid of [...journeyIds].sort()) {
+      const doc = jMap.get(jid) ?? null;
+      let slidesTotal = countSlidesOnJourney(doc);
+      const tr = trackingByJourney.get(jid);
+      const metaCount = tr?.meta && typeof (tr.meta as { slideCount?: unknown }).slideCount === 'number'
+        ? Math.floor(Number((tr.meta as { slideCount: number }).slideCount))
+        : 0;
+      if (slidesTotal <= 0 && metaCount > 0) slidesTotal = metaCount;
+
+      let slidesSeen = 0;
+      if (slidesTotal > 0) {
+        if (tr && typeof tr.slideIndex === 'number' && tr.slideIndex >= 0) {
+          slidesSeen = Math.min(Math.floor(tr.slideIndex) + 1, slidesTotal);
+        } else {
+          const pr = progressByJourney.get(jid);
+          if (pr && typeof pr.engagementScore === 'number' && Number.isFinite(pr.engagementScore)) {
+            const eng = Math.max(0, Math.min(100, Math.round(pr.engagementScore)));
+            slidesSeen = Math.min(Math.round((eng / 100) * slidesTotal), slidesTotal);
+          }
+        }
+      }
+
+      const ratio = slidesTotal > 0 ? slidesSeen / slidesTotal : 0;
+      journeys.push({
+        journeyId: jid,
+        journeyTitle: String(doc?.title || 'Formation'),
+        slidesSeen,
+        slidesTotal,
+        ratio
+      });
+    }
+
+    const trainingCount = journeys.length;
+    const sumOfRatios = journeys.reduce((acc, j) => acc + j.ratio, 0);
+    const averageRatio = trainingCount > 0 ? sumOfRatios / trainingCount : 0;
+    const overallPercent = Math.min(100, Math.round(averageRatio * 100));
+
+    const parts = journeys.map((j) => (j.slidesTotal > 0 ? `${j.slidesSeen}/${j.slidesTotal}` : '0/0'));
+    const formulaHuman =
+      trainingCount === 0
+        ? ''
+        : `(${parts.join(' + ')}) ÷ ${trainingCount} ≈ ${overallPercent} % — moyenne des avancements slides par formation`;
+
+    return {
+      trainingCount,
+      journeys,
+      sumOfRatios,
+      averageRatio,
+      overallPercent,
+      formulaHuman
+    };
   }
 
   async getRepProgressByTraining(journeyId: string) {
