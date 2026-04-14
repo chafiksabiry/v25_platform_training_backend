@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import Gig from '../models/Gig';
 import Document from '../models/Document';
 import TrainingJourney, { ITrainingJourney } from '../models/TrainingJourney';
@@ -329,6 +330,7 @@ class GigTrainingGeneratorService {
       );
       const allSlides = mergedSlides.map((s, i) => ({
         ...s,
+        _id: new mongoose.Types.ObjectId(),
         id: i + 1,
         imageDescription: '',
         illustrationUrl: '',

@@ -22,6 +22,37 @@ function countSlidesOnJourney(j: { presentation?: { slides?: unknown } } | null 
   return Array.isArray(slides) ? slides.length : 0;
 }
 
+/** Assigne un _id Mongo à chaque slide qui n’en a pas (présentation persistée). */
+export function ensurePresentationSlideIdsOnSlides(slides: unknown[] | null | undefined): boolean {
+  if (!Array.isArray(slides)) return false;
+  let changed = false;
+  for (const slide of slides) {
+    if (!slide || typeof slide !== 'object') continue;
+    const s = slide as { _id?: unknown; slideId?: unknown };
+    const raw = s._id ?? s.slideId;
+    const ok = raw != null && mongoose.Types.ObjectId.isValid(String(raw));
+    if (!ok) {
+      (slide as { _id: mongoose.Types.ObjectId })._id = new mongoose.Types.ObjectId();
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function countCompletedInTrackingSlides(track: Record<string, unknown> | null | undefined): number {
+  const raw = track?.slides as unknown;
+  if (!raw || typeof raw !== 'object') return 0;
+  if (raw instanceof Map) {
+    let n = 0;
+    for (const v of raw.values()) {
+      if (v && typeof v === 'object' && (v as { completed?: boolean }).completed === true) n += 1;
+    }
+    return n;
+  }
+  return Object.values(raw as Record<string, { completed?: boolean }>).filter((v) => v?.completed === true)
+    .length;
+}
+
 export type RepSlideProgressJourneyLine = {
   journeyId: string;
   journeyTitle: string;
@@ -148,7 +179,11 @@ class TrainingJourneyService {
 
   async saveJourney(journeyData: Partial<ITrainingJourney>): Promise<ITrainingJourney> {
     this.ensureObjectIds(journeyData);
-    
+    const pres = (journeyData as { presentation?: { slides?: unknown[] } }).presentation;
+    if (pres?.slides && Array.isArray(pres.slides)) {
+      ensurePresentationSlideIdsOnSlides(pres.slides);
+    }
+
     // Automatically populate images if descriptions are present
     await this.populateImages(journeyData);
 
@@ -600,15 +635,24 @@ class TrainingJourneyService {
       const doc = jMap.get(jid) ?? null;
       let slidesTotal = countSlidesOnJourney(doc);
       const tr = trackingByJourney.get(jid);
-      const metaCount = tr?.meta && typeof (tr.meta as { slideCount?: unknown }).slideCount === 'number'
-        ? Math.floor(Number((tr.meta as { slideCount: number }).slideCount))
-        : 0;
+      const trLegacy = tr as Record<string, unknown> | undefined;
+      const metaCount =
+        trLegacy?.meta &&
+        typeof trLegacy.meta === 'object' &&
+        trLegacy.meta !== null &&
+        typeof (trLegacy.meta as { slideCount?: unknown }).slideCount === 'number'
+          ? Math.floor(Number((trLegacy.meta as { slideCount: number }).slideCount))
+          : 0;
       if (slidesTotal <= 0 && metaCount > 0) slidesTotal = metaCount;
 
       let slidesSeen = 0;
       if (slidesTotal > 0) {
-        if (tr && typeof tr.slideIndex === 'number' && tr.slideIndex >= 0) {
-          slidesSeen = Math.min(Math.floor(tr.slideIndex) + 1, slidesTotal);
+        const completedFromMap = tr ? countCompletedInTrackingSlides(tr as Record<string, unknown>) : 0;
+        if (completedFromMap > 0) {
+          slidesSeen = Math.min(completedFromMap, slidesTotal);
+        } else if (trLegacy && typeof trLegacy.slideIndex === 'number') {
+          const si = trLegacy.slideIndex;
+          if (si >= 0) slidesSeen = Math.min(Math.floor(si) + 1, slidesTotal);
         } else {
           const pr = progressByJourney.get(jid);
           if (pr && typeof pr.engagementScore === 'number' && Number.isFinite(pr.engagementScore)) {
@@ -659,11 +703,12 @@ class TrainingJourneyService {
     repId: string;
     journeyId: string;
     moduleId?: string;
+    slideId?: string;
     slideIndex?: number;
     event: RepTrainingTrackingEventKind | string;
     durationMs?: number;
-    sessionId?: string;
-    meta?: Record<string, unknown>;
+    /** défaut true : marque la slide comme vue / complétée dans `slides` */
+    completed?: boolean;
   }) {
     const repOid = requireObjectId(input.repId, 'repId');
     const journeyOid = requireObjectId(input.journeyId, 'journeyId');
@@ -673,23 +718,43 @@ class TrainingJourneyService {
       throw new AppError(`event must be one of: ${REP_TRAINING_TRACKING_EVENTS.join(', ')}`, 400);
     }
 
+    let slideKey: string;
+    const sid = input.slideId != null ? String(input.slideId).trim() : '';
+    if (sid && mongoose.Types.ObjectId.isValid(sid)) {
+      slideKey = new mongoose.Types.ObjectId(sid).toString();
+    } else if (typeof input.slideIndex === 'number' && Number.isFinite(input.slideIndex) && input.slideIndex >= 0) {
+      const journey = await TrainingJourney.findById(journeyOid).select('presentation');
+      const slides = (journey?.presentation as { slides?: unknown[] } | undefined)?.slides;
+      if (!Array.isArray(slides) || slides.length === 0) {
+        throw new AppError('Journey has no slides', 400);
+      }
+      const changed = ensurePresentationSlideIdsOnSlides(slides as unknown[]);
+      if (changed && journey) {
+        journey.markModified('presentation');
+        await journey.save();
+      }
+      const idx = Math.min(Math.floor(input.slideIndex), slides.length - 1);
+      const slide = slides[idx] as { _id?: unknown };
+      if (!slide?._id || !mongoose.Types.ObjectId.isValid(String(slide._id))) {
+        throw new AppError('Could not resolve slide id', 400);
+      }
+      slideKey = new mongoose.Types.ObjectId(String(slide._id)).toString();
+    } else {
+      throw new AppError('slideId (ObjectId) or slideIndex is required', 400);
+    }
+
+    const completed = input.completed !== false;
     const $set: Record<string, unknown> = {
       repId: repOid,
       journeyId: journeyOid,
-      event: ev
+      event: ev,
+      [`slides.${slideKey}`]: { completed }
     };
     if (input.moduleId != null && String(input.moduleId).trim()) {
       $set.moduleId = requireObjectId(input.moduleId, 'moduleId');
     }
-    if (typeof input.slideIndex === 'number' && Number.isFinite(input.slideIndex) && input.slideIndex >= 0) {
-      $set.slideIndex = Math.floor(input.slideIndex);
-    }
     if (typeof input.durationMs === 'number' && Number.isFinite(input.durationMs) && input.durationMs >= 0) {
       $set.durationMs = Math.floor(input.durationMs);
-    }
-    if (input.sessionId) $set.sessionId = String(input.sessionId).trim();
-    if (input.meta && typeof input.meta === 'object' && !Array.isArray(input.meta)) {
-      $set.meta = input.meta;
     }
 
     return await RepTrainingTracking.findOneAndUpdate(

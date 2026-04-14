@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import documentParserService from './documentParserService';
 import aiService from './aiService';
 import { AppError } from '../middleware/errorHandler';
@@ -609,6 +610,7 @@ SORTIE : uniquement un objet JSON valide {"slides":[...]} — aucun markdown, au
       );
       const allSlides = withoutQuizSlides.map((s, i) => ({
         ...s,
+        _id: new mongoose.Types.ObjectId(),
         id: i + 1,
         imageDescription: '',
         illustrationUrl: '',

@@ -282,11 +282,11 @@ export const postTrainingTrackingEvent = asyncHandler(async (req: AuthRequest, r
     repId: String(payload.repId || ''),
     journeyId: String(payload.journeyId || ''),
     moduleId: payload.moduleId != null ? String(payload.moduleId) : undefined,
+    slideId: payload.slideId != null ? String(payload.slideId) : undefined,
     slideIndex: typeof payload.slideIndex === 'number' ? payload.slideIndex : undefined,
     event: String(payload.event || ''),
     durationMs: typeof payload.durationMs === 'number' ? payload.durationMs : undefined,
-    sessionId: payload.sessionId != null ? String(payload.sessionId) : undefined,
-    meta: payload.meta && typeof payload.meta === 'object' ? payload.meta : undefined
+    completed: typeof payload.completed === 'boolean' ? payload.completed : undefined
   });
   res.status(201).json({ success: true, data: doc });
 });
