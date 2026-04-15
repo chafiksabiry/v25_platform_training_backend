@@ -133,11 +133,25 @@ class DocumentAnalysisService {
     try {
       console.log('🚀 Starting Multiphase Program Generation (program-generator method)');
       const analysisContext = typeof analysis === 'string' ? analysis : JSON.stringify(analysis);
+      const prefs =
+        analysis && typeof analysis === 'object' ? (analysis as any).generationPreferences : null;
+      const preferenceInstructions = prefs
+        ? `
+        CONTRAINTES DE GENERATION A RESPECTER STRICTEMENT:
+        - Duree cible choisie: ${prefs.selectedDuration || 'non specifiee'}
+        - Methodologie choisie: ${prefs.methodologyName || 'non specifiee'}
+        - Description methodologie: ${prefs.methodologyDescription || 'non specifiee'}
+        - Composants methodologie: ${(prefs.methodologyComponents || []).join(', ') || 'non specifies'}
+        - Titre formation choisi: ${prefs.trainingTitle || 'non specifie'}
+        - Description formation choisie: ${prefs.trainingDescription || 'non specifiee'}
+        IMPORTANT: Le plan genere doit suivre cette duree cible et cette methodologie.`
+        : '';
       
       // ── Call 1: Program metadata + module plan (no sessions yet) ──────────
       const metaPrompt = `Tu es un expert en conception pédagogique.
         CONTEXTE D'ANALYSE:
         ${analysisContext.slice(0, 5000)}
+        ${preferenceInstructions}
 
         Génère UNIQUEMENT les métadonnées du programme et la liste des modules (sans détailler les sessions).
         Réponds en JSON valide uniquement, sans markdown :

@@ -329,14 +329,18 @@ export const generateProgramFromAnalysis = async (
   next: NextFunction
 ) => {
   try {
-    const { analysis } = req.body;
+    const { analysis, generationPreferences } = req.body;
     if (!analysis) {
       return res.status(400).json({ error: 'Analysis data is required' });
     }
 
     const anthropicKey = req.headers['x-anthropic-key'] as string;
+    const enrichedAnalysis =
+      generationPreferences && typeof generationPreferences === 'object'
+        ? { ...analysis, generationPreferences }
+        : analysis;
 
-    const program = await documentAnalysisService.generateTrainingProgram(analysis, anthropicKey);
+    const program = await documentAnalysisService.generateTrainingProgram(enrichedAnalysis, anthropicKey);
     const presentation = await documentAnalysisService.generatePresentation(program, anthropicKey);
 
     const parseDuration = (val: any): number => {
