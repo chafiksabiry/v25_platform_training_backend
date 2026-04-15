@@ -20,6 +20,11 @@ router.get(
 );
 
 router.post(
+  '/chat',
+  aiController.chat
+);
+
+router.post(
   '/analyze-document',
   upload.single('file'),
   aiController.analyzeDocument

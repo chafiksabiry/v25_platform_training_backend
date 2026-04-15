@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import gigTrainingGeneratorService from '../services/gigTrainingGeneratorService';
 import documentAnalysisService from '../services/documentAnalysisService';
+import aiService from '../services/aiService';
 import { generatePPTX } from '../services/pptxExportService';
 import { PythonPPTService } from '../services/pythonPPTService';
 import cloudinaryService from '../services/cloudinaryService';
@@ -139,6 +140,54 @@ export const listGigCallRecordings = async (
         summary: rec.summary || rec.analysis?.summaryText || '',
         createdAt: rec.createdAt,
       })),
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * Chat endpoint used by frontend Claude-like conversation UI.
+ */
+export const chat = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { message, context } = req.body || {};
+
+    if (!message || typeof message !== 'string' || !message.trim()) {
+      return res.status(400).json({ success: false, error: 'message is required' });
+    }
+
+    const anthropicKey = req.headers['x-anthropic-key'] as string;
+    const safeContext =
+      typeof context === 'string' && context.trim().length > 0
+        ? context.trim()
+        : 'No additional context provided.';
+
+    const prompt = [
+      'HARX conversation context:',
+      safeContext,
+      '',
+      'User message:',
+      message.trim()
+    ].join('\n');
+
+    const systemPrompt =
+      'You are HARX AI assistant powered by Claude. Be concise, helpful, and action-oriented. ' +
+      'When relevant, guide the user to produce training goals, audience, duration, and constraints.';
+
+    const response = await aiService.generateWithClaude(
+      prompt,
+      systemPrompt,
+      anthropicKey
+    );
+
+    return res.status(200).json({
+      success: true,
+      response: String(response || '').trim()
     });
   } catch (error) {
     return next(error);
