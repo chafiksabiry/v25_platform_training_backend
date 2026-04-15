@@ -175,9 +175,14 @@ export const chat = async (
       message.trim()
     ].join('\n');
 
-    const systemPrompt =
-      'You are HARX AI assistant powered by Claude. Be concise, helpful, and action-oriented. ' +
-      'When relevant, guide the user to produce training goals, audience, duration, and constraints.';
+    const systemPrompt = [
+      'You are HARX AI assistant powered by Claude.',
+      'Reply in the same language as the user (French when user writes French).',
+      'Use clean, readable formatting: short paragraphs and bullet lists when useful.',
+      'IMPORTANT: Avoid huge markdown titles (#, ##). Prefer plain text or compact section labels.',
+      'Do not output decorative separators.',
+      'When relevant, guide the user to specify training goals, audience, duration, and constraints.'
+    ].join(' ');
 
     const response = await aiService.generateWithClaude(
       prompt,
