@@ -346,6 +346,72 @@ class AIService {
     }
   }
 
+  async *streamWithClaude(
+    prompt: string,
+    systemPrompt?: string,
+    apiKey?: string,
+    options?: { temperature?: number; preferredModels?: string[] }
+  ): AsyncGenerator<string, void, unknown> {
+    const client = apiKey ? new Anthropic({ apiKey }) : this.anthropic;
+
+    const defaultChain = [
+      process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5',
+      'claude-3-5-sonnet-20241022',
+      'claude-3-5-sonnet-20240620',
+      'claude-3-haiku-20240307',
+    ];
+    const preferred = (options?.preferredModels || []).filter(Boolean);
+    const modelsToTry = [...new Set([...preferred, ...defaultChain])];
+    const temperature =
+      options?.temperature != null
+        ? options.temperature
+        : parseFloat(process.env.OPENAI_TEMPERATURE || '0.7');
+
+    let lastError: any;
+    for (const model of modelsToTry) {
+      try {
+        const envMaxTokens = parseInt(process.env.ANTHROPIC_MAX_TOKENS || '8192', 10);
+        const stream = await client.messages.create({
+          model,
+          max_tokens: Math.max(envMaxTokens, 8192),
+          system: systemPrompt || 'You are an expert assistant.',
+          messages: [{ role: 'user', content: prompt }],
+          temperature,
+          stream: true
+        } as any);
+
+        let producedText = false;
+        for await (const event of stream as any) {
+          if (event?.type === 'content_block_delta' && event?.delta?.type === 'text_delta') {
+            const textChunk = String(event.delta.text || '');
+            if (textChunk) {
+              producedText = true;
+              yield textChunk;
+            }
+          }
+        }
+
+        if (producedText) return;
+      } catch (error: any) {
+        lastError = error;
+        console.warn(`⚠️ Claude streaming model ${model} failed: ${error.message}`);
+      }
+    }
+
+    // Fallback to non-stream generation, chunked by words to keep UX progressive.
+    const fallback = await this.generateWithClaude(prompt, systemPrompt, apiKey, undefined, options);
+    if (!fallback) return;
+
+    const words = fallback.split(/(\s+)/);
+    for (const word of words) {
+      if (word) yield word;
+    }
+
+    if (!fallback && lastError) {
+      throw new Error(lastError?.message || 'Claude stream failed');
+    }
+  }
+
   async generateQuiz(topic: string, numberOfQuestions: number = 5): Promise<any> {
     const prompt = `Generate ${numberOfQuestions} multiple choice quiz questions about ${topic}.
     Return a JSON array with this structure:

@@ -181,21 +181,46 @@ export const chat = async (
       'Use clean, readable formatting: short paragraphs and bullet lists when useful.',
       'IMPORTANT: Avoid huge markdown titles (#, ##). Prefer plain text or compact section labels.',
       'Do not output decorative separators.',
-      'When relevant, guide the user to specify training goals, audience, duration, and constraints.'
+      'Do NOT mention or infer company name, gig name, or gig description unless explicitly provided by user in current message.',
+      'If user asks for a training plan, generate a complete draft plan immediately (modules, duration, objectives, evaluation) without waiting for extra clarifications.',
+      'You may finish with 2-4 optional clarification questions, but only after providing the full initial plan.'
     ].join(' ');
 
-    const response = await aiService.generateWithClaude(
-      prompt,
-      systemPrompt,
-      anthropicKey
-    );
+    const streamEnabled = String(req.query.stream ?? 'true').toLowerCase() !== 'false';
+    if (!streamEnabled) {
+      const response = await aiService.generateWithClaude(
+        prompt,
+        systemPrompt,
+        anthropicKey
+      );
 
-    return res.status(200).json({
-      success: true,
-      response: String(response || '').trim()
-    });
+      return res.status(200).json({
+        success: true,
+        response: String(response || '').trim()
+      });
+    }
+
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.status(200);
+    if (typeof (res as any).flushHeaders === 'function') {
+      (res as any).flushHeaders();
+    }
+
+    for await (const chunk of aiService.streamWithClaude(prompt, systemPrompt, anthropicKey)) {
+      res.write(chunk);
+      if (typeof (res as any).flush === 'function') {
+        (res as any).flush();
+      }
+    }
+
+    return res.end();
   } catch (error) {
-    return next(error);
+    if (!res.headersSent) return next(error);
+    res.write('\n[STREAM_ERROR]');
+    return res.end();
   }
 };
 
