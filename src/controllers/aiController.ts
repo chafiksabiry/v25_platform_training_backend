@@ -7,6 +7,7 @@ import { PythonPPTService } from '../services/pythonPPTService';
 import cloudinaryService from '../services/cloudinaryService';
 import { AppError } from '../middleware/errorHandler';
 import Document from '../models/Document';
+import Gig from '../models/Gig';
 import TrainingChatSession from '../models/TrainingChatSession';
 import mongoose from 'mongoose';
 import fs from 'fs';
@@ -659,10 +660,17 @@ export const analyzeDocument = async (
       }
     }
 
-    // Persist analyzed document so KB retrieval by gigId can work.
-    // If companyId is missing, we skip persistence to avoid invalid records.
+    // Persist analyzed document in `documents` for KB usage (linked to gigId).
+    // If companyId is missing, try resolving it from the provided gig.
     try {
-      const normalizedCompanyId = companyId || '';
+      let normalizedCompanyId = String(companyId || '').trim();
+      const normalizedGigId = String(gigId || '').trim();
+
+      if (!normalizedCompanyId && normalizedGigId) {
+        const gigRecord = await Gig.findById(normalizedGigId).select('companyId').lean();
+        normalizedCompanyId = String((gigRecord as any)?.companyId || '').trim();
+      }
+
       if (normalizedCompanyId) {
         const aiAnalysis = (analysis as any)?.aiAnalysis || {};
         await Document.create({
@@ -675,7 +683,7 @@ export const analyzeDocument = async (
           tags: [],
           uploadedBy: '',
           companyId: normalizedCompanyId,
-          gigId: gigId || undefined,
+          gigId: normalizedGigId || undefined,
           isProcessed: true,
           processingStatus: 'completed',
           chunks: [],
@@ -697,7 +705,10 @@ export const analyzeDocument = async (
           }
         });
       } else {
-        console.warn('⚠️ Skipping document persistence: missing companyId');
+        console.warn('⚠️ Skipping document persistence: missing companyId (and no company found via gigId).', {
+          gigId: String(gigId || ''),
+          fileName: req.file.originalname,
+        });
       }
     } catch (persistError) {
       console.error('❌ Failed to persist analyzed document:', persistError);
