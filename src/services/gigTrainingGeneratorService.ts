@@ -60,6 +60,27 @@ class GigTrainingGeneratorService {
     };
   }
 
+  private applyDurationConstraint(modules: any[], targetTotalMinutes?: number): any[] {
+    if (!Array.isArray(modules) || modules.length === 0 || !targetTotalMinutes || targetTotalMinutes <= 0) {
+      return modules;
+    }
+
+    const safeModules = modules.map((m, i) => this.normalizeModuleShape(m, i));
+    const currentTotal = safeModules.reduce((sum, m) => sum + this.toMinutes(m?.duration, 60), 0);
+    if (currentTotal <= 0) return safeModules;
+
+    const ratio = targetTotalMinutes / currentTotal;
+    return safeModules.map((m, idx) => {
+      const base = this.toMinutes(m?.duration, 60);
+      const scaled = Math.max(15, Math.round((base * ratio) / 5) * 5);
+      return {
+        ...m,
+        id: typeof m?.id === 'number' ? m.id : idx + 1,
+        duration: scaled
+      };
+    });
+  }
+
   async generateTrainingFromGig(
     gigId: string,
     apiKey?: string,
@@ -135,6 +156,20 @@ class GigTrainingGeneratorService {
             : '')
         : '';
 
+    const preferences = sourceContext?.preferences && typeof sourceContext.preferences === 'object'
+      ? sourceContext.preferences
+      : null;
+    const preferredDurationRaw = preferences?.selectedDuration;
+    const preferredTotalMinutes = this.toMinutes(preferredDurationRaw, 0);
+    const preferencesBlock = preferences
+      ? `\nPREFERENCES UTILISATEUR (OBLIGATOIRE):\n` +
+        `- Duree cible: ${preferences?.selectedDuration || 'non specifiee'}\n` +
+        `- Methodologie choisie: ${preferences?.methodologyName || 'non specifiee'}\n` +
+        `- Description methodologie: ${preferences?.methodologyDescription || 'non specifiee'}\n` +
+        `- Composants methodologie: ${(preferences?.methodologyComponents || []).join(', ') || 'non specifies'}\n` +
+        `IMPORTANT: Respecte strictement cette duree cible et cette methodologie dans la structure du plan.\n`
+      : '';
+
     const kbPromptFragment = kbContext
       ? `\nBASE DE CONNAISSANCES (SOURCE DE VÉRITÉ) :\n${kbContext}\n`
       : '';
@@ -149,6 +184,7 @@ class GigTrainingGeneratorService {
         INDUSTRIE : ${gig.industry}
         ${kbPromptFragment}
         ${explicitSourceContextBlock}
+        ${preferencesBlock}
         ${includeCallRecordings ? '\nIMPORTANT: si des call recordings sont fournis dans SOURCE CONTEXT, utilise-les pour enrichir objections, ton, scénarios et exemples concrets.\n' : ''}
 
         MISSION : Crée une structure pédagogique basée sur la Taxonomie de Bloom.
@@ -195,6 +231,7 @@ class GigTrainingGeneratorService {
         Thème du programme : ${meta.title}
         ${kbPromptFragment}
         ${explicitSourceContextBlock}
+        ${preferencesBlock}
 
         Pour le module décrit ci-dessous UNIQUEMENT, génère les sessions détaillées.
         TRÈS IMPORTANT : Inspire-toi DIRECTEMENT des détails techniques de la BASE DE CONNAISSANCES pour le contenu des sections.
@@ -232,10 +269,12 @@ class GigTrainingGeneratorService {
         })
       );
 
+      const normalizedModules = (detailedModules.length > 0 ? detailedModules : modulePlan).map((m: any, i: number) =>
+        this.normalizeModuleShape(m, i)
+      );
+      const constrainedModules = this.applyDurationConstraint(normalizedModules, preferredTotalMinutes);
       const sessionsData = {
-        modules: (detailedModules.length > 0 ? detailedModules : modulePlan).map((m: any, i: number) =>
-          this.normalizeModuleShape(m, i)
-        ),
+        modules: constrainedModules,
       };
 
       // ── Phase 3: Batched Presentation Generation ────────────────────────
@@ -343,6 +382,9 @@ class GigTrainingGeneratorService {
         companyId: gig.companyId,
         gigId: gig._id,
         industry: gig.industry,
+        estimatedDuration: preferredTotalMinutes > 0
+          ? `${Math.round(preferredTotalMinutes / 60)} heures`
+          : (meta.estimatedDuration || meta.duration),
         status: 'draft',
         methodologyData: {
           presentation: allSlides,
