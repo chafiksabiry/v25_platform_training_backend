@@ -166,6 +166,14 @@ export const chat = async (
       typeof context === 'string' && context.trim().length > 0
         ? context.trim()
         : 'No additional context provided.';
+    let parsedContext: any = null;
+    try {
+      parsedContext = JSON.parse(safeContext);
+    } catch {
+      parsedContext = null;
+    }
+    const selectedDuration = parsedContext?.selectedDuration || 'non specifiee';
+    const selectedMethodology = parsedContext?.selectedMethodology || 'Methodologie 360';
 
     const prompt = [
       'HARX conversation context:',
@@ -181,6 +189,10 @@ export const chat = async (
       'Use clean, readable formatting: short paragraphs and bullet lists when useful.',
       'IMPORTANT: Avoid huge markdown titles (#, ##). Prefer plain text or compact section labels.',
       'Do not output decorative separators.',
+      `ALWAYS apply this methodology framework: ${selectedMethodology}.`,
+      `ALWAYS treat the training target duration as: ${selectedDuration}.`,
+      'Duration must come ONLY from the selected duration constraint, never from methodology component durations.',
+      `In every answer, include a short reminder line: "Rappel — Duree cible: ${selectedDuration} | Methodologie: ${selectedMethodology}".`,
       'Do NOT mention or infer company name, gig name, or gig description unless explicitly provided by user in current message.',
       'If user asks for a training plan, generate a complete draft plan immediately (modules, duration, objectives, evaluation) without waiting for extra clarifications.',
       'You may finish with 2-4 optional clarification questions, but only after providing the full initial plan.'

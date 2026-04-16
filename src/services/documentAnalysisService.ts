@@ -144,7 +144,8 @@ class DocumentAnalysisService {
         - Composants methodologie: ${(prefs.methodologyComponents || []).join(', ') || 'non specifies'}
         - Titre formation choisi: ${prefs.trainingTitle || 'non specifie'}
         - Description formation choisie: ${prefs.trainingDescription || 'non specifiee'}
-        IMPORTANT: Le plan genere doit suivre cette duree cible et cette methodologie.`
+        IMPORTANT: Le plan genere doit suivre cette duree cible et cette methodologie.
+        IMPORTANT: La duree globale et la repartition des modules doivent venir UNIQUEMENT de la duree cible choisie (jamais des durees de composants methodologiques).`
         : '';
       
       // ── Call 1: Program metadata + module plan (no sessions yet) ──────────

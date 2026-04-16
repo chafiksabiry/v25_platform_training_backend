@@ -167,7 +167,8 @@ class GigTrainingGeneratorService {
         `- Methodologie choisie: ${preferences?.methodologyName || 'non specifiee'}\n` +
         `- Description methodologie: ${preferences?.methodologyDescription || 'non specifiee'}\n` +
         `- Composants methodologie: ${(preferences?.methodologyComponents || []).join(', ') || 'non specifies'}\n` +
-        `IMPORTANT: Respecte strictement cette duree cible et cette methodologie dans la structure du plan.\n`
+        `IMPORTANT: Respecte strictement cette duree cible et cette methodologie dans la structure du plan.\n` +
+        `IMPORTANT: La duree doit venir UNIQUEMENT de la duree cible utilisateur (pas des durees de composants de methodologie).\n`
       : '';
 
     const kbPromptFragment = kbContext
