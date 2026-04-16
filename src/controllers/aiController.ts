@@ -7,11 +7,25 @@ import { PythonPPTService } from '../services/pythonPPTService';
 import cloudinaryService from '../services/cloudinaryService';
 import { AppError } from '../middleware/errorHandler';
 import Document from '../models/Document';
+import TrainingChatSession from '../models/TrainingChatSession';
 import mongoose from 'mongoose';
 import fs from 'fs';
 import { promisify } from 'util';
 
 const unlinkAsync = promisify(fs.unlink);
+
+const toObjectIdOrUndefined = (value: unknown): mongoose.Types.ObjectId | undefined => {
+  if (!value) return undefined;
+  const raw = String(value).trim();
+  if (!raw || !mongoose.Types.ObjectId.isValid(raw)) return undefined;
+  return new mongoose.Types.ObjectId(raw);
+};
+
+const buildSessionTitle = (seedText: string): string => {
+  const normalized = String(seedText || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return 'Nouvelle conversation';
+  return normalized.length > 90 ? `${normalized.slice(0, 87)}...` : normalized;
+};
 
 export const generateTrainingFromGig = async (
   req: Request,
@@ -155,7 +169,7 @@ export const chat = async (
   next: NextFunction
 ) => {
   try {
-    const { message, context } = req.body || {};
+    const { message, context, gigId, companyId, sessionId } = req.body || {};
 
     if (!message || typeof message !== 'string' || !message.trim()) {
       return res.status(400).json({ success: false, error: 'message is required' });
@@ -174,6 +188,22 @@ export const chat = async (
     }
     const selectedDuration = parsedContext?.selectedDuration || 'non specifiee';
     const selectedMethodology = parsedContext?.selectedMethodology || 'Methodologie 360';
+    const safeGigId = toObjectIdOrUndefined(gigId);
+    const safeCompanyId = toObjectIdOrUndefined(companyId);
+    const safeSessionId = toObjectIdOrUndefined(sessionId);
+
+    let activeSession = safeSessionId
+      ? await TrainingChatSession.findById(safeSessionId)
+      : null;
+    if (!activeSession) {
+      activeSession = await TrainingChatSession.create({
+        gigId: safeGigId,
+        companyId: safeCompanyId,
+        title: buildSessionTitle(message),
+        messages: [],
+        lastActivityAt: new Date(),
+      });
+    }
 
     const prompt = [
       'HARX conversation context:',
@@ -211,9 +241,22 @@ export const chat = async (
         anthropicKey
       );
 
+      const userMessageText = message.trim();
+      const assistantMessageText = String(response || '').trim();
+      activeSession.messages.push(
+        { role: 'user', text: userMessageText, createdAt: new Date() } as any,
+        { role: 'assistant', text: assistantMessageText, createdAt: new Date() } as any
+      );
+      if (!activeSession.title || activeSession.title === 'Nouvelle conversation') {
+        activeSession.title = buildSessionTitle(userMessageText);
+      }
+      activeSession.lastActivityAt = new Date();
+      await activeSession.save();
+
       return res.status(200).json({
         success: true,
-        response: String(response || '').trim()
+        response: assistantMessageText,
+        sessionId: String(activeSession._id),
       });
     }
 
@@ -221,23 +264,119 @@ export const chat = async (
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
+    res.setHeader('X-Chat-Session-Id', String(activeSession._id));
     res.status(200);
     if (typeof (res as any).flushHeaders === 'function') {
       (res as any).flushHeaders();
     }
 
+    let fullResponse = '';
     for await (const chunk of aiService.streamWithClaude(prompt, systemPrompt, anthropicKey)) {
+      fullResponse += chunk;
       res.write(chunk);
       if (typeof (res as any).flush === 'function') {
         (res as any).flush();
       }
     }
 
+    const userMessageText = message.trim();
+    const assistantMessageText = String(fullResponse || '').trim();
+    activeSession.messages.push(
+      { role: 'user', text: userMessageText, createdAt: new Date() } as any,
+      { role: 'assistant', text: assistantMessageText, createdAt: new Date() } as any
+    );
+    if (!activeSession.title || activeSession.title === 'Nouvelle conversation') {
+      activeSession.title = buildSessionTitle(userMessageText);
+    }
+    activeSession.lastActivityAt = new Date();
+    await activeSession.save();
+
     return res.end();
   } catch (error) {
     if (!res.headersSent) return next(error);
     res.write('\n[STREAM_ERROR]');
     return res.end();
+  }
+};
+
+/**
+ * Returns saved chat sessions linked to a gig.
+ */
+export const listChatHistory = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const gigId = String(req.query.gigId || '').trim();
+    if (!gigId) {
+      return res.status(400).json({ success: false, error: 'gigId is required' });
+    }
+
+    const safeGigId = toObjectIdOrUndefined(gigId);
+    const query = safeGigId
+      ? { gigId: safeGigId }
+      : { gigId };
+
+    const sessions = await TrainingChatSession.find(query)
+      .sort({ lastActivityAt: -1 })
+      .limit(40)
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      sessions: sessions.map((session: any) => {
+        const messages = Array.isArray(session.messages) ? session.messages : [];
+        const preview = messages.length > 0 ? String(messages[messages.length - 1]?.text || '') : '';
+        return {
+          _id: String(session._id),
+          title: session.title || 'Nouvelle conversation',
+          lastActivityAt: session.lastActivityAt || session.updatedAt || session.createdAt,
+          messagesCount: messages.length,
+          preview: preview.length > 160 ? `${preview.slice(0, 157)}...` : preview,
+        };
+      }),
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * Returns all messages for one saved chat session.
+ */
+export const getChatSession = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { sessionId } = req.params;
+    if (!sessionId || !mongoose.Types.ObjectId.isValid(sessionId)) {
+      return res.status(400).json({ success: false, error: 'Invalid sessionId' });
+    }
+
+    const session = await TrainingChatSession.findById(sessionId).lean();
+    if (!session) {
+      return res.status(404).json({ success: false, error: 'Chat session not found' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      session: {
+        _id: String((session as any)._id),
+        title: (session as any).title || 'Nouvelle conversation',
+        gigId: (session as any).gigId ? String((session as any).gigId) : null,
+        lastActivityAt: (session as any).lastActivityAt || (session as any).updatedAt || (session as any).createdAt,
+        messages: ((session as any).messages || []).map((m: any) => ({
+          role: m.role === 'assistant' ? 'assistant' : 'user',
+          text: String(m.text || ''),
+          createdAt: m.createdAt || null,
+        })),
+      },
+    });
+  } catch (error) {
+    return next(error);
   }
 };
 

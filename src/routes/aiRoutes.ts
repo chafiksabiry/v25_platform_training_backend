@@ -24,6 +24,16 @@ router.post(
   aiController.chat
 );
 
+router.get(
+  '/chat/history',
+  aiController.listChatHistory
+);
+
+router.get(
+  '/chat/history/:sessionId',
+  aiController.getChatSession
+);
+
 router.post(
   '/analyze-document',
   upload.single('file'),
