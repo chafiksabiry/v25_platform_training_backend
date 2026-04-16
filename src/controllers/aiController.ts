@@ -29,6 +29,53 @@ const buildSessionTitle = (seedText: string): string => {
   return normalized.length > 90 ? `${normalized.slice(0, 87)}...` : normalized;
 };
 
+const isHexColor = (value: unknown): boolean =>
+  typeof value === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value);
+
+const extractStyleJsonFromTag = (rawText: string): any | null => {
+  const match = String(rawText || '').match(/<harx-style>([\s\S]*?)<\/harx-style>/i);
+  if (!match?.[1]) return null;
+  try {
+    return JSON.parse(match[1]);
+  } catch {
+    return null;
+  }
+};
+
+const isValidStyleBlueprint = (candidate: any): boolean => {
+  if (!candidate || typeof candidate !== 'object') return false;
+  if (!Array.isArray(candidate.moduleCardThemes) || candidate.moduleCardThemes.length < 1) return false;
+  if (!isHexColor(candidate.titleColor) || !isHexColor(candidate.accentColor)) return false;
+  if (!candidate.contentTheme || typeof candidate.contentTheme !== 'object') return false;
+
+  const validTheme = candidate.moduleCardThemes.every(
+    (theme: any) => isHexColor(theme?.bg) && isHexColor(theme?.border) && (!theme?.text || isHexColor(theme?.text))
+  );
+  if (!validTheme) return false;
+
+  const ct = candidate.contentTheme;
+  const requiredHexFields = [
+    'bodyColor',
+    'headingColor',
+    'tableBorder',
+    'tableHeaderBg',
+    'tableHeaderText',
+    'tableRowBg',
+    'kpiBg',
+    'kpiBorder',
+    'kpiLabel',
+    'kpiValue',
+    'panelBg',
+    'panelBorder',
+    'badgeBg',
+    'badgeText',
+  ];
+  if (!requiredHexFields.every((field) => isHexColor(ct?.[field]))) return false;
+  if (!['rounded', 'square', 'soft'].includes(String(ct?.moduleShape || ''))) return false;
+
+  return true;
+};
+
 const getStylePresetFromSeed = (seedText: string) => {
   const presets = [
     {
@@ -116,12 +163,50 @@ const getStylePresetFromSeed = (seedText: string) => {
   return presets[hash % presets.length];
 };
 
-const ensureVisualResponseContract = (
+const generateStyleBlueprintWithClaude = async (
+  contentText: string,
+  selectedDuration: string,
+  selectedMethodology: string,
+  anthropicKey: string
+): Promise<any | null> => {
+  try {
+    const stylePrompt = [
+      'Generate ONLY a JSON object (no markdown, no code fence, no extra text).',
+      'The JSON must match this shape exactly:',
+      '{"moduleCardThemes":[{"bg":"#hex","border":"#hex","text":"#hex"}],"titleColor":"#hex","accentColor":"#hex","contentTheme":{"bodyColor":"#hex","headingColor":"#hex","tableBorder":"#hex","tableHeaderBg":"#hex","tableHeaderText":"#hex","tableRowBg":"#hex","kpiBg":"#hex","kpiBorder":"#hex","kpiLabel":"#hex","kpiValue":"#hex","moduleShape":"rounded|square|soft","panelBg":"#hex","panelBorder":"#hex","badgeBg":"#hex","badgeText":"#hex"}}',
+      `Target duration: ${selectedDuration}.`,
+      `Methodology: ${selectedMethodology}.`,
+      'Content to style:',
+      String(contentText || '').slice(0, 5000),
+    ].join('\n');
+
+    const styleSystem = [
+      'You are a strict JSON style generator for HARX training cards.',
+      'Output valid JSON only.',
+      'Use coherent, readable, professional palettes.',
+      'Do not output explanations.',
+    ].join(' ');
+
+    const raw = await aiService.generateWithClaude(stylePrompt, styleSystem, anthropicKey);
+    const normalized = String(raw || '')
+      .replace(/```json/gi, '')
+      .replace(/```/g, '')
+      .trim();
+
+    const parsed = extractStyleJsonFromTag(normalized) || JSON.parse(normalized);
+    return isValidStyleBlueprint(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const ensureVisualResponseContract = async (
   rawText: string,
   selectedDuration: string,
   selectedMethodology: string,
-  seedText: string
-): string => {
+  seedText: string,
+  anthropicKey: string
+): Promise<string> => {
   let text = String(rawText || '').trim();
   if (!text) text = "Je n'ai pas pu generer une reponse pour le moment.";
 
@@ -135,11 +220,25 @@ const ensureVisualResponseContract = (
     ].join('\n');
   }
 
-  if (!HARX_STYLE_TAG_REGEX.test(text)) {
-    const preset = getStylePresetFromSeed(seedText);
+  const existingStyle = extractStyleJsonFromTag(text);
+  let styleBlueprint = isValidStyleBlueprint(existingStyle) ? existingStyle : null;
+  if (!styleBlueprint) {
+    styleBlueprint = await generateStyleBlueprintWithClaude(
+      text,
+      selectedDuration,
+      selectedMethodology,
+      anthropicKey
+    );
+  }
+  if (!styleBlueprint) {
+    styleBlueprint = getStylePresetFromSeed(seedText);
+  }
+
+  if (styleBlueprint) {
+    text = text.replace(/<harx-style>[\s\S]*?<\/harx-style>/gi, '').trim();
     text += [
       '',
-      `<harx-style>${JSON.stringify(preset)}</harx-style>`,
+      `<harx-style>${JSON.stringify(styleBlueprint)}</harx-style>`,
     ].join('\n');
   }
 
@@ -362,11 +461,12 @@ export const chat = async (
         systemPrompt,
         anthropicKey
       );
-      const finalResponse = ensureVisualResponseContract(
+      const finalResponse = await ensureVisualResponseContract(
         String(response || ''),
         selectedDuration,
         selectedMethodology,
-        message.trim()
+        message.trim(),
+        anthropicKey
       );
 
       const userMessageText = message.trim();
@@ -408,11 +508,12 @@ export const chat = async (
     }
 
     const userMessageText = message.trim();
-    const assistantMessageText = ensureVisualResponseContract(
+    const assistantMessageText = await ensureVisualResponseContract(
       String(fullResponse || ''),
       selectedDuration,
       selectedMethodology,
-      message.trim()
+      message.trim(),
+      anthropicKey
     );
     if (assistantMessageText !== String(fullResponse || '').trim()) {
       const appended = assistantMessageText.slice(String(fullResponse || '').trim().length);
