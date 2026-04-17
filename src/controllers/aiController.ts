@@ -288,6 +288,22 @@ const inferKbDomainFromContext = (parsedContext: any): {
   };
 };
 
+const isDomainMismatch = (text: string, domainLabel: string): boolean => {
+  const lower = String(text || '').toLowerCase();
+  const aiScore =
+    (lower.match(/\b(ai|ia|intelligence artificielle|machine learning|deep learning|llm|chatgpt|python|prompt)\b/g) || []).length;
+  const insuranceScore =
+    (lower.match(/\b(assurance|mutuelle|courtage|garantie|sinistre|remboursement|sant[eé])\b/g) || []).length;
+
+  if (/ia|ai/.test(domainLabel.toLowerCase())) {
+    return insuranceScore >= 2 && aiScore === 0;
+  }
+  if (/assurance/.test(domainLabel.toLowerCase())) {
+    return aiScore >= 2 && insuranceScore === 0;
+  }
+  return false;
+};
+
 export const generateTrainingFromGig = async (
   req: Request,
   res: Response,
@@ -490,6 +506,7 @@ export const chat = async (
       `In every answer, include a short reminder line: "Rappel — Duree cible: ${selectedDuration} | Methodologie: ${selectedMethodology}".`,
       'Do NOT include sections about resources/support/materials/equipment (e.g., "Supports et ressources", "Documents fournis", "Équipement nécessaire").',
       'Focus only on pedagogical structure, module content, activities, evaluation, and timing.',
+      'If prior conversation history is off-domain, ignore it and prioritize current user message + KB context.',
       'Use visually rich pedagogical writing similar to premium training cards: bold section title, one highlighted subtitle line, concise explanation, bullet list of actionable points.',
       'Alternate visual tone between responses (e.g., mint/case-practice, amber/constraints, blue/action-plan) while staying professional.',
       'ALWAYS include at least one markdown table in EVERY response (with at least 3 columns) to structure key information.',
@@ -502,12 +519,17 @@ export const chat = async (
     ].join(' ');
 
     const streamEnabled = String(req.query.stream ?? 'true').toLowerCase() !== 'false';
+    const shouldValidateDomain = inferredDomain.domainLabel !== 'Non déterminé (mixte)';
     if (!streamEnabled) {
-      const response = await aiService.generateWithClaude(
+      let response = await aiService.generateWithClaude(
         prompt,
         systemPrompt,
         anthropicKey
       );
+      if (shouldValidateDomain && isDomainMismatch(String(response || ''), inferredDomain.domainLabel)) {
+        const correctiveSystemPrompt = `${systemPrompt} CRITICAL DOMAIN LOCK: ${inferredDomain.strictTopicGuard} If draft is off-domain, regenerate fully in the correct domain.`;
+        response = await aiService.generateWithClaude(prompt, correctiveSystemPrompt, anthropicKey);
+      }
       const finalResponse = await ensureVisualResponseContract(
         String(response || ''),
         selectedDuration,
@@ -546,11 +568,25 @@ export const chat = async (
     }
 
     let fullResponse = '';
-    for await (const chunk of aiService.streamWithClaude(prompt, systemPrompt, anthropicKey)) {
-      fullResponse += chunk;
-      res.write(chunk);
+    if (shouldValidateDomain) {
+      // For strict domain lock, generate once then stream-safe write validated content.
+      let response = await aiService.generateWithClaude(prompt, systemPrompt, anthropicKey);
+      if (isDomainMismatch(String(response || ''), inferredDomain.domainLabel)) {
+        const correctiveSystemPrompt = `${systemPrompt} CRITICAL DOMAIN LOCK: ${inferredDomain.strictTopicGuard} If draft is off-domain, regenerate fully in the correct domain.`;
+        response = await aiService.generateWithClaude(prompt, correctiveSystemPrompt, anthropicKey);
+      }
+      fullResponse = String(response || '');
+      res.write(fullResponse);
       if (typeof (res as any).flush === 'function') {
         (res as any).flush();
+      }
+    } else {
+      for await (const chunk of aiService.streamWithClaude(prompt, systemPrompt, anthropicKey)) {
+        fullResponse += chunk;
+        res.write(chunk);
+        if (typeof (res as any).flush === 'function') {
+          (res as any).flush();
+        }
       }
     }
 
