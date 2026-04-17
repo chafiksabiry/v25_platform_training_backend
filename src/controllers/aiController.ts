@@ -247,12 +247,14 @@ const ensureVisualResponseContract = async (
 };
 
 const inferKbDomainFromContext = (parsedContext: any): {
-  domainLabel: string;
+  kbFocusLabel: string;
+  kbKeywords: string[];
   strictTopicGuard: string;
 } => {
   const docs = Array.isArray(parsedContext?.knowledgeBaseDocuments)
     ? parsedContext.knowledgeBaseDocuments
     : [];
+
   const kbText = docs
     .map((d: any) =>
       [
@@ -264,44 +266,45 @@ const inferKbDomainFromContext = (parsedContext: any): {
     .join(' ')
     .toLowerCase();
 
-  const hasAiSignal = /(ai|intelligence artificielle|machine learning|deep learning|chatgpt|llm|python|data|prompt)/i.test(kbText);
-  const hasInsuranceSignal = /(assurance|mutuelle|courtage|garantie|sinistre|remboursement|sant[eé])/i.test(kbText);
+  const stopwords = new Set([
+    'avec', 'dans', 'pour', 'sans', 'tout', 'tous', 'toute', 'sur', 'des', 'les', 'une', 'vos', 'votre',
+    'from', 'that', 'this', 'then', 'have', 'will', 'into', 'about', 'which', 'dont', 'avec', 'plus',
+  ]);
+  const keywordCounts = new Map<string, number>();
+  const tokens = kbText.match(/[a-zA-ZÀ-ÿ0-9_]{4,}/g) || [];
+  for (const tokenRaw of tokens) {
+    const token = tokenRaw.toLowerCase();
+    if (stopwords.has(token)) continue;
+    keywordCounts.set(token, (keywordCounts.get(token) || 0) + 1);
+  }
+  const kbKeywords = Array.from(keywordCounts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 24)
+    .map(([k]) => k);
 
-  if (hasAiSignal && !hasInsuranceSignal) {
+  if (kbKeywords.length > 0) {
     return {
-      domainLabel: 'IA / outils IA',
+      kbFocusLabel: kbKeywords.slice(0, 8).join(', '),
+      kbKeywords,
       strictTopicGuard:
-        'The dominant KB domain is AI tools. Do NOT switch to insurance or brokerage unless the user explicitly asks for it.',
+        'Use ONLY the KB topic. Keep terms, examples, and vocabulary aligned with KB keywords. Do not switch to another domain unless user explicitly asks.',
     };
   }
-  if (hasInsuranceSignal && !hasAiSignal) {
-    return {
-      domainLabel: 'Assurance',
-      strictTopicGuard:
-        'The dominant KB domain is insurance. Stay in insurance context unless user asks another domain explicitly.',
-    };
-  }
+
   return {
-    domainLabel: 'Non déterminé (mixte)',
+    kbFocusLabel: 'No KB keywords detected',
+    kbKeywords: [],
     strictTopicGuard:
-      'Infer domain strictly from user message and KB documents. Never invent a different domain.',
+      'Infer topic from current user message and available KB documents. Never invent a different domain.',
   };
 };
 
-const isDomainMismatch = (text: string, domainLabel: string): boolean => {
+const isKbTopicMismatch = (text: string, kbKeywords: string[]): boolean => {
+  if (!Array.isArray(kbKeywords) || kbKeywords.length === 0) return false;
   const lower = String(text || '').toLowerCase();
-  const aiScore =
-    (lower.match(/\b(ai|ia|intelligence artificielle|machine learning|deep learning|llm|chatgpt|python|prompt)\b/g) || []).length;
-  const insuranceScore =
-    (lower.match(/\b(assurance|mutuelle|courtage|garantie|sinistre|remboursement|sant[eé])\b/g) || []).length;
-
-  if (/ia|ai/.test(domainLabel.toLowerCase())) {
-    return insuranceScore >= 2 && aiScore === 0;
-  }
-  if (/assurance/.test(domainLabel.toLowerCase())) {
-    return aiScore >= 2 && insuranceScore === 0;
-  }
-  return false;
+  const hits = kbKeywords.filter((kw) => kw && lower.includes(kw.toLowerCase())).length;
+  // If almost no overlap with KB vocabulary, treat as off-topic.
+  return hits < 2;
 };
 
 export const generateTrainingFromGig = async (
@@ -500,7 +503,7 @@ export const chat = async (
       `ALWAYS apply this methodology framework: ${selectedMethodology}.`,
       `ALWAYS treat the training target duration as: ${selectedDuration}.`,
       'IMPORTANT: Methodology defines pedagogical approach only. It must NOT force the business/topic domain.',
-      `Dominant domain from KB/context: ${inferredDomain.domainLabel}.`,
+      `KB keyword focus: ${inferredDomain.kbFocusLabel}.`,
       inferredDomain.strictTopicGuard,
       'Duration must come ONLY from the selected duration constraint, never from methodology component durations.',
       `In every answer, include a short reminder line: "Rappel — Duree cible: ${selectedDuration} | Methodologie: ${selectedMethodology}".`,
@@ -519,14 +522,14 @@ export const chat = async (
     ].join(' ');
 
     const streamEnabled = String(req.query.stream ?? 'true').toLowerCase() !== 'false';
-    const shouldValidateDomain = inferredDomain.domainLabel !== 'Non déterminé (mixte)';
+    const shouldValidateDomain = inferredDomain.kbKeywords.length > 0;
     if (!streamEnabled) {
       let response = await aiService.generateWithClaude(
         prompt,
         systemPrompt,
         anthropicKey
       );
-      if (shouldValidateDomain && isDomainMismatch(String(response || ''), inferredDomain.domainLabel)) {
+      if (shouldValidateDomain && isKbTopicMismatch(String(response || ''), inferredDomain.kbKeywords)) {
         const correctiveSystemPrompt = `${systemPrompt} CRITICAL DOMAIN LOCK: ${inferredDomain.strictTopicGuard} If draft is off-domain, regenerate fully in the correct domain.`;
         response = await aiService.generateWithClaude(prompt, correctiveSystemPrompt, anthropicKey);
       }
@@ -571,7 +574,7 @@ export const chat = async (
     if (shouldValidateDomain) {
       // For strict domain lock, generate once then stream-safe write validated content.
       let response = await aiService.generateWithClaude(prompt, systemPrompt, anthropicKey);
-      if (isDomainMismatch(String(response || ''), inferredDomain.domainLabel)) {
+      if (isKbTopicMismatch(String(response || ''), inferredDomain.kbKeywords)) {
         const correctiveSystemPrompt = `${systemPrompt} CRITICAL DOMAIN LOCK: ${inferredDomain.strictTopicGuard} If draft is off-domain, regenerate fully in the correct domain.`;
         response = await aiService.generateWithClaude(prompt, correctiveSystemPrompt, anthropicKey);
       }
