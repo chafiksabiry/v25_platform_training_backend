@@ -582,44 +582,25 @@ SORTIE : uniquement un objet JSON valide {"slides":[...]} — aucun markdown, au
         }
       };
 
-      // ── LOT 1 : LES FONDATIONS (6 slides) ──────────────────────────────
-      const batch1Desc = `
-        Slide 1 : Slide de titre — accroche impactante, slogan fort, chiffre clé du domaine.
-        Slide 2 : Contexte et problématique — statistiques, enjeux actuels, chiffres de référence.
-        Slide 3 : Définition et concepts fondamentaux — clair, accessible, avec exemples concrets.
-        Slide 4 : Historique et évolution — dates clés, timeline, faits marquants.
-        Slide 5 : Fonctionnement détaillé — mécanismes, processus étape par étape.
-        Slide 6 : Comparaisons et distinctions importantes — tableau ou points comparatifs.
-      `;
+      // ── Dynamic batches from curriculum complexity (modules/sections) ────
+      const batches: Array<{ label: string; startId: number; desc: string }> = [];
+      for (let i = 0; i < batchCount; i++) {
+        const start = i * chunkSize;
+        const end = Math.min(start + chunkSize, lineItems.length);
+        const chunk = lineItems.slice(start, end);
+        if (chunk.length === 0) continue;
+        batches.push({
+          label: `B${i + 1}`,
+          startId: start + 1,
+          desc: chunk.join('\n'),
+        });
+      }
 
-      // ── LOT 2 : L'EXPERTISE 360° (5 slides) ─────────────────────────────
-      const batch2Desc = `
-        Slide 7 : Typologies et catégories (publiques, privées, professionnelles…).
-        Slide 8 : Services et offres disponibles — liste complète avec exemples.
-        Slide 9 : Avantages pour les bénéficiaires — bénéfices concrets, chiffres, témoignages.
-        Slide 10 : Inconvénients et limites — regard critique et réaliste.
-        Slide 11 : Cas pratique — exemple réel ou simulé avec chiffres concrets.
-      `;
+      const batchSlides = await Promise.all(
+        batches.map((b) => generateBatch(`${b.label} (Slides ${b.startId}-${b.startId + b.desc.split('\n').length - 1})`, b.desc, b.startId))
+      );
 
-      // ── LOT 3a / 3b : ACTION & FUTUR (3+3 slides) — évite la troncature max_tokens ──
-      const batch3aDesc = `
-        Slide 12 : Rôle dans l'écosystème global — lien avec le système global et la société.
-        Slide 13 : Contexte local/régional (Maroc ou pays cible) — données locales, spécificités.
-        Slide 14 : Enjeux actuels et Innovations — IA, digitalisation, nouvelles technologies.
-      `;
-      const batch3bDesc = `
-        Slide 15 : Conclusion synthétique — récapitulatif, messages clés, perspectives.
-        Slide 16 : Prochaines étapes (Call to Action) — que faire après cette formation.
-      `;
-
-      const [slides1, slides2, slides3a, slides3b] = await Promise.all([
-        generateBatch('B1 (Fondations)', batch1Desc, 1),
-        generateBatch('B2 (Expertise)', batch2Desc, 7),
-        generateBatch('B3a (Action 1/2)', batch3aDesc, 12),
-        generateBatch('B3b (Action 2/2)', batch3bDesc, 15)
-      ]);
-
-      const merged = [...slides1, ...slides2, ...slides3a, ...slides3b];
+      const merged = batchSlides.flat();
       const withoutQuizSlides = merged.filter(
         (s: any) => String(s?.type || '').toLowerCase() !== 'quiz'
       );

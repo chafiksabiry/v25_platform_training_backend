@@ -81,6 +81,40 @@ class GigTrainingGeneratorService {
     });
   }
 
+  private computeSlideTargetFromModules(modules: any[]): number {
+    const safeModules = Array.isArray(modules) ? modules : [];
+    if (safeModules.length === 0) return 14;
+    let sectionCount = 0;
+    for (const module of safeModules) {
+      sectionCount += Array.isArray(module?.sections) ? module.sections.length : 0;
+    }
+    const raw = 10 + safeModules.length * 2 + Math.min(14, Math.ceil(sectionCount / 2));
+    return Math.max(10, Math.min(32, raw));
+  }
+
+  private buildDynamicSlideItems(slideTarget: number, modules: any[]): string[] {
+    const n = Math.max(1, slideTarget);
+    const titles = (Array.isArray(modules) ? modules : []).map((m: any) => String(m?.title || 'Module').slice(0, 100));
+    const plan: string[] = [];
+    plan.push('Slide de titre — accroche impactante, promesse de valeur, contexte métier.');
+    plan.push('Contexte et enjeux — chiffres, problématique terrain et objectifs pédagogiques.');
+    const middle = Math.max(0, n - 4);
+    for (let i = 0; i < middle; i++) {
+      if (titles.length > 0) {
+        const t = titles[i % titles.length];
+        const phase = Math.floor(i / titles.length) % 3;
+        if (phase === 0) plan.push(`Module « ${t} » — concepts et fondamentaux à maîtriser.`);
+        else if (phase === 1) plan.push(`Module « ${t} » — cas pratiques, chiffres et décisions terrain.`);
+        else plan.push(`Module « ${t} » — erreurs fréquentes, limites et bonnes pratiques.`);
+      } else {
+        plan.push('Contenu métier approfondi — définitions, exemples, application opérationnelle.');
+      }
+    }
+    plan.push('Conclusion synthétique — messages clés et ancrage opérationnel.');
+    plan.push('Prochaines étapes — plan d’action terrain après formation.');
+    return plan.map((desc, idx) => `Slide ${idx + 1}: ${desc}`);
+  }
+
   async generateTrainingFromGig(
     gigId: string,
     apiKey?: string,
@@ -334,38 +368,28 @@ class GigTrainingGeneratorService {
         }
       };
 
-      const batch1Desc = `
-        Slide 1: Titre et Accroche - Slogan fort lié au Job.
-        Slide 2: Contexte du marché et enjeux actuels - Chiffres clés.
-        Slide 3: Concepts fondamentaux et définitions - Base technique.
-        Slide 4: Évolution du métier/secteur - Timeline ou faits marquants.
-        Slide 5: Fonctionnement et Mécanismes - Processus métier.
-        Slide 6: Différenciation et comparaison - Positionnement.
-      `;
+      const slideTarget = this.computeSlideTargetFromModules(constrainedModules);
+      const lineItems = this.buildDynamicSlideItems(slideTarget, constrainedModules);
+      const batchCount = Math.min(4, Math.max(1, lineItems.length));
+      const chunkSize = Math.ceil(lineItems.length / batchCount);
+      const batches: Array<{ label: string; startId: number; desc: string }> = [];
+      for (let i = 0; i < batchCount; i++) {
+        const start = i * chunkSize;
+        const end = Math.min(start + chunkSize, lineItems.length);
+        const chunk = lineItems.slice(start, end);
+        if (chunk.length === 0) continue;
+        batches.push({
+          label: `B${i + 1}`,
+          startId: start + 1,
+          desc: chunk.join('\n'),
+        });
+      }
 
-      const batch2Desc = `
-        Slide 7: Typologies et segments clients/projets.
-        Slide 8: Catalogue de services et offres (extraits des docs).
-        Slide 9: Bénéfices et Valeur Ajoutée (ROI, efficacité).
-        Slide 10: Défis et Limites du terrain - Réalisme.
-        Slide 11: Étude de cas / Processus exemplaire - Détail technique.
-      `;
+      const batchSlides = await Promise.all(
+        batches.map((b) => generatePresentationBatch(`${b.label}`, b.desc, b.startId))
+      );
 
-      const batch3Desc = `
-        Slide 12: Écosystème et partenaires - Relations métier.
-        Slide 13: Spécificités locales et réglementaires (ex: Maroc).
-        Slide 14: Futur et Innovations - IA, Digitalisation du poste.
-        Slide 15: Synthèse des compétences clés.
-        Slide 16: Call to Action - Prochaines étapes opérationnelles.
-      `;
-
-      const [slides1, slides2, slides3] = await Promise.all([
-        generatePresentationBatch('B1', batch1Desc, 1),
-        generatePresentationBatch('B2', batch2Desc, 7),
-        generatePresentationBatch('B3', batch3Desc, 12)
-      ]);
-
-      const mergedSlides = [...slides1, ...slides2, ...slides3].filter(
+      const mergedSlides = batchSlides.flat().filter(
         (s: any) => String(s?.type || '').toLowerCase() !== 'quiz'
       );
       const allSlides = mergedSlides.map((s, i) => ({
