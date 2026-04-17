@@ -9,8 +9,8 @@ export interface IDocument extends Document {
   content: string;
   tags: string[];
   uploadedBy: string;
-  companyId: string;
-  gigId?: string;
+  companyId: mongoose.Types.ObjectId;
+  gigId?: mongoose.Types.ObjectId;
   isProcessed: boolean;
   processingStatus: string;
   chunks: Array<{
@@ -49,8 +49,8 @@ const documentSchema = new Schema<IDocument>(
     content: { type: String, default: '' },
     tags: { type: [String], default: [] },
     uploadedBy: { type: String },
-    companyId: { type: String, ref: 'Company', required: true },
-    gigId: { type: String, ref: 'Gig' },
+    companyId: { type: Schema.Types.ObjectId, ref: 'Company', required: true },
+    gigId: { type: Schema.Types.ObjectId, ref: 'Gig' },
     isProcessed: { type: Boolean, default: false },
     processingStatus: { type: String, default: 'pending' },
     chunks: [

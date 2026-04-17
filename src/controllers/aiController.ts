@@ -745,15 +745,16 @@ export const analyzeDocument = async (
     // Persist analyzed document in `documents` for KB usage (linked to gigId).
     // If companyId is missing, try resolving it from the provided gig.
     try {
-      let normalizedCompanyId = String(companyId || '').trim();
       const normalizedGigId = String(gigId || '').trim();
+      let safeCompanyObjectId = toObjectIdOrUndefined(companyId);
+      const safeGigObjectId = toObjectIdOrUndefined(normalizedGigId);
 
-      if (!normalizedCompanyId && normalizedGigId) {
+      if (!safeCompanyObjectId && safeGigObjectId) {
         const gigRecord = await Gig.findById(normalizedGigId).select('companyId').lean();
-        normalizedCompanyId = String((gigRecord as any)?.companyId || '').trim();
+        safeCompanyObjectId = toObjectIdOrUndefined((gigRecord as any)?.companyId);
       }
 
-      if (normalizedCompanyId) {
+      if (safeCompanyObjectId) {
         const aiAnalysis = (analysis as any)?.aiAnalysis || {};
         await Document.create({
           name: req.file.originalname,
@@ -764,8 +765,8 @@ export const analyzeDocument = async (
           content: (analysis as any)?.extractedContent?.text || '',
           tags: [],
           uploadedBy: '',
-          companyId: normalizedCompanyId,
-          gigId: normalizedGigId || undefined,
+          companyId: safeCompanyObjectId,
+          gigId: safeGigObjectId || undefined,
           isProcessed: true,
           processingStatus: 'completed',
           chunks: [],
