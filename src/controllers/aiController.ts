@@ -42,6 +42,11 @@ const normalizeGeneratedTitle = (rawTitle: string, fallback: string): string => 
   return cleaned.length > 90 ? `${cleaned.slice(0, 87)}...` : cleaned;
 };
 
+type ChatTitleMessage = {
+  role: 'assistant' | 'user';
+  text: string;
+};
+
 const isHexColor = (value: unknown): boolean =>
   typeof value === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value);
 
@@ -653,16 +658,16 @@ export const generateChatTitle = async (
     const anthropicKey = req.headers['x-anthropic-key'] as string;
 
     const entries = Array.isArray(messages) ? messages : [];
-    const normalizedMessages = entries
-      .map((entry: any) => ({
+    const normalizedMessages: ChatTitleMessage[] = entries
+      .map((entry: any): ChatTitleMessage => ({
         role: String(entry?.role || '').toLowerCase() === 'assistant' ? 'assistant' : 'user',
         text: String(entry?.text || '').replace(/\s+/g, ' ').trim(),
       }))
-      .filter((entry: { role: 'assistant' | 'user'; text: string }) => entry.text.length > 0)
+      .filter((entry) => entry.text.length > 0)
       .slice(-12);
 
     const fallbackSeed =
-      normalizedMessages.find((entry: { role: 'assistant' | 'user'; text: string }) => entry.role === 'user')?.text ||
+      normalizedMessages.find((entry) => entry.role === 'user')?.text ||
       normalizedMessages[0]?.text ||
       'Slides generees depuis le chat';
     const fallbackTitle = buildSessionTitle(fallbackSeed);
@@ -672,7 +677,7 @@ export const generateChatTitle = async (
     }
 
     const transcript = normalizedMessages
-      .map((entry: { role: 'assistant' | 'user'; text: string }) => `${entry.role}: ${entry.text}`)
+      .map((entry) => `${entry.role}: ${entry.text}`)
       .join('\n');
 
     const prompt = [
