@@ -30,6 +30,18 @@ const buildSessionTitle = (seedText: string): string => {
   return normalized.length > 90 ? `${normalized.slice(0, 87)}...` : normalized;
 };
 
+const normalizeGeneratedTitle = (rawTitle: string, fallback: string): string => {
+  const cleaned = String(rawTitle || '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/[`*_#>|-]+/g, ' ')
+    .replace(/["'“”‘’]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[.!?;:,]+$/g, '');
+  if (!cleaned) return fallback;
+  return cleaned.length > 90 ? `${cleaned.slice(0, 87)}...` : cleaned;
+};
+
 const isHexColor = (value: unknown): boolean =>
   typeof value === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value);
 
@@ -625,6 +637,74 @@ export const chat = async (
     if (!res.headersSent) return next(error);
     res.write('\n[STREAM_ERROR]');
     return res.end();
+  }
+};
+
+/**
+ * Generates a concise title from chat messages.
+ */
+export const generateChatTitle = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { messages } = req.body || {};
+    const anthropicKey = req.headers['x-anthropic-key'] as string;
+
+    const entries = Array.isArray(messages) ? messages : [];
+    const normalizedMessages = entries
+      .map((entry: any) => ({
+        role: String(entry?.role || '').toLowerCase() === 'assistant' ? 'assistant' : 'user',
+        text: String(entry?.text || '').replace(/\s+/g, ' ').trim(),
+      }))
+      .filter((entry: { role: 'assistant' | 'user'; text: string }) => entry.text.length > 0)
+      .slice(-12);
+
+    const fallbackSeed =
+      normalizedMessages.find((entry: { role: 'assistant' | 'user'; text: string }) => entry.role === 'user')?.text ||
+      normalizedMessages[0]?.text ||
+      'Slides generees depuis le chat';
+    const fallbackTitle = buildSessionTitle(fallbackSeed);
+
+    if (normalizedMessages.length === 0) {
+      return res.status(200).json({ success: true, title: fallbackTitle });
+    }
+
+    const transcript = normalizedMessages
+      .map((entry: { role: 'assistant' | 'user'; text: string }) => `${entry.role}: ${entry.text}`)
+      .join('\n');
+
+    const prompt = [
+      'Conversation transcript:',
+      transcript,
+      '',
+      'Task: Generate one short title for this training journey.',
+      'Constraints:',
+      '- 4 to 9 words',
+      '- Keep the business topic of the conversation',
+      '- Do not use quotes, markdown, numbering, or punctuation at the end',
+      '- Return only the title text',
+    ].join('\n');
+
+    const systemPrompt = [
+      'You create concise professional training titles in French.',
+      'Return plain text only.',
+      'Do not output explanations.',
+    ].join(' ');
+
+    const rawTitle = await aiService.generateWithClaude(
+      prompt,
+      systemPrompt,
+      anthropicKey,
+      120,
+      { temperature: 0.2 }
+    );
+
+    const title = normalizeGeneratedTitle(rawTitle, fallbackTitle);
+    return res.status(200).json({ success: true, title });
+  } catch (error) {
+    return next(error);
   }
 };
 

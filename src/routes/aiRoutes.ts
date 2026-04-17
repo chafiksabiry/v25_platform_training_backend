@@ -24,6 +24,11 @@ router.post(
   aiController.chat
 );
 
+router.post(
+  '/chat/title',
+  aiController.generateChatTitle
+);
+
 router.get(
   '/chat/history',
   aiController.listChatHistory
