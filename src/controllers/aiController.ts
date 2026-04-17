@@ -246,6 +246,48 @@ const ensureVisualResponseContract = async (
   return text.trim();
 };
 
+const inferKbDomainFromContext = (parsedContext: any): {
+  domainLabel: string;
+  strictTopicGuard: string;
+} => {
+  const docs = Array.isArray(parsedContext?.knowledgeBaseDocuments)
+    ? parsedContext.knowledgeBaseDocuments
+    : [];
+  const kbText = docs
+    .map((d: any) =>
+      [
+        String(d?.name || ''),
+        String(d?.summary || ''),
+        Array.isArray(d?.keyTerms) ? d.keyTerms.join(' ') : '',
+      ].join(' ')
+    )
+    .join(' ')
+    .toLowerCase();
+
+  const hasAiSignal = /(ai|intelligence artificielle|machine learning|deep learning|chatgpt|llm|python|data|prompt)/i.test(kbText);
+  const hasInsuranceSignal = /(assurance|mutuelle|courtage|garantie|sinistre|remboursement|sant[eé])/i.test(kbText);
+
+  if (hasAiSignal && !hasInsuranceSignal) {
+    return {
+      domainLabel: 'IA / outils IA',
+      strictTopicGuard:
+        'The dominant KB domain is AI tools. Do NOT switch to insurance or brokerage unless the user explicitly asks for it.',
+    };
+  }
+  if (hasInsuranceSignal && !hasAiSignal) {
+    return {
+      domainLabel: 'Assurance',
+      strictTopicGuard:
+        'The dominant KB domain is insurance. Stay in insurance context unless user asks another domain explicitly.',
+    };
+  }
+  return {
+    domainLabel: 'Non déterminé (mixte)',
+    strictTopicGuard:
+      'Infer domain strictly from user message and KB documents. Never invent a different domain.',
+  };
+};
+
 export const generateTrainingFromGig = async (
   req: Request,
   res: Response,
@@ -407,6 +449,7 @@ export const chat = async (
     }
     const selectedDuration = parsedContext?.selectedDuration || 'non specifiee';
     const selectedMethodology = parsedContext?.selectedMethodology || 'Methodologie 360';
+    const inferredDomain = inferKbDomainFromContext(parsedContext);
     const safeGigId = toObjectIdOrUndefined(gigId);
     const safeCompanyId = toObjectIdOrUndefined(companyId);
     const safeSessionId = toObjectIdOrUndefined(sessionId);
@@ -440,6 +483,9 @@ export const chat = async (
       'Do not output decorative separators.',
       `ALWAYS apply this methodology framework: ${selectedMethodology}.`,
       `ALWAYS treat the training target duration as: ${selectedDuration}.`,
+      'IMPORTANT: Methodology defines pedagogical approach only. It must NOT force the business/topic domain.',
+      `Dominant domain from KB/context: ${inferredDomain.domainLabel}.`,
+      inferredDomain.strictTopicGuard,
       'Duration must come ONLY from the selected duration constraint, never from methodology component durations.',
       `In every answer, include a short reminder line: "Rappel — Duree cible: ${selectedDuration} | Methodologie: ${selectedMethodology}".`,
       'Do NOT include sections about resources/support/materials/equipment (e.g., "Supports et ressources", "Documents fournis", "Équipement nécessaire").',
