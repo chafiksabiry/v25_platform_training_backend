@@ -1,5 +1,4 @@
 import { Response } from 'express';
-import axios from 'axios';
 import { AuthRequest } from '../middleware/auth';
 import trainingJourneyService from '../services/trainingJourneyService';
 import { asyncHandler } from '../middleware/errorHandler';
@@ -191,44 +190,22 @@ export const generateTrainingThumbnail = asyncHandler(async (req: AuthRequest, r
   const prompt = String(body.prompt || '').trim();
   const gigTitle = String(body.gigTitle || '').trim();
   const industry = String(body.industry || '').trim();
+  const anthropicKey = req.headers['x-anthropic-key'] as string | undefined;
   const seed = prompt || `Professional training thumbnail for ${gigTitle || 'training'} in ${industry || 'business'} domain`;
 
-  const generatedUrl = await ImageGenerationService.generateImage(seed);
-  if (!generatedUrl) {
-    return res.status(422).json({ success: false, error: 'Could not generate thumbnail image' });
-  }
-
   try {
-    // Download image bytes server-side, then upload to Cloudinary.
-    // This avoids Cloudinary remote-fetch failures on some source URLs.
-    const imageResponse = await axios.get<ArrayBuffer>(generatedUrl, {
-      responseType: 'arraybuffer',
-      timeout: 15000
-    });
-    const buffer = Buffer.from(imageResponse.data);
+    const buffer = await ImageGenerationService.generateImageBuffer(seed, anthropicKey);
     const uploaded = await cloudinaryService.uploadImageBuffer(buffer, 'trainings/thumbnails');
     return res.status(200).json({
       success: true,
       url: uploaded.url,
       publicId: uploaded.publicId
     });
-  } catch (bufferUploadError) {
-    console.warn('[journeyController:generateTrainingThumbnail] Buffer upload failed, trying remote upload');
-  }
-
-  try {
-    const uploaded = await cloudinaryService.uploadRemoteImage(generatedUrl, 'trainings/thumbnails');
-    return res.status(200).json({
-      success: true,
-      url: uploaded.url,
-      publicId: uploaded.publicId
-    });
   } catch (error) {
-    console.warn('[journeyController:generateTrainingThumbnail] Cloudinary upload failed, returning source URL');
-    return res.status(200).json({
-      success: true,
-      url: generatedUrl,
-      publicId: ''
+    console.error('[journeyController:generateTrainingThumbnail] Failed to generate/upload thumbnail:', error);
+    return res.status(502).json({
+      success: false,
+      error: 'AI thumbnail generation failed before Cloudinary save. Check OPENAI_API_KEY, ANTHROPIC_API_KEY, and Cloudinary credentials.'
     });
   }
 });
