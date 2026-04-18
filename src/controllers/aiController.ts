@@ -94,93 +94,6 @@ const isValidStyleBlueprint = (candidate: any): boolean => {
   return true;
 };
 
-const getStylePresetFromSeed = (seedText: string) => {
-  const presets = [
-    {
-      moduleCardThemes: [
-        { bg: '#eefdff', border: '#bce7ea', text: '#132b33' },
-        { bg: '#f2fffa', border: '#b9ead7', text: '#123529' },
-        { bg: '#eef7ff', border: '#bad5ef', text: '#1a2c45' },
-      ],
-      titleColor: '#14233b',
-      accentColor: '#0ea5a0',
-      contentTheme: {
-        bodyColor: '#13212a',
-        headingColor: '#102033',
-        tableBorder: '#bfe2df',
-        tableHeaderBg: '#ddf7f4',
-        tableHeaderText: '#10303a',
-        tableRowBg: '#f4fffd',
-        kpiBg: '#e9fbf7',
-        kpiBorder: '#bde9de',
-        kpiLabel: '#2e6163',
-        kpiValue: '#10313a',
-        moduleShape: 'soft',
-        panelBg: '#f4fffc',
-        panelBorder: '#bde9df',
-        badgeBg: '#e2f8f3',
-        badgeText: '#0f766e',
-      },
-    },
-    {
-      moduleCardThemes: [
-        { bg: '#fff8ea', border: '#edd6a8', text: '#2e2417' },
-        { bg: '#fff2df', border: '#efc07e', text: '#31220d' },
-        { bg: '#fff9f2', border: '#e9cc9b', text: '#2f2617' },
-      ],
-      titleColor: '#1c2339',
-      accentColor: '#f59e0b',
-      contentTheme: {
-        bodyColor: '#2a2218',
-        headingColor: '#18223a',
-        tableBorder: '#e6d5b6',
-        tableHeaderBg: '#fff2dc',
-        tableHeaderText: '#2a2218',
-        tableRowBg: '#fffaf1',
-        kpiBg: '#fff6e9',
-        kpiBorder: '#edd6a8',
-        kpiLabel: '#8a6830',
-        kpiValue: '#2f2617',
-        moduleShape: 'rounded',
-        panelBg: '#fffaf1',
-        panelBorder: '#ecd8b2',
-        badgeBg: '#fff0d8',
-        badgeText: '#b97008',
-      },
-    },
-    {
-      moduleCardThemes: [
-        { bg: '#f0f4ff', border: '#cad8fa', text: '#1a2948' },
-        { bg: '#f4f7ff', border: '#d5def9', text: '#1a2948' },
-        { bg: '#eef6f0', border: '#cfe7d5', text: '#183525' },
-      ],
-      titleColor: '#0f213f',
-      accentColor: '#6366f1',
-      contentTheme: {
-        bodyColor: '#1b2738',
-        headingColor: '#112141',
-        tableBorder: '#ced8f0',
-        tableHeaderBg: '#eaf0ff',
-        tableHeaderText: '#112141',
-        tableRowBg: '#f8faff',
-        kpiBg: '#eef2ff',
-        kpiBorder: '#cfd8f3',
-        kpiLabel: '#4b5c8f',
-        kpiValue: '#182a4a',
-        moduleShape: 'soft',
-        panelBg: '#f8faff',
-        panelBorder: '#d3dcf5',
-        badgeBg: '#e8eeff',
-        badgeText: '#3949ab',
-      },
-    },
-  ];
-
-  const seed = String(seedText || '');
-  const hash = seed.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
-  return presets[hash % presets.length];
-};
-
 const generateStyleBlueprintWithClaude = async (
   contentText: string,
   selectedDuration: string,
@@ -192,6 +105,7 @@ const generateStyleBlueprintWithClaude = async (
       'Generate ONLY a JSON object (no markdown, no code fence, no extra text).',
       'The JSON must match this shape exactly:',
       '{"moduleCardThemes":[{"bg":"#hex","border":"#hex","text":"#hex"}],"titleColor":"#hex","accentColor":"#hex","contentTheme":{"bodyColor":"#hex","headingColor":"#hex","tableBorder":"#hex","tableHeaderBg":"#hex","tableHeaderText":"#hex","tableRowBg":"#hex","kpiBg":"#hex","kpiBorder":"#hex","kpiLabel":"#hex","kpiValue":"#hex","moduleShape":"rounded|square|soft","panelBg":"#hex","panelBorder":"#hex","badgeBg":"#hex","badgeText":"#hex"}}',
+      'Create a fresh non-repetitive visual identity for this specific training content.',
       `Target duration: ${selectedDuration}.`,
       `Methodology: ${selectedMethodology}.`,
       'Content to style:',
@@ -258,10 +172,6 @@ const ensureVisualResponseContract = async (
       anthropicKey
     );
   }
-  if (!styleBlueprint) {
-    styleBlueprint = getStylePresetFromSeed(seedText);
-  }
-
   if (styleBlueprint) {
     text = text.replace(/<harx-style>[\s\S]*?<\/harx-style>/gi, '').trim();
     text += [
@@ -270,7 +180,7 @@ const ensureVisualResponseContract = async (
     ].join('\n');
   }
 
-  return text.trim();
+  return text.replace(/<harx-style>[\s\S]*?<\/harx-style>/gi, (match) => (styleBlueprint ? match : '')).trim();
 };
 
 const inferKbDomainFromContext = (parsedContext: any): {
