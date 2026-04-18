@@ -146,6 +146,29 @@ export type RepSlideProgressSummary = {
 };
 
 class TrainingJourneyService {
+  private resolveTrainingLogo(journey: any): { type: 'icon' | 'image'; value: string } {
+    const explicitType = String(journey?.trainingLogo?.type || '').trim().toLowerCase();
+    const explicitValue = String(journey?.trainingLogo?.value || '').trim();
+    if ((explicitType === 'icon' || explicitType === 'image') && explicitValue) {
+      return { type: explicitType as 'icon' | 'image', value: explicitValue };
+    }
+
+    const seed = `${journey?.title || ''} ${journey?.name || ''} ${journey?.description || ''}`.toLowerCase();
+    if (/\b(securit|kyc|compliance|conformit|risk)\b/.test(seed)) {
+      return { type: 'icon', value: 'shield' };
+    }
+    if (/\b(vente|sales|negociation|closing|prospection|crm)\b/.test(seed)) {
+      return { type: 'icon', value: 'briefcase' };
+    }
+    if (/\b(report|data|analytics|kpi|tableau|dashboard)\b/.test(seed)) {
+      return { type: 'icon', value: 'chart' };
+    }
+    if (/\b(ai|ia|tech|digital|code|developpement|devops|cloud)\b/.test(seed)) {
+      return { type: 'icon', value: 'laptop' };
+    }
+    return { type: 'icon', value: 'book-open' };
+  }
+
   private ensureObjectIds(journey: any): void {
     if (!journey.modules) return;
 
@@ -437,6 +460,13 @@ class TrainingJourneyService {
 
   async getTrainerDashboard(companyId: string, gigId?: string) {
     const journeys = await this.getJourneysByCompanyAndGig(companyId, gigId);
+    const journeysWithLogo = journeys.map((journey: any) => {
+      const base = typeof journey?.toObject === 'function' ? journey.toObject() : journey;
+      return {
+        ...base,
+        trainingLogo: this.resolveTrainingLogo(journey)
+      };
+    });
 
     const enrolledRepIds = new Set<string>();
     journeys.forEach(journey => {
@@ -447,7 +477,7 @@ class TrainingJourneyService {
 
     if (enrolledRepIds.size === 0) {
       return {
-        journeys,
+        journeys: journeysWithLogo,
         totalTrainees: 0,
         activeTrainees: 0,
         completionRate: 0,
@@ -529,7 +559,7 @@ class TrainingJourneyService {
     const validRepCount = traineeInfoList.length;
 
     return {
-      journeys,
+      journeys: journeysWithLogo,
       totalTrainees: validRepCount,
       activeTrainees: activeCount,
       completionRate: validRepCount > 0 ? (completedCount / validRepCount) * 100 : 0,

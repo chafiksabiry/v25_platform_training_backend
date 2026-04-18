@@ -147,6 +147,10 @@ export interface ITrainingJourney extends Document {
     fontFamily?: string;
     layoutStyle?: 'modern' | 'corporate' | 'creative';
   };
+  trainingLogo?: {
+    type?: 'icon' | 'image';
+    value?: string;
+  };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -298,6 +302,17 @@ const trainingJourneySchema = new Schema<ITrainingJourney>(
       accentColor: { type: String },
       fontFamily: { type: String },
       layoutStyle: { type: String, enum: ['modern', 'corporate', 'creative'] }
+    },
+    trainingLogo: {
+      type: {
+        type: String,
+        enum: ['icon', 'image'],
+        default: 'icon'
+      },
+      value: {
+        type: String,
+        trim: true
+      }
     }
   },
   {
