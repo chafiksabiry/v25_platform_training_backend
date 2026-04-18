@@ -15,6 +15,7 @@ import { promisify } from 'util';
 
 const unlinkAsync = promisify(fs.unlink);
 const HARX_STYLE_TAG_REGEX = /<harx-style>\s*\{[\s\S]*?\}\s*<\/harx-style>/i;
+const HARX_HTML_TAG_REGEX = /<harx-html>[\s\S]*?<\/harx-html>/i;
 const MARKDOWN_TABLE_REGEX = /(?:^|\n)\|.+\|(?:\n\|[-:\s|]+\|)(?:\n\|.*\|)*/m;
 
 const toObjectIdOrUndefined = (value: unknown): mongoose.Types.ObjectId | undefined => {
@@ -229,8 +230,14 @@ const ensureVisualResponseContract = async (
   if (!text) text = "Je n'ai pas pu generer une reponse pour le moment.";
 
   const lowerSeed = String(seedText || '').toLowerCase();
+  const asksHtmlExperience =
+    /\b(html|css|javascript|js|page\s*web|web\s*page|landing\s*page|mini\s*site)\b/i.test(lowerSeed);
   const asksStructuredPlan =
     /\b(plan|programme|parcours|curriculum|roadmap|agenda|structure|schema|planning)\b/i.test(lowerSeed);
+
+  if (asksHtmlExperience || HARX_HTML_TAG_REGEX.test(text)) {
+    return text.replace(HARX_STYLE_TAG_REGEX, '').trim();
+  }
 
   // Keep chat spontaneous by default; only enforce visual contracts for clear plan-building requests.
   if (!asksStructuredPlan) {
@@ -531,6 +538,7 @@ export const chat = async (
       'Do not output decorative separators.',
       'Visual style policy: for normal chat replies, keep formatting light and conversational (no forced cards/tables).',
       'When the user asks for a plan/program structure, switch to structured output with clear blocks and practical timing.',
+      'If user explicitly asks for HTML/CSS/JS output, return exactly one <harx-html>...</harx-html> block containing a full HTML document with inline <style> and optional <script>; no markdown, no extra text.',
       `ALWAYS apply this methodology framework: ${selectedMethodology}.`,
       `ALWAYS treat the training target duration as: ${selectedDuration}.`,
       'IMPORTANT: Methodology defines pedagogical approach only. It must NOT force the business/topic domain.',
