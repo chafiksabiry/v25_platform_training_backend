@@ -25,6 +25,21 @@ class CloudinaryService {
     };
   }
 
+  async uploadRemoteImage(
+    imageUrl: string,
+    folder: string = 'training-images'
+  ): Promise<{ url: string; publicId: string }> {
+    const result = await cloudinary.uploader.upload(imageUrl, {
+      folder,
+      resource_type: 'image'
+    });
+
+    return {
+      url: result.secure_url,
+      publicId: result.public_id
+    };
+  }
+
   async uploadDocument(
     file: Express.Multer.File,
     folder: string = 'training-content'

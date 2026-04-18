@@ -22,6 +22,7 @@ router.get('/rep/:repId/slide-progress-summary', journeyController.getRepSlidePr
 router.get('/rep/:repId/training-tracking', journeyController.listTrainingTrackingByRep);
 router.get('/journey/:journeyId/reps-progress', journeyController.getRepProgressByTraining);
 router.get('/gig/:gigId', journeyController.listJourneysByGig);
+router.post('/generate-thumbnail', journeyController.generateTrainingThumbnail);
 router.get('/rep/:repId', journeyController.getJourneysForRep);
 router.get('/:id', journeyController.getJourneyById);
 router.put('/:id', journeyController.updateJourney);
