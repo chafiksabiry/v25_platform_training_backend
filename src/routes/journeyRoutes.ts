@@ -24,6 +24,7 @@ router.get('/journey/:journeyId/reps-progress', journeyController.getRepProgress
 router.get('/gig/:gigId', journeyController.listJourneysByGig);
 router.post('/generate-thumbnail', journeyController.generateTrainingThumbnail);
 router.post('/suggest-vision', journeyController.suggestTrainingVision);
+router.post('/suggest-target-roles', journeyController.suggestTargetRoles);
 router.get('/rep/:repId', journeyController.getJourneysForRep);
 router.get('/:id', journeyController.getJourneyById);
 router.put('/:id', journeyController.updateJourney);

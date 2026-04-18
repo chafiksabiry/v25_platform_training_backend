@@ -290,6 +290,84 @@ export const suggestTrainingVision = asyncHandler(async (req: AuthRequest, res: 
   });
 });
 
+export const suggestTargetRoles = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const payload = req.body || {};
+  const anthropicKey = req.headers['x-anthropic-key'] as string | undefined;
+  const gig = payload.gig || {};
+  const industry = String(payload.industry || gig?.industry || '').trim();
+
+  const gigTitle = String(gig?.title || '').trim();
+  const gigDescription = String(gig?.description || '').trim();
+  const activities = Array.isArray(gig?.activities) ? gig.activities : [];
+  const skills = gig?.skills || {};
+
+  const allowedRoles: string[] = Array.isArray(payload.allowedRoles) ? payload.allowedRoles : [];
+  if (!allowedRoles.length) {
+    return res.status(400).json({ success: false, error: 'allowedRoles is required' });
+  }
+
+  const prompt = [
+    'Select the most relevant training target roles for this gig context.',
+    '',
+    'GIG CONTEXT:',
+    `- title: ${gigTitle}`,
+    `- description: ${gigDescription}`,
+    `- industry: ${industry}`,
+    `- activities: ${JSON.stringify(activities).slice(0, 2500)}`,
+    `- skills: ${JSON.stringify(skills).slice(0, 2500)}`,
+    '',
+    `ALLOWED ROLES: ${allowedRoles.join(' | ')}`,
+    '',
+    'RULES:',
+    '- Return 2 to 5 roles maximum.',
+    '- Select only from ALLOWED ROLES.',
+    '- Prioritize concrete operational fit with gig context.',
+    '',
+    'STRICT JSON FORMAT:',
+    '{"roles":["role1","role2"]}'
+  ].join('\n');
+
+  const systemPrompt = [
+    'You are a training audience selector.',
+    'Return valid JSON only.',
+    'No markdown.'
+  ].join(' ');
+
+  const raw = await aiService.generateWithClaude(
+    prompt,
+    systemPrompt,
+    anthropicKey,
+    500,
+    { temperature: 0.2 }
+  );
+
+  let parsed: any = {};
+  try {
+    parsed = aiService.parseJson(raw, 'suggest_target_roles');
+  } catch {
+    parsed = {};
+  }
+
+  const normalizedAllowed = new Set(allowedRoles.map(r => String(r || '').trim().toLowerCase()));
+  const suggested = (Array.isArray(parsed?.roles) ? parsed.roles : [])
+    .map((r: any) => String(r || '').trim())
+    .filter((r: string) => normalizedAllowed.has(r.toLowerCase()));
+
+  const roles = Array.from(new Set(suggested)).slice(0, 5);
+
+  if (!roles.length) {
+    return res.status(422).json({
+      success: false,
+      error: 'AI could not determine suitable target roles from the provided gig context'
+    });
+  }
+
+  return res.status(200).json({
+    success: true,
+    data: { roles }
+  });
+});
+
 /** Trainings (journeys) where this rep is enrolled — linked to gig via journey.gigId when set. */
 export const getJourneysForRep = asyncHandler(async (req: AuthRequest, res: Response) => {
   const repId = String(req.params.repId || '').trim();
