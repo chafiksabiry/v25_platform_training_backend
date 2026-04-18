@@ -61,6 +61,28 @@ const extractStyleJsonFromTag = (rawText: string): any | null => {
   }
 };
 
+const extractHtmlDocumentCandidate = (rawText: string): string | null => {
+  const source = String(rawText || '').trim();
+  if (!source) return null;
+
+  const taggedMatch = source.match(/<harx-html>([\s\S]*?)<\/harx-html>/i);
+  if (taggedMatch?.[1]?.trim()) return taggedMatch[1].trim();
+
+  const fencedHtmlMatch = source.match(/```(?:html)?\s*([\s\S]*?)```/i);
+  if (fencedHtmlMatch?.[1]?.trim()) {
+    const candidate = fencedHtmlMatch[1].trim();
+    if (/<(?:html|head|body|style|script|main|section|article|div)\b/i.test(candidate)) {
+      return candidate;
+    }
+  }
+
+  if (/<(?:html|head|body|style|script)\b/i.test(source)) {
+    return source;
+  }
+
+  return null;
+};
+
 const isValidStyleBlueprint = (candidate: any): boolean => {
   if (!candidate || typeof candidate !== 'object') return false;
   if (!Array.isArray(candidate.moduleCardThemes) || candidate.moduleCardThemes.length < 1) return false;
@@ -236,7 +258,15 @@ const ensureVisualResponseContract = async (
     /\b(plan|programme|parcours|curriculum|roadmap|agenda|structure|schema|planning)\b/i.test(lowerSeed);
 
   if (asksHtmlExperience || HARX_HTML_TAG_REGEX.test(text)) {
-    return text.replace(HARX_STYLE_TAG_REGEX, '').trim();
+    const cleaned = text.replace(HARX_STYLE_TAG_REGEX, '').trim();
+    if (HARX_HTML_TAG_REGEX.test(cleaned)) {
+      return cleaned;
+    }
+    const htmlCandidate = extractHtmlDocumentCandidate(cleaned);
+    if (htmlCandidate) {
+      return `<harx-html>${htmlCandidate}</harx-html>`;
+    }
+    return cleaned;
   }
 
   // Keep chat spontaneous by default; only enforce visual contracts for clear plan-building requests.
