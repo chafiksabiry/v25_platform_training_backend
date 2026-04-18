@@ -210,6 +210,86 @@ export const generateTrainingThumbnail = asyncHandler(async (req: AuthRequest, r
   }
 });
 
+export const suggestTrainingVision = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const payload = req.body || {};
+  const target = String(payload.target || 'both').trim().toLowerCase();
+  const anthropicKey = req.headers['x-anthropic-key'] as string | undefined;
+  const gig = payload.gig || {};
+  const industry = String(payload.industry || gig?.industry || '').trim();
+  const currentTitle = String(payload.currentTitle || '').trim();
+  const currentDescription = String(payload.currentDescription || '').trim();
+
+  const gigTitle = String(gig?.title || '').trim();
+  const gigDescription = String(gig?.description || '').trim();
+  const activities = Array.isArray(gig?.activities) ? gig.activities : [];
+  const skills = gig?.skills || {};
+
+  const userPrompt = [
+    'Generate training vision metadata from the gig context.',
+    `Target output: ${target}`,
+    '',
+    'GIG CONTEXT:',
+    `- title: ${gigTitle}`,
+    `- description: ${gigDescription}`,
+    `- industry: ${industry}`,
+    `- activities: ${JSON.stringify(activities).slice(0, 2500)}`,
+    `- skills: ${JSON.stringify(skills).slice(0, 2500)}`,
+    '',
+    'CURRENT FORM VALUES:',
+    `- currentTitle: ${currentTitle}`,
+    `- currentDescription: ${currentDescription}`,
+    '',
+    'RULES:',
+    '- Output concise, professional training metadata.',
+    '- Keep business domain aligned with gig context.',
+    '- Do not mention AI, Claude, or implementation details.',
+    '- Title: 4-10 words.',
+    '- Description: 1-3 sentences, practical and outcome-oriented.',
+    '',
+    'STRICT JSON FORMAT:',
+    '{"title":"...","description":"..."}'
+  ].join('\n');
+
+  const systemPrompt = [
+    'You are a training program designer.',
+    'Return valid JSON only.',
+    'No markdown, no extra prose.'
+  ].join(' ');
+
+  const raw = await aiService.generateWithClaude(
+    userPrompt,
+    systemPrompt,
+    anthropicKey,
+    600,
+    { temperature: 0.35 }
+  );
+
+  let parsed: any;
+  try {
+    parsed = aiService.parseJson(raw, 'suggest_training_vision');
+  } catch {
+    parsed = {};
+  }
+
+  const suggestedTitle = String(parsed?.title || gigTitle || currentTitle || '').trim();
+  const suggestedDescription = String(parsed?.description || gigDescription || currentDescription || '').trim();
+
+  if (!suggestedTitle && !suggestedDescription) {
+    return res.status(422).json({
+      success: false,
+      error: 'AI did not return usable training vision content'
+    });
+  }
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      title: suggestedTitle,
+      description: suggestedDescription
+    }
+  });
+});
+
 /** Trainings (journeys) where this rep is enrolled — linked to gig via journey.gigId when set. */
 export const getJourneysForRep = asyncHandler(async (req: AuthRequest, res: Response) => {
   const repId = String(req.params.repId || '').trim();

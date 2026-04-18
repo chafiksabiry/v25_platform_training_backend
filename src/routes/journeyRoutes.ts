@@ -23,6 +23,7 @@ router.get('/rep/:repId/training-tracking', journeyController.listTrainingTracki
 router.get('/journey/:journeyId/reps-progress', journeyController.getRepProgressByTraining);
 router.get('/gig/:gigId', journeyController.listJourneysByGig);
 router.post('/generate-thumbnail', journeyController.generateTrainingThumbnail);
+router.post('/suggest-vision', journeyController.suggestTrainingVision);
 router.get('/rep/:repId', journeyController.getJourneysForRep);
 router.get('/:id', journeyController.getJourneyById);
 router.put('/:id', journeyController.updateJourney);
