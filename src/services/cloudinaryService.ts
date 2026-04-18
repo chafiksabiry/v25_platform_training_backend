@@ -40,6 +40,28 @@ class CloudinaryService {
     };
   }
 
+  async uploadImageBuffer(
+    buffer: Buffer,
+    folder: string = 'training-images'
+  ): Promise<{ url: string; publicId: string }> {
+    return new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          folder,
+          resource_type: 'image'
+        },
+        (error, result) => {
+          if (error || !result) return reject(error || new Error('Cloudinary upload failed'));
+          resolve({
+            url: result.secure_url,
+            publicId: result.public_id
+          });
+        }
+      );
+      stream.end(buffer);
+    });
+  }
+
   async uploadDocument(
     file: Express.Multer.File,
     folder: string = 'training-content'

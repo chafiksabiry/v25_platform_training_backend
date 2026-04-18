@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import axios from 'axios';
 import { AuthRequest } from '../middleware/auth';
 import trainingJourneyService from '../services/trainingJourneyService';
 import { asyncHandler } from '../middleware/errorHandler';
@@ -195,6 +196,24 @@ export const generateTrainingThumbnail = asyncHandler(async (req: AuthRequest, r
   const generatedUrl = await ImageGenerationService.generateImage(seed);
   if (!generatedUrl) {
     return res.status(422).json({ success: false, error: 'Could not generate thumbnail image' });
+  }
+
+  try {
+    // Download image bytes server-side, then upload to Cloudinary.
+    // This avoids Cloudinary remote-fetch failures on some source URLs.
+    const imageResponse = await axios.get<ArrayBuffer>(generatedUrl, {
+      responseType: 'arraybuffer',
+      timeout: 15000
+    });
+    const buffer = Buffer.from(imageResponse.data);
+    const uploaded = await cloudinaryService.uploadImageBuffer(buffer, 'trainings/thumbnails');
+    return res.status(200).json({
+      success: true,
+      url: uploaded.url,
+      publicId: uploaded.publicId
+    });
+  } catch (bufferUploadError) {
+    console.warn('[journeyController:generateTrainingThumbnail] Buffer upload failed, trying remote upload');
   }
 
   try {
