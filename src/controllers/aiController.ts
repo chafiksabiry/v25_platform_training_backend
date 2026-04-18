@@ -15,7 +15,6 @@ import { promisify } from 'util';
 
 const unlinkAsync = promisify(fs.unlink);
 const HARX_STYLE_TAG_REGEX = /<harx-style>\s*\{[\s\S]*?\}\s*<\/harx-style>/i;
-const HARX_HTML_TAG_REGEX = /<harx-html>[\s\S]*?<\/harx-html>/i;
 const MARKDOWN_TABLE_REGEX = /(?:^|\n)\|.+\|(?:\n\|[-:\s|]+\|)(?:\n\|.*\|)*/m;
 
 const toObjectIdOrUndefined = (value: unknown): mongoose.Types.ObjectId | undefined => {
@@ -59,28 +58,6 @@ const extractStyleJsonFromTag = (rawText: string): any | null => {
   } catch {
     return null;
   }
-};
-
-const extractHtmlDocumentCandidate = (rawText: string): string | null => {
-  const source = String(rawText || '').trim();
-  if (!source) return null;
-
-  const taggedMatch = source.match(/<harx-html>([\s\S]*?)<\/harx-html>/i);
-  if (taggedMatch?.[1]?.trim()) return taggedMatch[1].trim();
-
-  const fencedHtmlMatch = source.match(/```(?:html)?\s*([\s\S]*?)```/i);
-  if (fencedHtmlMatch?.[1]?.trim()) {
-    const candidate = fencedHtmlMatch[1].trim();
-    if (/<(?:html|head|body|style|script|main|section|article|div)\b/i.test(candidate)) {
-      return candidate;
-    }
-  }
-
-  if (/<(?:html|head|body|style|script)\b/i.test(source)) {
-    return source;
-  }
-
-  return null;
 };
 
 const isValidStyleBlueprint = (candidate: any): boolean => {
@@ -250,24 +227,11 @@ const ensureVisualResponseContract = async (
 ): Promise<string> => {
   let text = String(rawText || '').trim();
   if (!text) text = "Je n'ai pas pu generer une reponse pour le moment.";
+  text = text.replace(/<harx-html>[\s\S]*?<\/harx-html>/gi, '').trim();
 
   const lowerSeed = String(seedText || '').toLowerCase();
-  const asksHtmlExperience =
-    /\b(html|css|javascript|js|page\s*web|web\s*page|landing\s*page|mini\s*site)\b/i.test(lowerSeed);
   const asksStructuredPlan =
-    /\b(plan|programme|parcours|curriculum|roadmap|agenda|structure|schema|planning)\b/i.test(lowerSeed);
-
-  if (asksHtmlExperience || HARX_HTML_TAG_REGEX.test(text)) {
-    const cleaned = text.replace(HARX_STYLE_TAG_REGEX, '').trim();
-    if (HARX_HTML_TAG_REGEX.test(cleaned)) {
-      return cleaned;
-    }
-    const htmlCandidate = extractHtmlDocumentCandidate(cleaned);
-    if (htmlCandidate) {
-      return `<harx-html>${htmlCandidate}</harx-html>`;
-    }
-    return cleaned;
-  }
+    /\b(plan|programme|parcours|curriculum|roadmap|agenda|structure|schema|planning|module|contenu|cours|formation)\b/i.test(lowerSeed);
 
   // Keep chat spontaneous by default; only enforce visual contracts for clear plan-building requests.
   if (!asksStructuredPlan) {
@@ -566,9 +530,9 @@ export const chat = async (
       'Use clean, readable formatting: short paragraphs and bullet lists only when they add value.',
       'IMPORTANT: Avoid huge markdown titles (#, ##). Prefer plain text or compact section labels.',
       'Do not output decorative separators.',
-      'Visual style policy: for normal chat replies, keep formatting light and conversational (no forced cards/tables).',
-      'When the user asks for a plan/program structure, switch to structured output with clear blocks and practical timing.',
-      'If user explicitly asks for HTML/CSS/JS output, return exactly one <harx-html>...</harx-html> block containing a full HTML document with inline <style> and optional <script>; no markdown, no extra text.',
+      'Visual style policy: keep normal chat replies light and conversational.',
+      'For training plans, modules, and detailed content, return structured Markdown blocks optimized for rich styled rendering (clear headings, bullet points, concise tables).',
+      'Never output HTML, CSS, JavaScript, iframe snippets, or <harx-html> tags.',
       `ALWAYS apply this methodology framework: ${selectedMethodology}.`,
       `ALWAYS treat the training target duration as: ${selectedDuration}.`,
       'IMPORTANT: Methodology defines pedagogical approach only. It must NOT force the business/topic domain.',
