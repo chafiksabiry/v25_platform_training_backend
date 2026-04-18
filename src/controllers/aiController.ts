@@ -230,8 +230,7 @@ const ensureVisualResponseContract = async (
 
   const lowerSeed = String(seedText || '').toLowerCase();
   const asksStructuredPlan =
-    /\b(plan|programme|parcours|module|curriculum|roadmap|agenda|structure|schema|planning)\b/i.test(lowerSeed) ||
-    /\b(2h|3h|4h|120\s*min|dur[ée]e)\b/i.test(lowerSeed);
+    /\b(plan|programme|parcours|curriculum|roadmap|agenda|structure|schema|planning)\b/i.test(lowerSeed);
 
   // Keep chat spontaneous by default; only enforce visual contracts for clear plan-building requests.
   if (!asksStructuredPlan) {
@@ -531,7 +530,7 @@ export const chat = async (
       'IMPORTANT: Avoid huge markdown titles (#, ##). Prefer plain text or compact section labels.',
       'Do not output decorative separators.',
       'Visual style policy: for normal chat replies, keep formatting light and conversational (no forced cards/tables).',
-      'When the user asks for a plan/program/module structure, switch to structured output with clear blocks and practical timing.',
+      'When the user asks for a plan/program structure, switch to structured output with clear blocks and practical timing.',
       `ALWAYS apply this methodology framework: ${selectedMethodology}.`,
       `ALWAYS treat the training target duration as: ${selectedDuration}.`,
       'IMPORTANT: Methodology defines pedagogical approach only. It must NOT force the business/topic domain.',
