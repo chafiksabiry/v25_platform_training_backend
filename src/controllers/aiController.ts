@@ -63,6 +63,7 @@ const appendTrainingReadinessBlock = async (params: {
     '- ready: contenu suffisant pour valider / enregistrer la formation.',
     '- incomplete: au moins un module important manque de contenu substantiel.',
     '- not_applicable: pas de plan de formation clair dans cette reponse (banalites, questions seules, hors sujet).',
+    'REGLE ABSOLUE: si missingModules contient au moins un module, readiness DOIT etre incomplete (jamais ready). ready implique missingModules vide [].',
     'messageFr: phrase courte en francais pour l utilisateur (ex: ce qui manque).',
   ].join('\n');
 
@@ -91,9 +92,9 @@ const appendTrainingReadinessBlock = async (params: {
   }
 
   const readinessRaw = String(data?.readiness || '').trim();
-  const readiness =
+  let readiness: 'ready' | 'incomplete' | 'not_applicable' =
     readinessRaw === 'ready' || readinessRaw === 'incomplete' || readinessRaw === 'not_applicable'
-      ? readinessRaw
+      ? (readinessRaw as 'ready' | 'incomplete' | 'not_applicable')
       : 'not_applicable';
 
   const missingModules = Array.isArray(data?.missingModules)
@@ -106,7 +107,12 @@ const appendTrainingReadinessBlock = async (params: {
         .slice(0, 16)
     : [];
 
-  const messageFr =
+  /** Jamais « ready » tant qu’un module est listé comme incomplet (évite bouton Valider fantôme). */
+  if (readiness === 'ready' && missingModules.length > 0) {
+    readiness = 'incomplete';
+  }
+
+  let messageFr =
     String(data?.messageFr || '').trim() ||
     (readiness === 'ready'
       ? 'La formation semble prête. Vous pouvez la valider pour l’enregistrer.'
@@ -114,10 +120,14 @@ const appendTrainingReadinessBlock = async (params: {
         ? `Il manque encore du contenu pour ${missingModules.length} module(s).`
         : '');
 
+  if (readiness === 'incomplete' && missingModules.length > 0 && !messageFr) {
+    messageFr = `Il manque encore du contenu pour ${missingModules.length} module(s).`;
+  }
+
   if (readiness === 'not_applicable') return '';
 
   const actions: { id: string; label: string }[] = [];
-  if (readiness === 'ready') {
+  if (readiness === 'ready' && missingModules.length === 0) {
     actions.push({ id: 'validate_training', label: 'Valider la formation' });
   } else if (readiness === 'incomplete' && missingModules.length > 0) {
     actions.push({
