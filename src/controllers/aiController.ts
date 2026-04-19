@@ -16,7 +16,6 @@ import { promisify } from 'util';
 const unlinkAsync = promisify(fs.unlink);
 const HARX_STYLE_TAG_REGEX = /<harx-style>\s*\{[\s\S]*?\}\s*<\/harx-style>/i;
 const HARX_TRAINING_STATUS_REGEX = /<harx-training-status>\s*([\s\S]*?)\s*<\/harx-training-status>/i;
-const MARKDOWN_TABLE_REGEX = /(?:^|\n)\|.+\|(?:\n\|[-:\s|]+\|)(?:\n\|.*\|)*/m;
 
 const isJourneyBuilderApp = (parsed: any): boolean => String(parsed?.app || '').trim() === 'HARX Journey Builder';
 
@@ -281,15 +280,7 @@ const ensureVisualResponseContract = async (
     return text.replace(HARX_STYLE_TAG_REGEX, '').trim();
   }
 
-  if (!MARKDOWN_TABLE_REGEX.test(text)) {
-    text += [
-      '',
-      'Tableau de synthese',
-      '| Bloc | Duree cible | Methodologie |',
-      '|---|---|---|',
-      `| Plan de formation | ${selectedDuration} | ${selectedMethodology} |`,
-    ].join('\n');
-  }
+  // Ne plus injecter de tableau « Bloc | Durée | Méthodologie » : ce n’est pas du contenu slide et encombre la présentation.
 
   const existingStyle = extractStyleJsonFromTag(text);
   let styleBlueprint = isValidStyleBlueprint(existingStyle) ? existingStyle : null;
@@ -572,19 +563,19 @@ export const chat = async (
       'Visual style policy: keep normal chat replies light and conversational.',
       'For training plans, modules, and detailed content, return structured Markdown blocks optimized for rich styled rendering (clear headings, bullet points, concise tables).',
       'Never output HTML, CSS, JavaScript, iframe snippets, or <harx-html> tags.',
-      `ALWAYS apply this methodology framework: ${selectedMethodology}.`,
-      `ALWAYS treat the training target duration as: ${selectedDuration}.`,
-      'IMPORTANT: Methodology defines pedagogical approach only. It must NOT force the business/topic domain.',
+      `INTERNAL pacing (do not paste verbatim into slide-ready module bodies): methodology ${selectedMethodology}; global target duration ${selectedDuration}.`,
+      'IMPORTANT: Methodology shapes pedagogy only; it must NOT force the business/topic domain.',
       `KB keyword focus: ${inferredDomain.kbFocusLabel}.`,
       inferredDomain.strictTopicGuard,
-      'Duration must come ONLY from the selected duration constraint, never from methodology component durations.',
-      `When useful, add a short reminder line: "Rappel — Duree cible: ${selectedDuration} | Methodologie: ${selectedMethodology}".`,
+      'Do not add per-slide or per-module duration labels (e.g. "25 min", "Durée totale", "X minutes") unless the user explicitly asks for a timing breakdown.',
+      'Do NOT add reminder banners like "Rappel — Durée cible … | Méthodologie …" or similar meta lines in answers.',
+      'SLIDE-READY MODULE CONTENT: when producing or completing content that will appear on presentation slides, output ONLY learner-facing text (short headings, bullet lists, short paragraphs). No "## Objectifs pédagogiques" boilerplate, no evaluation grids, no admin recap tables, no methodology/duration headers in that body.',
       'Do NOT include sections about resources/support/materials/equipment (e.g., "Supports et ressources", "Documents fournis", "Équipement nécessaire").',
-      'Focus only on pedagogical structure, module content, activities, evaluation, and timing.',
+      'Focus on clear pedagogical ideas learners see on slides; keep pacing implicit unless the user asks for a schedule.',
       'If prior conversation history is off-domain, ignore it and prioritize current user message + KB context.',
       'Prefer useful clarity over rigid templates.',
       'Do NOT mention or infer company name, gig name, or gig description unless explicitly provided by user in current message.',
-      'If user asks for a training plan, generate a complete draft plan immediately (modules, duration, objectives, evaluation) without waiting for extra clarifications.',
+      'If user asks for a training plan, generate a complete draft plan immediately (modules with substantive slide-ready text, programme-level structure) without waiting for extra clarifications; for parts that become slides, obey SLIDE-READY MODULE CONTENT (no per-module timing banners in slide bodies).',
       'You may finish with 2-4 optional clarification questions, but only after providing the full initial plan.',
       'NEVER include fake UI buttons, markdown button syntax, or "Valider / Enregistrer" controls in your reply; the app shows validation actions separately when appropriate.'
     ].join(' ');
