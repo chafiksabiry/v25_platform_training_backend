@@ -15,7 +15,126 @@ import { promisify } from 'util';
 
 const unlinkAsync = promisify(fs.unlink);
 const HARX_STYLE_TAG_REGEX = /<harx-style>\s*\{[\s\S]*?\}\s*<\/harx-style>/i;
+const HARX_TRAINING_STATUS_REGEX = /<harx-training-status>\s*([\s\S]*?)\s*<\/harx-training-status>/i;
 const MARKDOWN_TABLE_REGEX = /(?:^|\n)\|.+\|(?:\n\|[-:\s|]+\|)(?:\n\|.*\|)*/m;
+
+const isJourneyBuilderApp = (parsed: any): boolean => String(parsed?.app || '').trim() === 'HARX Journey Builder';
+
+const stripStyleTagsForReadiness = (raw: string): string =>
+  String(raw || '')
+    .replace(/<harx-style>[\s\S]*?<\/harx-style>/gi, '')
+    .replace(HARX_TRAINING_STATUS_REGEX, '')
+    .trim();
+
+/**
+ * Second pass (Claude): decide if the training reply is ready to validate, incomplete, or N/A.
+ * Appends <harx-training-status>{...}</harx-training-status> for the Journey Builder UI (actions outside the composer).
+ */
+const appendTrainingReadinessBlock = async (params: {
+  assistantMessage: string;
+  userMessage: string;
+  parsedContext: any;
+  anthropicKey?: string;
+}): Promise<string> => {
+  const { assistantMessage, userMessage, parsedContext, anthropicKey } = params;
+  if (!isJourneyBuilderApp(parsedContext)) return '';
+
+  const compactAssistant = stripStyleTagsForReadiness(assistantMessage).slice(-14000);
+  if (!compactAssistant || compactAssistant.length < 80) return '';
+
+  const outline = Array.isArray(parsedContext?.curriculumOutline) ? parsedContext.curriculumOutline : [];
+
+  const prompt = [
+    'Analyse la derniere reponse assistant pour un parcours de formation HARX (Journey Builder).',
+    'Decide si le programme / plan est assez complet pour validation (modules avec contenu pedagogique concret).',
+    'Si des modules manquent encore de contenu (titre seul, todo, a completer, ou non traites), liste-les par titre.',
+    '',
+    `Message utilisateur le plus recent: ${String(userMessage || '').trim()}`,
+    '',
+    'Modules prevus / etat connu (JSON, peut etre vide):',
+    JSON.stringify(outline).slice(0, 8000),
+    '',
+    'Reponse assistant (extrait pertinent):',
+    compactAssistant,
+    '',
+    'Retourne UNIQUEMENT un JSON valide de forme:',
+    '{"readiness":"ready|incomplete|not_applicable","missingModules":[{"title":"","reason":""}],"messageFr":""}',
+    'readiness:',
+    '- ready: contenu suffisant pour valider / enregistrer la formation.',
+    '- incomplete: au moins un module important manque de contenu substantiel.',
+    '- not_applicable: pas de plan de formation clair dans cette reponse (banalites, questions seules, hors sujet).',
+    'messageFr: phrase courte en francais pour l utilisateur (ex: ce qui manque).',
+  ].join('\n');
+
+  const systemPrompt = [
+    'Tu es un controleur qualite pedagogique HARX.',
+    'Reponds en JSON strict uniquement, sans markdown ni code fence.',
+  ].join(' ');
+
+  let raw = '';
+  try {
+    raw = await aiService.generateWithClaude(prompt, systemPrompt, anthropicKey, 640, {
+      temperature: 0.12,
+      preferredModels: ['claude-3-5-haiku-20241022'],
+    });
+  } catch (e) {
+    console.warn('[chat] training readiness inference failed:', e);
+    return '';
+  }
+
+  let data: any;
+  try {
+    data = aiService.parseJson(String(raw || ''), 'trainingReadiness');
+  } catch {
+    console.warn('[chat] training readiness JSON parse failed');
+    return '';
+  }
+
+  const readinessRaw = String(data?.readiness || '').trim();
+  const readiness =
+    readinessRaw === 'ready' || readinessRaw === 'incomplete' || readinessRaw === 'not_applicable'
+      ? readinessRaw
+      : 'not_applicable';
+
+  const missingModules = Array.isArray(data?.missingModules)
+    ? (data.missingModules as any[])
+        .filter((m) => m && String(m.title || '').trim())
+        .map((m) => ({
+          title: String(m.title).trim(),
+          reason: m.reason ? String(m.reason).trim() : undefined,
+        }))
+        .slice(0, 16)
+    : [];
+
+  const messageFr =
+    String(data?.messageFr || '').trim() ||
+    (readiness === 'ready'
+      ? 'La formation semble prête. Vous pouvez la valider pour l’enregistrer.'
+      : readiness === 'incomplete' && missingModules.length > 0
+        ? `Il manque encore du contenu pour ${missingModules.length} module(s).`
+        : '');
+
+  if (readiness === 'not_applicable') return '';
+
+  const actions: { id: string; label: string }[] = [];
+  if (readiness === 'ready') {
+    actions.push({ id: 'validate_training', label: 'Valider la formation' });
+  } else if (readiness === 'incomplete' && missingModules.length > 0) {
+    actions.push({
+      id: 'save_without_missing',
+      label: `Enregistrer sans ces ${missingModules.length} module(s)`,
+    });
+    actions.push({
+      id: 'generate_missing_modules',
+      label: 'Générer le contenu des modules manquants',
+    });
+  }
+
+  if (actions.length === 0) return '';
+
+  const payload = { readiness, missingModules, messageFr, actions };
+  return `\n\n<harx-training-status>${JSON.stringify(payload)}</harx-training-status>`;
+};
 
 const toObjectIdOrUndefined = (value: unknown): mongoose.Types.ObjectId | undefined => {
   if (!value) return undefined;
@@ -456,7 +575,8 @@ export const chat = async (
       'Prefer useful clarity over rigid templates.',
       'Do NOT mention or infer company name, gig name, or gig description unless explicitly provided by user in current message.',
       'If user asks for a training plan, generate a complete draft plan immediately (modules, duration, objectives, evaluation) without waiting for extra clarifications.',
-      'You may finish with 2-4 optional clarification questions, but only after providing the full initial plan.'
+      'You may finish with 2-4 optional clarification questions, but only after providing the full initial plan.',
+      'NEVER include fake UI buttons, markdown button syntax, or "Valider / Enregistrer" controls in your reply; the app shows validation actions separately when appropriate.'
     ].join(' ');
 
     const streamEnabled = String(req.query.stream ?? 'true').toLowerCase() !== 'false';
@@ -471,13 +591,23 @@ export const chat = async (
         const correctiveSystemPrompt = `${systemPrompt} CRITICAL DOMAIN LOCK: ${inferredDomain.strictTopicGuard} If draft is off-domain, regenerate fully in the correct domain.`;
         response = await aiService.generateWithClaude(prompt, correctiveSystemPrompt, anthropicKey);
       }
-      const finalResponse = await ensureVisualResponseContract(
+      let finalResponse = await ensureVisualResponseContract(
         String(response || ''),
         selectedDuration,
         selectedMethodology,
         message.trim(),
         anthropicKey
       );
+
+      const readinessExtra = await appendTrainingReadinessBlock({
+        assistantMessage: finalResponse,
+        userMessage: message.trim(),
+        parsedContext,
+        anthropicKey,
+      });
+      if (readinessExtra) {
+        finalResponse = `${finalResponse}${readinessExtra}`;
+      }
 
       const userMessageText = message.trim();
       const assistantMessageText = finalResponse;
@@ -532,7 +662,7 @@ export const chat = async (
     }
 
     const userMessageText = message.trim();
-    const assistantMessageText = await ensureVisualResponseContract(
+    let assistantMessageText = await ensureVisualResponseContract(
       String(fullResponse || ''),
       selectedDuration,
       selectedMethodology,
@@ -548,6 +678,21 @@ export const chat = async (
         }
       }
     }
+
+    const readinessExtra = await appendTrainingReadinessBlock({
+      assistantMessage: assistantMessageText,
+      userMessage: userMessageText,
+      parsedContext,
+      anthropicKey,
+    });
+    if (readinessExtra) {
+      assistantMessageText = `${assistantMessageText}${readinessExtra}`;
+      res.write(readinessExtra);
+      if (typeof (res as any).flush === 'function') {
+        (res as any).flush();
+      }
+    }
+
     activeSession.messages.push(
       { role: 'user', text: userMessageText, createdAt: new Date() } as any,
       { role: 'assistant', text: assistantMessageText, createdAt: new Date() } as any
