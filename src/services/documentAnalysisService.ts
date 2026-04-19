@@ -515,7 +515,7 @@ class DocumentAnalysisService {
 STYLE & QUALITÉ (comme un document Claude de référence) :
 - Une seule idée dominante par slide ; titre fort et court (≤ 14 mots) qui porte cette idée.
 - Corps : soit 2 à 4 phrases courtes et informatives, soit 3 à 5 puces au parallélisme grammatical ; ne répète pas le titre.
-- Champs "content" et "bullets" : uniquement le texte visible par l’apprenant sur la slide. Interdiction d’y mettre durées (« 25 min », « Durée totale »), rappels méthodologie/durée, tableaux récap, ou méta pédagogique hors slide.
+- Champs "content" et "bullets" : texte visible par l’apprenant ; Markdown léger autorisé dans "content" (**gras**, *italique*, listes -, sauts de ligne) pour cohérence avec le chat. Dans "bullets", chaque élément reste une phrase ou courte puce sans markdown complexe. Interdiction de durées (« 25 min »), rappels méthodologie/durée, tableaux récap, ou méta hors slide.
 - Précision : termes métier corrects, exemples et chiffres tirés du contexte (programme / KB), pas de généralités interchangeables.
 - Ton : expert accessible, confiant, légèrement chaleureux — comme une excellente réponse Claude.
 - Quiz : question claire, 4 choix dont un seul correct, explication pédagogique utile.
