@@ -152,6 +152,37 @@ const toObjectIdOrUndefined = (value: unknown): mongoose.Types.ObjectId | undefi
   return new mongoose.Types.ObjectId(raw);
 };
 
+/** Enrichit le chat avec la fiche gig (snapshot JSON + champs persistés formation) pour ancrer plans / contenus. */
+const buildGigGroundingBlocks = async (
+  safeGigId: mongoose.Types.ObjectId | undefined,
+  parsedContext: any
+): Promise<{ promptAppend: string; systemRules: string[] }> => {
+  const snap = parsedContext?.gigSnapshot && typeof parsedContext.gigSnapshot === 'object' ? parsedContext.gigSnapshot : null;
+  const snapText = snap ? JSON.stringify(snap).slice(0, 12000) : '';
+  let dbLines = '';
+  if (safeGigId) {
+    try {
+      const g = await Gig.findById(safeGigId).lean();
+      if (g) {
+        dbLines =
+          `\nGIG (base formation — champs persistés)\n- titre: ${String((g as any).title || '')}\n- description: ${String((g as any).description || '')}\n- industrie: ${String((g as any).industry || '')}\n`;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!snapText && !dbLines) return { promptAppend: '', systemRules: [] };
+  const promptAppend =
+    `\n\n--- ANCRAGE GIG (prioritaire pour plan, modules, contenu pédagogique) ---\n` +
+    (snapText ? `Fiche gig (JSON):\n${snapText}\n` : '') +
+    dbLines;
+  const systemRules = [
+    'GIG ANCRAGE: Une fiche GIG est fournie (JSON et/ou base formation). Tout plan, module ou contenu slide-ready DOIT rester aligné sur cette mission (titre, description, industries, activités, secteurs). Ne pas inventer un autre métier ou vertical.',
+    'La méthodologie pilote le format pédagogique ; le GIG pilote le domaine métier et le vocabulaire terrain.',
+  ];
+  return { promptAppend, systemRules };
+};
+
 const buildSessionTitle = (seedText: string): string => {
   const normalized = String(seedText || '').replace(/\s+/g, ' ').trim();
   if (!normalized) return 'Nouvelle conversation';
@@ -543,9 +574,12 @@ export const chat = async (
       });
     }
 
+    const gigGrounding = await buildGigGroundingBlocks(safeGigId, parsedContext);
+
     const prompt = [
       'HARX conversation context:',
       safeContext,
+      gigGrounding.promptAppend,
       '',
       'User message:',
       message.trim()
@@ -564,7 +598,9 @@ export const chat = async (
       'For training plans, modules, and detailed content, always use structured Markdown optimized for rich styled rendering (headings, bullet points, compact tables when useful).',
       'Never output HTML, CSS, JavaScript, iframe snippets, or <harx-html> tags.',
       `INTERNAL pacing (do not paste verbatim into slide-ready module bodies): methodology ${selectedMethodology}; global target duration ${selectedDuration}.`,
-      'IMPORTANT: Methodology shapes pedagogy only; it must NOT force the business/topic domain.',
+      gigGrounding.systemRules.length
+        ? 'IMPORTANT: Methodology shapes pedagogy only; the GIG anchoring block defines the business/topic domain when present.'
+        : 'IMPORTANT: Methodology shapes pedagogy only; it must NOT force the business/topic domain.',
       `KB keyword focus: ${inferredDomain.kbFocusLabel}.`,
       inferredDomain.strictTopicGuard,
       'Do not add per-slide or per-module duration labels (e.g. "25 min", "Durée totale", "X minutes") unless the user explicitly asks for a timing breakdown.',
@@ -574,7 +610,9 @@ export const chat = async (
       'Focus on clear pedagogical ideas learners see on slides; keep pacing implicit unless the user asks for a schedule.',
       'If prior conversation history is off-domain, ignore it and prioritize current user message + KB context.',
       'Prefer useful clarity over rigid templates.',
-      'Do NOT mention or infer company name, gig name, or gig description unless explicitly provided by user in current message.',
+      ...(gigGrounding.systemRules.length
+        ? gigGrounding.systemRules
+        : ['Do NOT mention or infer company name, gig name, or gig description unless explicitly provided by user in current message.']),
       'If user asks for a training plan, generate a complete draft plan immediately (modules with substantive slide-ready text, programme-level structure) without waiting for extra clarifications; for parts that become slides, obey SLIDE-READY MODULE CONTENT (no per-module timing banners in slide bodies).',
       'You may finish with 2-4 optional clarification questions, but only after providing the full initial plan.',
       'NEVER include fake UI buttons, markdown button syntax, or "Valider / Enregistrer" controls in your reply; the app shows validation actions separately when appropriate.'

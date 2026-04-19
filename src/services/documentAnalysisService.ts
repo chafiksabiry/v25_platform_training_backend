@@ -3,6 +3,7 @@ import documentParserService from './documentParserService';
 import aiService from './aiService';
 import { AppError } from '../middleware/errorHandler';
 import Document from '../models/Document';
+import Gig from '../models/Gig';
 
 interface DocumentAnalysisResult {
   extractedContent: {
@@ -487,6 +488,30 @@ class DocumentAnalysisService {
           ? `\nSOURCE CONTEXT (PRIORITY DATASET FOR THIS GENERATION)\n- sourceMode: ${sourceMode || 'unspecified'}\n- includeCallRecordings: ${options?.includeCallRecordings === true ? 'true' : 'false'}\n- usableCallRecordings: ${usableCallRecordings.length}/${callRecordings.length}\n${uploadContextBlock}${kbDocsContextBlock}${callRecordingsBlock}\n`
           : '';
 
+      const gigSnapshot =
+        sourceContext?.gigSnapshot && typeof sourceContext.gigSnapshot === 'object'
+          ? sourceContext.gigSnapshot
+          : null;
+      let gigDbAnchor = '';
+      if (options?.gigId) {
+        try {
+          const g = await Gig.findById(String(options.gigId)).lean();
+          if (g) {
+            gigDbAnchor =
+              `\nGIG (référence formation — champs persistés)\n- titre: ${String((g as any).title || '')}\n- description: ${String((g as any).description || '')}\n- industrie: ${String((g as any).industry || '')}\n`;
+          }
+        } catch (e) {
+          console.warn('[documentAnalysis] gig lookup failed for presentation:', e);
+        }
+      }
+      const gigSnapshotBlock = gigSnapshot
+        ? `\nGIG (fiche métier — ANCRAGE OBLIGATOIRE)\n${JSON.stringify(gigSnapshot).slice(0, 14000)}\n`
+        : '';
+      const gigAnchorSection =
+        gigSnapshotBlock || gigDbAnchor
+          ? `${gigSnapshotBlock}${gigDbAnchor}CONSIGNE GIG: tout le contenu des slides doit rester aligné sur cette mission (titre, description, secteurs / industries / activités listés). Ne pas inventer un autre métier ou vertical.\n\n`
+          : '';
+
       const narrative = this.buildProgramNarrativeContext(program, 26000);
       const programInfo = `
         PROGRAMME : ${program.title || program.name || ''}
@@ -527,7 +552,7 @@ SORTIE : uniquement un objet JSON valide {"slides":[...]} — aucun markdown, au
       const generateBatch = async (label: string, slideDescriptions: string, _startId: number) => {
         const prompt = `Rôle : LEAD INSTRUCTIONAL DESIGNER HARX — présentation méthode 360°, qualité « artefact Claude ».
 
-          ${kbBlock}${sourceContextBlock}CONTEXTE DU PROGRAMME :
+          ${gigAnchorSection}${kbBlock}${sourceContextBlock}CONTEXTE DU PROGRAMME :
           ${programInfo}
 
           LOT À GÉNÉRER (${label}) — slides dans cet ordre exact, contenu expert et concis :

@@ -169,10 +169,16 @@ class GigTrainingGeneratorService {
     const kbDocumentsFromContext = Array.isArray(sourceContext?.knowledgeDocuments) ? sourceContext.knowledgeDocuments : [];
     const callRecordingsFromContext = Array.isArray(sourceContext?.callRecordings) ? sourceContext.callRecordings : [];
 
+    const gigSnapshotObj = sourceContext?.gigSnapshot && typeof sourceContext.gigSnapshot === 'object' ? sourceContext.gigSnapshot : null;
+    const gigSnapshotBlock = gigSnapshotObj
+      ? `GIG SNAPSHOT (titre, description, industries, activités, secteurs — ANCRAGE OBLIGATOIRE du plan et du contenu):\n${JSON.stringify(gigSnapshotObj).slice(0, 12000)}\n`
+      : '';
+
     const explicitSourceContextBlock =
       sourceContext != null
         ? `\nSOURCE CONTEXT (explicit input)\n` +
           `sourceMode: ${sourceMode || 'unspecified'}\n` +
+          gigSnapshotBlock +
           (uploadAnalyses.length
             ? `UPLOAD ANALYSES:\n${uploadAnalyses
                 .map((u: any, i: number) => `[UPLOAD ${i + 1}] ${u?.fileName || 'Untitled'} | topics: ${(u?.keyTopics || []).join(', ')}`)
