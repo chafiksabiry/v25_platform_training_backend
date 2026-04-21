@@ -405,22 +405,30 @@ const buildDeterministicStoryboardFallback = (params: {
   const out: Array<{ title: string; prompt: string }> = [];
   out.push({
     title: isFr ? `${titleBase} - Couverture` : `${titleBase} - Cover`,
-    prompt: `[COVER] ${titleBase}. Professional title-slide visual, clean PowerPoint composition, strong hero visual, no text rendered in image.`,
+    prompt:
+      `[COVER] ${titleBase}. Slide de garde de formation, style PowerPoint professionnel, ` +
+      'grand titre visible, zone de sous-titre, fond clair avec accents bleus, mise en page éducative.',
   });
   out.push({
     title: isFr ? 'Plan de formation' : 'Training agenda',
-    prompt: `[AGENDA] Visual roadmap/agenda slide for ${titleBase}, clear sections progression, infographic layout, reserved areas for bullet points, no logo.`,
+    prompt:
+      `[AGENDA] Sommaire de la formation ${titleBase}, slide type agenda avec liste des sections, ` +
+      'titre "Sommaire", blocs horizontaux lisibles, design cours/formation.',
   });
   middleTitles.forEach((t, i) => {
     out.push({
       title: t,
-      prompt: `[CONTENT] Slide visual for "${t}" in ${titleBase}, concrete business/technical scenario from training context, structured layout, room for key bullets.`,
+      prompt:
+        `[CONTENT] Slide de contenu "${t}" pour ${titleBase}, style présentation pédagogique, ` +
+        'titre en haut, paragraphes/bullets lisibles, schéma simple (boîtes/flèches), mise en page structurée.',
     });
     if (i + 3 >= total - 1) return;
   });
   out.push({
     title: isFr ? 'Conclusion' : 'Conclusion',
-    prompt: `[CONCLUSION] Final recap slide visual for ${titleBase}, achievement/progress metaphor, clean corporate style, space for takeaway bullets.`,
+    prompt:
+      `[CONCLUSION] Slide de conclusion pour ${titleBase}, synthèse visuelle avec points clés, ` +
+      'style citation/récapitulatif final, design PowerPoint formation.',
   });
   return out.slice(0, total);
 };
@@ -444,10 +452,13 @@ const buildImageStoryboardFromDigest = async (params: {
     '- Middle images must be content and summary visuals that follow the training progression.',
     '- Content visuals must represent concrete concepts from the training digest (modules, process, tools, cases).',
     'Visual requirements:',
-    '- Professional PowerPoint-like composition (clean layout, visual hierarchy, room for bullet text on slide).',
+    '- The visuals must look like real training slides (PowerPoint style), not random stock photos.',
+    '- Include layout instructions in prompts: title area, content text blocks, bullet zones, footer area.',
+    '- Prefer educational slide templates: light background, blue accents, clean typography, simple diagrams/icons.',
+    '- Agenda slide must clearly request a "Sommaire" style layout with listed sections.',
+    '- Content slides must request text-friendly composition (paragraphs, bullets, process blocks).',
+    '- Conclusion slide must request recap/citation style ending.',
     '- Realistic corporate learning context, no logos/watermarks.',
-    '- Do not generate random generic stock scenes disconnected from the digest.',
-    '- Image prompts must explicitly reference the specific section intent (e.g. agenda, module topic, conclusion).',
     `Language for title text: ${String(params.language || 'fr')}`,
     `Training title: ${String(params.trainingTitle || 'Training')}`,
     `Optional style guidance from user: ${String(params.styleGuidance || '').slice(0, 800) || 'none'}`,
@@ -510,31 +521,48 @@ const processTrainingImageJob = async (
   state.updatedAt = Date.now();
   trainingImageGenerationJobs.set(jobId, state);
   try {
+    let imageSetId = state.savedImageSetId ? toObjectIdOrUndefined(state.savedImageSetId) : undefined;
+    if (!imageSetId) {
+      const created = await TrainingImageSet.create({
+        gigId: state.gigId,
+        companyId: state.companyId,
+        title: state.title,
+        trainingTitle: state.trainingTitle || undefined,
+        language: state.language,
+        sourceDigest: state.sourceDigest.slice(0, 40000),
+        items: [],
+      });
+      imageSetId = created._id;
+      state.savedImageSetId = String(created._id);
+      state.updatedAt = Date.now();
+      trainingImageGenerationJobs.set(jobId, state);
+    }
+
     for (let i = 0; i < storyboard.length; i += 1) {
       const scene = storyboard[i];
       const imgBuffer = await ImageGenerationService.generateImageBuffer(scene.prompt);
       const uploaded = await cloudinaryService.uploadImageBuffer(imgBuffer, 'training-images/generated');
-      state.items.push({
+      const nextItem = {
         index: i + 1,
         title: scene.title,
         prompt: scene.prompt,
         imageUrl: uploaded.url,
         imageCloudinaryPublicId: uploaded.publicId,
-      });
+      };
+      state.items.push(nextItem);
+      if (imageSetId) {
+        await TrainingImageSet.updateOne(
+          { _id: imageSetId },
+          {
+            $push: { items: nextItem },
+            $set: { updatedAt: new Date() },
+          }
+        );
+      }
       state.completed = state.items.length;
       state.updatedAt = Date.now();
       trainingImageGenerationJobs.set(jobId, state);
     }
-    const saved = await TrainingImageSet.create({
-      gigId: state.gigId,
-      companyId: state.companyId,
-      title: state.title,
-      trainingTitle: state.trainingTitle || undefined,
-      language: state.language,
-      sourceDigest: state.sourceDigest.slice(0, 40000),
-      items: state.items,
-    });
-    state.savedImageSetId = String(saved._id);
     state.status = 'completed';
     state.updatedAt = Date.now();
     trainingImageGenerationJobs.set(jobId, state);
