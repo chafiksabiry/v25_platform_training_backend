@@ -23,35 +23,42 @@ export class ImageGenerationService {
   static async generateImageBuffer(description: string, anthropicApiKey?: string): Promise<Buffer> {
     const scene = String(description || '').trim() || 'Training slide';
     const seed = this.hashSeed(scene).toString(16).slice(0, 8);
-    const svgPrompt = [
+    const baseRules = [
       'Generate a valid standalone SVG for a 16:9 training slide.',
       'Output only raw SVG markup (no markdown, no prose).',
       'Use viewBox="0 0 1920 1080".',
+      'Return compact SVG under 12000 characters.',
       'Style: corporate PowerPoint slide, crisp vector style, modern clean look.',
-      'Must include meaningful slide text (title + 4-6 bullet points) based on the provided scene.',
-      'Use a different composition than previous slides (vary card placements and accent zones).',
+      'Must include readable title + 3-5 bullet points based on the provided scene.',
       'Keep excellent contrast and readability.',
       'Do not include external images or fonts.',
       `Scene content: ${scene}`,
       `Variation key: ${seed}`,
     ].join('\n');
-    let rawSvg = '';
-    try {
-      rawSvg = await aiService.generateWithClaude(
-        svgPrompt,
-        'You are an SVG designer. Return only valid SVG.',
-        anthropicApiKey,
-        2200,
-        { temperature: 0.6, preferredModels: [String(process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5')] }
-      );
-    } catch (e: any) {
-      throw new Error(`Claude SVG generation failed: ${String(e?.message || e)}`);
+    const retryRules = [
+      baseRules,
+      'Retry mode: use simpler layout with fewer shapes.',
+      'Retry mode: avoid gradients and keep XML minimal.',
+    ].join('\n');
+    const prompts = [baseRules, retryRules];
+    let lastError = '';
+    for (let i = 0; i < prompts.length; i += 1) {
+      try {
+        const rawSvg = await aiService.generateWithClaude(
+          prompts[i],
+          'You are an SVG designer. Return only valid SVG.',
+          anthropicApiKey,
+          7000,
+          { temperature: 0.45, preferredModels: [String(process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5')] }
+        );
+        const svg = this.extractSvg(rawSvg);
+        if (svg) return Buffer.from(svg, 'utf-8');
+        lastError = 'Claude response does not contain a valid <svg>...</svg> block';
+      } catch (e: any) {
+        lastError = `Claude SVG generation failed: ${String(e?.message || e)}`;
+      }
     }
-    const svg = this.extractSvg(rawSvg);
-    if (!svg) {
-      throw new Error('Claude response does not contain a valid <svg>...</svg> block');
-    }
-    return Buffer.from(svg, 'utf-8');
+    throw new Error(lastError || 'Claude SVG generation failed');
   }
 
   // Backward compatibility for existing journey/module illustration flows.
