@@ -1042,9 +1042,6 @@ export const chat = async (
     } catch {
       parsedContext = null;
     }
-    const selectedDuration = parsedContext?.selectedDuration || 'non specifiee';
-    const selectedMethodology = parsedContext?.selectedMethodology || 'Methodologie 360';
-    const inferredDomain = inferKbDomainFromContext(parsedContext);
     const safeGigId = toObjectIdOrUndefined(gigId);
     const safeCompanyId = toObjectIdOrUndefined(companyId);
     const safeSessionId = toObjectIdOrUndefined(sessionId);
@@ -1062,11 +1059,52 @@ export const chat = async (
       });
     }
 
+    const sessionContext =
+      activeSession.contextSnapshot && typeof activeSession.contextSnapshot === 'object'
+        ? activeSession.contextSnapshot as Record<string, any>
+        : null;
+    const mergeFromSessionIfMissing = (key: string) => {
+      const sessionValue = sessionContext?.[key];
+      const currentValue = parsedContext?.[key];
+      const currentMissing =
+        currentValue == null ||
+        (Array.isArray(currentValue) && currentValue.length === 0) ||
+        (typeof currentValue === 'string' && currentValue.trim().length === 0);
+      if (currentMissing && sessionValue != null) {
+        parsedContext = { ...(parsedContext || {}), [key]: sessionValue };
+      }
+    };
+    if (!parsedContext && sessionContext) {
+      parsedContext = { ...sessionContext };
+    } else {
+      mergeFromSessionIfMissing('generationMode');
+      mergeFromSessionIfMissing('personalizationProfile');
+      mergeFromSessionIfMissing('analyzedUploads');
+      mergeFromSessionIfMissing('analyzedUploadsCount');
+      mergeFromSessionIfMissing('knowledgeBaseDocuments');
+      mergeFromSessionIfMissing('knowledgeBaseDocumentsCount');
+      mergeFromSessionIfMissing('selectedDuration');
+      mergeFromSessionIfMissing('selectedMethodology');
+      mergeFromSessionIfMissing('selectedGigId');
+      mergeFromSessionIfMissing('selectedGigTitle');
+      mergeFromSessionIfMissing('gigSnapshot');
+      mergeFromSessionIfMissing('useKnowledgeBase');
+      mergeFromSessionIfMissing('useUploadedDocuments');
+    }
+
+    const selectedDuration = parsedContext?.selectedDuration || 'non specifiee';
+    const selectedMethodology = parsedContext?.selectedMethodology || 'Methodologie 360';
+    const inferredDomain = inferKbDomainFromContext(parsedContext);
+    const effectiveContextString =
+      parsedContext && typeof parsedContext === 'object'
+        ? JSON.stringify(parsedContext)
+        : safeContext;
+
     const gigGrounding = await buildGigGroundingBlocks(safeGigId, parsedContext);
 
     const prompt = [
       'HARX conversation context:',
-      safeContext,
+      effectiveContextString,
       gigGrounding.promptAppend,
       '',
       'User message:',
@@ -1142,6 +1180,23 @@ export const chat = async (
         { role: 'user', text: userMessageText, createdAt: new Date() } as any,
         { role: 'assistant', text: assistantMessageText, createdAt: new Date() } as any
       );
+      activeSession.contextSnapshot = parsedContext && typeof parsedContext === 'object'
+        ? {
+            generationMode: parsedContext.generationMode,
+            personalizationProfile: parsedContext.personalizationProfile,
+            analyzedUploadsCount: parsedContext.analyzedUploadsCount,
+            analyzedUploads: parsedContext.analyzedUploads,
+            knowledgeBaseDocumentsCount: parsedContext.knowledgeBaseDocumentsCount,
+            knowledgeBaseDocuments: parsedContext.knowledgeBaseDocuments,
+            selectedDuration: parsedContext.selectedDuration,
+            selectedMethodology: parsedContext.selectedMethodology,
+            selectedGigId: parsedContext.selectedGigId,
+            selectedGigTitle: parsedContext.selectedGigTitle,
+            gigSnapshot: parsedContext.gigSnapshot,
+            useKnowledgeBase: parsedContext.useKnowledgeBase,
+            useUploadedDocuments: parsedContext.useUploadedDocuments,
+          }
+        : activeSession.contextSnapshot || null;
       if (!activeSession.title || activeSession.title === 'Nouvelle conversation') {
         activeSession.title = buildSessionTitle(userMessageText);
       }
@@ -1224,6 +1279,23 @@ export const chat = async (
       { role: 'user', text: userMessageText, createdAt: new Date() } as any,
       { role: 'assistant', text: assistantMessageText, createdAt: new Date() } as any
     );
+    activeSession.contextSnapshot = parsedContext && typeof parsedContext === 'object'
+      ? {
+          generationMode: parsedContext.generationMode,
+          personalizationProfile: parsedContext.personalizationProfile,
+          analyzedUploadsCount: parsedContext.analyzedUploadsCount,
+          analyzedUploads: parsedContext.analyzedUploads,
+          knowledgeBaseDocumentsCount: parsedContext.knowledgeBaseDocumentsCount,
+          knowledgeBaseDocuments: parsedContext.knowledgeBaseDocuments,
+          selectedDuration: parsedContext.selectedDuration,
+          selectedMethodology: parsedContext.selectedMethodology,
+          selectedGigId: parsedContext.selectedGigId,
+          selectedGigTitle: parsedContext.selectedGigTitle,
+          gigSnapshot: parsedContext.gigSnapshot,
+          useKnowledgeBase: parsedContext.useKnowledgeBase,
+          useUploadedDocuments: parsedContext.useUploadedDocuments,
+        }
+      : activeSession.contextSnapshot || null;
     if (!activeSession.title || activeSession.title === 'Nouvelle conversation') {
       activeSession.title = buildSessionTitle(userMessageText);
     }

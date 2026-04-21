@@ -11,6 +11,7 @@ export interface ITrainingChatSession extends Document {
   companyId?: mongoose.Types.ObjectId | string;
   title: string;
   messages: ITrainingChatMessage[];
+  contextSnapshot?: Record<string, unknown> | null;
   lastActivityAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -59,6 +60,10 @@ const trainingChatSessionSchema = new Schema<ITrainingChatSession>(
     messages: {
       type: [trainingChatMessageSchema],
       default: [],
+    },
+    contextSnapshot: {
+      type: Schema.Types.Mixed,
+      default: null,
     },
     lastActivityAt: {
       type: Date,
