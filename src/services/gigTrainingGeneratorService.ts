@@ -83,35 +83,32 @@ class GigTrainingGeneratorService {
 
   private computeSlideTargetFromModules(modules: any[]): number {
     const safeModules = Array.isArray(modules) ? modules : [];
-    if (safeModules.length === 0) return 14;
+    if (safeModules.length === 0) return 8;
     let sectionCount = 0;
     for (const module of safeModules) {
       sectionCount += Array.isArray(module?.sections) ? module.sections.length : 0;
     }
-    const raw = 10 + safeModules.length * 2 + Math.min(14, Math.ceil(sectionCount / 2));
-    return Math.max(10, Math.min(32, raw));
+    const raw = 4 + safeModules.length + Math.ceil(sectionCount / 3);
+    return Math.max(5, Math.min(8, raw));
   }
 
   private buildDynamicSlideItems(slideTarget: number, modules: any[]): string[] {
     const n = Math.max(1, slideTarget);
     const titles = (Array.isArray(modules) ? modules : []).map((m: any) => String(m?.title || 'Module').slice(0, 100));
     const plan: string[] = [];
-    plan.push('Slide de titre — accroche impactante, promesse de valeur, contexte métier.');
-    plan.push('Contexte et enjeux — chiffres, problématique terrain et objectifs pédagogiques.');
-    const middle = Math.max(0, n - 4);
-    for (let i = 0; i < middle; i++) {
-      if (titles.length > 0) {
+    if (titles.length > 0) {
+      for (let i = 0; i < n; i++) {
         const t = titles[i % titles.length];
-        const phase = Math.floor(i / titles.length) % 3;
-        if (phase === 0) plan.push(`Module « ${t} » — concepts et fondamentaux à maîtriser.`);
-        else if (phase === 1) plan.push(`Module « ${t} » — cas pratiques, chiffres et décisions terrain.`);
-        else plan.push(`Module « ${t} » — erreurs fréquentes, limites et bonnes pratiques.`);
-      } else {
-        plan.push('Contenu métier approfondi — définitions, exemples, application opérationnelle.');
+        const phase = Math.floor(i / Math.max(1, titles.length)) % 3;
+        if (phase === 0) plan.push(`${t} — points clés utiles au contexte du chat.`);
+        else if (phase === 1) plan.push(`${t} — exemple opérationnel, décision ou cas terrain.`);
+        else plan.push(`${t} — pièges fréquents et bonnes pratiques concrètes.`);
+      }
+    } else {
+      for (let i = 0; i < n; i++) {
+        plan.push('Contenu métier adapté au chat — définitions, exemples et application concrète.');
       }
     }
-    plan.push('Conclusion synthétique — messages clés et ancrage opérationnel.');
-    plan.push('Prochaines étapes — plan d’action terrain après formation.');
     return plan.map((desc, idx) => `Slide ${idx + 1}: ${desc}`);
   }
 
@@ -329,20 +326,23 @@ class GigTrainingGeneratorService {
           Génère ces slides avec une précision technique maximale basée sur la BASE DE CONNAISSANCES :
           ${slideDescriptions}
 
-          RÈGLES : 
+          RÈGLES :
           1. Les slides doivent être extrêmement techniques et précises.
           2. Extrais les chiffres, processus ou définitions des documents.
           3. Chaque slide doit inclure "visualElements" (2 à 6 formes : rectangle, rounded-rectangle, circle, ellipse, triangle, line, arrow) avec x,y,w,h en % (0–100), fill/stroke en hex, opacity pour les fonds décoratifs.
           4. IMAGES DÉSACTIVÉES : ne génère PAS d'image. Mets "imageDescription" à "" et "illustrationUrl" à "".
           5. Inclus "visualConfig" : layout, theme, backgroundHex, textHex, accentHex quand pertinent.
-          6. Réponds en JSON valide uniquement.
+          6. Vise un total d'environ 8 slides (maximum 8) pour l'ensemble de la présentation.
+          7. Ne force pas de structure (pas d'obligation cover/sommaire/conclusion). Laisse la progression s'adapter spontanément au contenu du chat et des modules.
+          8. Pas besoin de styliser le plan de narration : va droit au contenu utile.
+          9. Réponds en JSON valide uniquement.
 
           Structure JSON :
           {
             "slides": [
               {
                 "id": number,
-                "type": "cover|agenda|content|quote|conclusion|quiz",
+                "type": "content|quote|exercise|scenario|data|recap|quiz",
                 "title": "Titre",
                 "subtitle": "optionnel",
                 "content": "Développement détaillé (3 phrases min)",
