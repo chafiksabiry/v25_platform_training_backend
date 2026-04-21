@@ -75,6 +75,11 @@ router.get(
 );
 
 router.get(
+  '/training-images/status',
+  aiController.getTrainingImagesStatus
+);
+
+router.get(
   '/training-images/list',
   aiController.listTrainingImages
 );

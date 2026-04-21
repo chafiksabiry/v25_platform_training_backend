@@ -2326,8 +2326,13 @@ export const getTrainingImagesStatus = async (
   next: NextFunction
 ) => {
   try {
-    const jobId = String(req.params?.jobId || '').trim();
-    if (!jobId) return res.status(400).json({ success: false, error: 'jobId is required' });
+    const jobId = String(req.params?.jobId || req.query?.jobId || '').trim();
+    if (!jobId) {
+      return res.status(400).json({
+        success: false,
+        error: 'jobId is required. Use /api/ai/training-images/status/:jobId or /api/ai/training-images/status?jobId=...',
+      });
+    }
     const state = trainingImageGenerationJobs.get(jobId);
     if (!state) return res.status(404).json({ success: false, error: 'Training image job not found' });
 
