@@ -9,6 +9,7 @@ import { AppError } from '../middleware/errorHandler';
 import Document from '../models/Document';
 import Gig from '../models/Gig';
 import TrainingChatSession from '../models/TrainingChatSession';
+import TrainingPodcast from '../models/TrainingPodcast';
 import mongoose from 'mongoose';
 import fs from 'fs';
 import { promisify } from 'util';
@@ -1286,6 +1287,243 @@ export const generatePodcastScript = async (
     }
 
     return res.json({ success: true, script: trimmed });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * Chat dédié podcast: ajuste/raffine le script existant.
+ * Corps: { message, currentScript, trainingDigest?, trainingTitle?, language?, history?[] }
+ */
+export const podcastChat = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const {
+      message,
+      currentScript,
+      trainingDigest,
+      trainingTitle,
+      language,
+      history,
+    } = req.body || {};
+
+    const userMessage = String(message || '').trim();
+    const script = String(currentScript || '').trim();
+    if (!userMessage) {
+      return res.status(400).json({ success: false, error: 'message is required' });
+    }
+    if (!script) {
+      return res.status(400).json({ success: false, error: 'currentScript is required' });
+    }
+
+    const title = String(trainingTitle || '').trim() || 'Formation';
+    const lang = String(language || 'fr').toLowerCase();
+    const digest = String(trainingDigest || '').trim();
+    const anthropicKey = req.headers['x-anthropic-key'] as string | undefined;
+    const safeHistory = Array.isArray(history) ? history.slice(-20) : [];
+
+    const prompt = [
+      `Titre / contexte formation: ${title}`,
+      '',
+      'SCRIPT ACTUEL:',
+      script.slice(0, 22000),
+      '',
+      digest ? `DIGEST CONTEXTE:\n${digest.slice(0, 12000)}\n` : '',
+      'HISTORIQUE CHAT PODCAST (optionnel):',
+      JSON.stringify(safeHistory).slice(0, 7000),
+      '',
+      'DEMANDE UTILISATEUR:',
+      userMessage,
+      '',
+      'TACHE: retourne STRICTEMENT un JSON valide: {"assistantReply":"...","updatedScript":"..."}',
+      'assistantReply: message court pour confirmer les changements.',
+      'updatedScript: script complet mis a jour, pret a etre lu a voix haute.',
+    ].join('\n');
+
+    const systemFr = [
+      'Tu es un éditeur de scripts podcast de formation.',
+      "Tu modifies le script oral selon la demande utilisateur, tout en gardant un ton professionnel, chaleureux, clair.",
+      'Sortie JSON stricte uniquement, sans markdown, sans code fence.',
+      'Le champ updatedScript doit contenir le script complet final (pas une diff partielle).',
+    ].join(' ');
+
+    const systemEn = [
+      'You are a training podcast script editor.',
+      'Apply the user request while keeping a clear, warm, professional oral tone.',
+      'Output strict JSON only, no markdown, no code fences.',
+      'updatedScript must be the full final script, not a partial diff.',
+    ].join(' ');
+
+    const raw = await aiService.generateWithClaude(
+      prompt,
+      lang.startsWith('en') ? systemEn : systemFr,
+      anthropicKey,
+      8192,
+      { temperature: 0.35, preferredModels: ['claude-3-5-haiku-20241022'] }
+    );
+
+    let parsed: any;
+    try {
+      parsed = aiService.parseJson(String(raw || ''), 'podcastChat');
+    } catch {
+      return res.status(502).json({ success: false, error: 'Réponse IA invalide pour podcast chat.' });
+    }
+
+    const assistantReply = String(parsed?.assistantReply || '').trim();
+    const updatedScript = String(parsed?.updatedScript || '').trim();
+    if (!updatedScript) {
+      return res.status(502).json({ success: false, error: 'Le script mis à jour est vide.' });
+    }
+
+    return res.json({
+      success: true,
+      assistantReply: assistantReply || 'Script mis à jour.',
+      updatedScript,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * Sauvegarde un podcast (titre + script + historique) en DB
+ * et pousse une version JSON du podcast dans Cloudinary.
+ */
+export const savePodcast = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const {
+      title,
+      script,
+      trainingTitle,
+      language,
+      gigId,
+      companyId,
+      audioUrl,
+      audioCloudinaryPublicId,
+      chatMessages,
+    } = req.body || {};
+
+    const cleanTitle = String(title || '').trim();
+    const cleanScript = String(script || '').trim();
+    if (!cleanTitle) {
+      return res.status(400).json({ success: false, error: 'title is required' });
+    }
+    if (!cleanScript) {
+      return res.status(400).json({ success: false, error: 'script is required' });
+    }
+
+    const safeGigId = toObjectIdOrUndefined(gigId);
+    const safeCompanyId = toObjectIdOrUndefined(companyId);
+    const safeLanguage = String(language || 'fr').trim().toLowerCase() || 'fr';
+    const safeTrainingTitle = String(trainingTitle || '').trim();
+
+    const safeChatMessages = Array.isArray(chatMessages)
+      ? chatMessages
+          .map((m: any) => ({
+            role: m?.role === 'assistant' ? 'assistant' : 'user',
+            text: String(m?.text || '').trim(),
+            createdAt: m?.createdAt ? new Date(m.createdAt) : new Date(),
+          }))
+          .filter((m) => m.text)
+          .slice(-80)
+      : [];
+
+    const fileBase = `podcast_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const cloudPayload = {
+      title: cleanTitle,
+      trainingTitle: safeTrainingTitle,
+      language: safeLanguage,
+      script: cleanScript,
+      audioUrl: String(audioUrl || '').trim() || undefined,
+      gigId: safeGigId ? safeGigId.toString() : undefined,
+      companyId: safeCompanyId ? safeCompanyId.toString() : undefined,
+      chatMessages: safeChatMessages,
+      savedAt: new Date().toISOString(),
+    };
+    const uploaded = await cloudinaryService.uploadJsonData(
+      cloudPayload,
+      fileBase,
+      'training-podcasts'
+    );
+
+    const saved = await TrainingPodcast.create({
+      gigId: safeGigId,
+      companyId: safeCompanyId,
+      title: cleanTitle,
+      trainingTitle: safeTrainingTitle || undefined,
+      language: safeLanguage,
+      script: cleanScript,
+      scriptCloudinaryUrl: uploaded.url,
+      scriptCloudinaryPublicId: uploaded.publicId,
+      audioUrl: String(audioUrl || '').trim() || undefined,
+      audioCloudinaryPublicId: String(audioCloudinaryPublicId || '').trim() || undefined,
+      chatMessages: safeChatMessages,
+    });
+
+    return res.json({
+      success: true,
+      podcast: {
+        _id: saved._id,
+        title: saved.title,
+        trainingTitle: saved.trainingTitle,
+        language: saved.language,
+        script: saved.script,
+        scriptCloudinaryUrl: saved.scriptCloudinaryUrl,
+        audioUrl: saved.audioUrl,
+        createdAt: saved.createdAt,
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * Liste des podcasts sauvegardés (par gig ou company).
+ */
+export const listSavedPodcasts = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const gigId = String(req.query.gigId || '').trim();
+    const companyId = String(req.query.companyId || '').trim();
+    const limitRaw = parseInt(String(req.query.limit || '20'), 10);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 20;
+
+    const filter: any = {};
+    const safeGigId = toObjectIdOrUndefined(gigId);
+    const safeCompanyId = toObjectIdOrUndefined(companyId);
+    if (safeGigId) filter.gigId = safeGigId;
+    if (safeCompanyId) filter.companyId = safeCompanyId;
+
+    const rows = await TrainingPodcast.find(filter)
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    return res.json({
+      success: true,
+      podcasts: rows.map((r: any) => ({
+        _id: String(r._id),
+        title: String(r.title || ''),
+        trainingTitle: r.trainingTitle ? String(r.trainingTitle) : undefined,
+        language: String(r.language || 'fr'),
+        script: String(r.script || ''),
+        scriptCloudinaryUrl: r.scriptCloudinaryUrl ? String(r.scriptCloudinaryUrl) : undefined,
+        audioUrl: r.audioUrl ? String(r.audioUrl) : undefined,
+        createdAt: r.createdAt,
+      })),
+    });
   } catch (error) {
     return next(error);
   }

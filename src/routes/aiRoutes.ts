@@ -30,6 +30,21 @@ router.post(
 );
 
 router.post(
+  '/podcast/chat',
+  aiController.podcastChat
+);
+
+router.post(
+  '/podcast/save',
+  aiController.savePodcast
+);
+
+router.get(
+  '/podcast/list',
+  aiController.listSavedPodcasts
+);
+
+router.post(
   '/chat/title',
   aiController.generateChatTitle
 );
