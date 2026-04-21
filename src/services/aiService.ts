@@ -94,7 +94,7 @@ class AIService {
     return out;
   }
 
-  public parseJson(raw: string, label: string = 'JSON'): any {
+  public parseJson(raw: string, label: string = 'JSON', options?: { suppressLogs?: boolean }): any {
     try {
       let cleaned = raw.trim();
 
@@ -215,8 +215,10 @@ class AIService {
         throw lastCandidateError;
       }
     } catch (e: any) {
-      console.error(`❌ JSON Parsing Error (${label}):`, e.message);
-      console.error(`📄 Raw content was:`, raw.slice(0, 1000) + (raw.length > 1000 ? '...' : ''));
+      if (!options?.suppressLogs) {
+        console.error(`❌ JSON Parsing Error (${label}):`, e.message);
+        console.error(`📄 Raw content was:`, raw.slice(0, 1000) + (raw.length > 1000 ? '...' : ''));
+      }
       throw new Error(`Failed to parse AI response: ${e.message}`);
     }
   }

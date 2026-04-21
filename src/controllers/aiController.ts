@@ -81,7 +81,7 @@ const appendTrainingReadinessBlock = async (params: {
   try {
     raw = await aiService.generateWithClaude(prompt, systemPrompt, anthropicKey, 640, {
       temperature: 0.12,
-      preferredModels: ['claude-3-5-haiku-20241022'],
+      preferredModels: ['claude-sonnet-4-5'],
     });
   } catch (e) {
     console.warn('[chat] training readiness inference failed:', e);
@@ -473,7 +473,7 @@ const buildImageStoryboardFromDigest = async (params: {
       1000,
       { temperature: 0.35, preferredModels: [String(process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5')] }
     );
-    const parsed = aiService.parseJson(String(raw || ''), 'trainingImageStoryboard');
+    const parsed = aiService.parseJson(String(raw || ''), 'trainingImageStoryboard', { suppressLogs: true });
     const normalized = normalizeStoryboardRows(parsed?.images, maxImages);
     if (normalized.length > 0) return normalized;
   } catch (error) {
@@ -496,7 +496,7 @@ const buildImageStoryboardFromDigest = async (params: {
       900,
       { temperature: 0.25, preferredModels: [String(process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5')] }
     );
-    const retryParsed = aiService.parseJson(String(retryRaw || ''), 'trainingImageStoryboardRetry');
+    const retryParsed = aiService.parseJson(String(retryRaw || ''), 'trainingImageStoryboardRetry', { suppressLogs: true });
     const retryNormalized = normalizeStoryboardRows(retryParsed?.images, maxImages);
     if (retryNormalized.length > 0) return retryNormalized;
   } catch (error) {
@@ -1810,7 +1810,7 @@ export const generatePodcastScript = async (
       lang.startsWith('en') ? systemEn : systemFr,
       anthropicKey,
       8192,
-      { temperature: 0.42, preferredModels: ['claude-3-5-haiku-20241022'] }
+      { temperature: 0.42, preferredModels: ['claude-sonnet-4-5'] }
     );
 
     const trimmed = String(script || '').trim();
@@ -1895,7 +1895,7 @@ export const podcastChat = async (
       lang.startsWith('en') ? systemEn : systemFr,
       anthropicKey,
       8192,
-      { temperature: 0.35, preferredModels: ['claude-3-5-haiku-20241022'] }
+      { temperature: 0.35, preferredModels: ['claude-sonnet-4-5'] }
     );
 
     let parsed: any;
