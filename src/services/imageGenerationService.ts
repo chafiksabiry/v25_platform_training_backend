@@ -20,21 +20,39 @@ export class ImageGenerationService {
   /**
    * Generates an SVG image buffer using Claude only (no OpenAI image API).
   */
-  static async generateImageBuffer(description: string, anthropicApiKey?: string): Promise<Buffer> {
+  static async generateImageBuffer(
+    description: string,
+    anthropicApiKey?: string,
+    mode: 'slide' | 'thumbnail' = 'slide'
+  ): Promise<Buffer> {
     const scene = String(description || '').trim() || 'Training slide';
     const seed = this.hashSeed(scene).toString(16).slice(0, 8);
-    const baseRules = [
-      'Generate a valid standalone SVG for a 16:9 training slide.',
-      'Output only raw SVG markup (no markdown, no prose).',
-      'Use viewBox="0 0 1920 1080".',
-      'Return compact SVG under 12000 characters.',
-      'Style: corporate PowerPoint slide, crisp vector style, modern clean look.',
-      'Must include readable title + 3-5 bullet points based on the provided scene.',
-      'Keep excellent contrast and readability.',
-      'Do not include external images or fonts.',
-      `Scene content: ${scene}`,
-      `Variation key: ${seed}`,
-    ].join('\n');
+    const baseRules = mode === 'thumbnail'
+      ? [
+          'Generate a valid standalone SVG for a 16:9 training thumbnail/cover image.',
+          'Output only raw SVG markup (no markdown, no prose).',
+          'Use viewBox="0 0 1920 1080".',
+          'Return compact SVG under 12000 characters.',
+          'Style: premium corporate cover image, modern clean illustration.',
+          'DO NOT create slide layout. DO NOT include title text. DO NOT include bullet points.',
+          'Focus on a single visual concept with strong composition and high contrast.',
+          'Prefer abstract/product/industry illustration with simple geometric shapes.',
+          'Do not include external images or fonts.',
+          `Scene content: ${scene}`,
+          `Variation key: ${seed}`,
+        ].join('\n')
+      : [
+          'Generate a valid standalone SVG for a 16:9 training slide.',
+          'Output only raw SVG markup (no markdown, no prose).',
+          'Use viewBox="0 0 1920 1080".',
+          'Return compact SVG under 12000 characters.',
+          'Style: corporate PowerPoint slide, crisp vector style, modern clean look.',
+          'Must include readable title + 3-5 bullet points based on the provided scene.',
+          'Keep excellent contrast and readability.',
+          'Do not include external images or fonts.',
+          `Scene content: ${scene}`,
+          `Variation key: ${seed}`,
+        ].join('\n');
     const retryRules = [
       baseRules,
       'Retry mode: use simpler layout with fewer shapes.',

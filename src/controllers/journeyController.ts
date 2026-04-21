@@ -194,8 +194,12 @@ export const generateTrainingThumbnail = asyncHandler(async (req: AuthRequest, r
   const seed = prompt || `Professional training thumbnail for ${gigTitle || 'training'} in ${industry || 'business'} domain`;
 
   try {
-    const buffer = await ImageGenerationService.generateImageBuffer(seed, anthropicKey);
-    const uploaded = await cloudinaryService.uploadImageBuffer(buffer, 'trainings/thumbnails');
+    const buffer = await ImageGenerationService.generateImageBuffer(seed, anthropicKey, 'thumbnail');
+    const uploaded = await cloudinaryService.uploadImageBuffer(
+      buffer,
+      'trainings/thumbnails',
+      'svg'
+    );
     return res.status(200).json({
       success: true,
       url: uploaded.url,
