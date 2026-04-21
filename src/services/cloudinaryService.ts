@@ -94,6 +94,31 @@ class CloudinaryService {
     };
   }
 
+  async uploadAudioBuffer(
+    buffer: Buffer,
+    fileName: string,
+    folder: string = 'training-podcasts/audio'
+  ): Promise<{ url: string; publicId: string }> {
+    return new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          folder,
+          resource_type: 'video',
+          public_id: fileName,
+          format: 'mp3'
+        },
+        (error, result) => {
+          if (error || !result) return reject(error || new Error('Cloudinary audio upload failed'));
+          resolve({
+            url: result.secure_url,
+            publicId: result.public_id
+          });
+        }
+      );
+      stream.end(buffer);
+    });
+  }
+
   async deleteFile(publicId: string): Promise<void> {
     await cloudinary.uploader.destroy(publicId);
   }

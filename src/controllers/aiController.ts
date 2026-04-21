@@ -202,6 +202,55 @@ const normalizeGeneratedTitle = (rawTitle: string, fallback: string): string => 
   return cleaned.length > 90 ? `${cleaned.slice(0, 87)}...` : cleaned;
 };
 
+const stripMarkdownForTts = (raw: string): string =>
+  String(raw || '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const generatePodcastMp3Buffer = async (scriptText: string, language: string): Promise<Buffer> => {
+  const apiKey = String(process.env.ELEVENLABS_API_KEY || '').trim();
+  if (!apiKey) {
+    throw new Error('ELEVENLABS_API_KEY is not configured');
+  }
+
+  const voiceId = String(process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM').trim();
+  const modelId = String(process.env.ELEVENLABS_MODEL || 'eleven_monolingual_v1').trim();
+  const text = stripMarkdownForTts(scriptText).slice(0, 4500);
+  if (!text) throw new Error('Script text is empty for TTS generation');
+
+  const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'audio/mpeg',
+      'xi-api-key': apiKey,
+    },
+    body: JSON.stringify({
+      text,
+      model_id: modelId,
+      voice_settings: {
+        stability: language.startsWith('fr') ? 0.45 : 0.5,
+        similarity_boost: 0.75,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '');
+    throw new Error(`ElevenLabs TTS failed (${response.status}): ${errorText.slice(0, 240)}`);
+  }
+
+  const audioArrayBuffer = await response.arrayBuffer();
+  return Buffer.from(audioArrayBuffer);
+};
+
 type ChatTitleMessage = {
   role: 'assistant' | 'user';
   text: string;
@@ -1424,6 +1473,8 @@ export const savePodcast = async (
     const safeCompanyId = toObjectIdOrUndefined(companyId);
     const safeLanguage = String(language || 'fr').trim().toLowerCase() || 'fr';
     const safeTrainingTitle = String(trainingTitle || '').trim();
+    let resolvedAudioUrl = String(audioUrl || '').trim() || undefined;
+    let resolvedAudioCloudinaryPublicId = String(audioCloudinaryPublicId || '').trim() || undefined;
 
     const safeChatMessages = Array.isArray(chatMessages)
       ? chatMessages
@@ -1437,12 +1488,23 @@ export const savePodcast = async (
       : [];
 
     const fileBase = `podcast_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    if (!resolvedAudioUrl) {
+      const mp3Buffer = await generatePodcastMp3Buffer(cleanScript, safeLanguage);
+      const uploadedAudio = await cloudinaryService.uploadAudioBuffer(
+        mp3Buffer,
+        `${fileBase}_audio`,
+        'training-podcasts/audio'
+      );
+      resolvedAudioUrl = uploadedAudio.url;
+      resolvedAudioCloudinaryPublicId = uploadedAudio.publicId;
+    }
+
     const cloudPayload = {
       title: cleanTitle,
       trainingTitle: safeTrainingTitle,
       language: safeLanguage,
       script: cleanScript,
-      audioUrl: String(audioUrl || '').trim() || undefined,
+      audioUrl: resolvedAudioUrl,
       gigId: safeGigId ? safeGigId.toString() : undefined,
       companyId: safeCompanyId ? safeCompanyId.toString() : undefined,
       chatMessages: safeChatMessages,
@@ -1463,8 +1525,8 @@ export const savePodcast = async (
       script: cleanScript,
       scriptCloudinaryUrl: uploaded.url,
       scriptCloudinaryPublicId: uploaded.publicId,
-      audioUrl: String(audioUrl || '').trim() || undefined,
-      audioCloudinaryPublicId: String(audioCloudinaryPublicId || '').trim() || undefined,
+      audioUrl: resolvedAudioUrl,
+      audioCloudinaryPublicId: resolvedAudioCloudinaryPublicId,
       chatMessages: safeChatMessages,
     });
 
