@@ -25,6 +25,11 @@ router.post(
 );
 
 router.post(
+  '/generate-podcast-script',
+  aiController.generatePodcastScript
+);
+
+router.post(
   '/chat/title',
   aiController.generateChatTitle
 );

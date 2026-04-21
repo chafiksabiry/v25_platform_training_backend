@@ -1227,3 +1227,66 @@ export const exportToPPTXPython = async (
     return next(error);
   }
 };
+
+/**
+ * Génère le script oral d’un podcast de formation (texte pour TTS / lecture navigateur).
+ * Corps : { trainingDigest: string, trainingTitle?: string, language?: string }
+ */
+export const generatePodcastScript = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { trainingDigest, trainingTitle, language } = req.body || {};
+    const digest = String(trainingDigest || '').trim();
+    if (!digest) {
+      return res.status(400).json({ success: false, error: 'trainingDigest is required' });
+    }
+    const title = String(trainingTitle || '').trim() || 'Formation';
+    const lang = String(language || 'fr').toLowerCase();
+    const anthropicKey = req.headers['x-anthropic-key'] as string | undefined;
+
+    const digestForModel =
+      digest.length > 20000 ? `${digest.slice(0, 20000)}\n\n[… contenu tronqué pour limite technique]` : digest;
+
+    const prompt = [`Titre / contexte formation: ${title}`, '', '--- Contenu source (digest) ---', digestForModel].join('\n');
+
+    const systemFr = [
+      "Tu rédiges le SCRIPT ORAL d'un seul podcast de formation, en français.",
+      'Entrée : le digest ci-dessus (programme, slides, gig, base de connaissances, synthèse conversation).',
+      'Sortie : uniquement le texte à lire à voix haute, sans markdown (# ** liste), sans numérotation technique de slides.',
+      'Structure : une ligne titre accrocheur, puis introduction courte, puis 3 à 5 chapitres avec titres annoncés oralement, puis conclusion.',
+      'Ton : professionnel, chaleureux, clair, phrases relativement courtes.',
+      "Durée cible à la lecture : environ 8 à 15 minutes (densité moyenne, pas d'excès de détails techniques).",
+      'Ne cite pas "digest" ni "JSON" dans le script.',
+    ].join(' ');
+
+    const systemEn = [
+      'You write the ORAL SCRIPT for a single training podcast, in English.',
+      'Input: the digest above.',
+      'Output: only the text to be read aloud, no markdown headings/lists syntax, no slide numbering.',
+      'Structure: one catchy title line, short intro, 3–5 chapters with spoken titles, conclusion.',
+      'Tone: professional, warm, clear, relatively short sentences.',
+      'Target listening length: about 8–15 minutes.',
+      'Do not mention "digest" or "JSON" in the script.',
+    ].join(' ');
+
+    const script = await aiService.generateWithClaude(
+      prompt,
+      lang.startsWith('en') ? systemEn : systemFr,
+      anthropicKey,
+      8192,
+      { temperature: 0.42, preferredModels: ['claude-3-5-haiku-20241022'] }
+    );
+
+    const trimmed = String(script || '').trim();
+    if (!trimmed) {
+      return res.status(502).json({ success: false, error: 'Le modèle n’a pas renvoyé de script.' });
+    }
+
+    return res.json({ success: true, script: trimmed });
+  } catch (error) {
+    return next(error);
+  }
+};
