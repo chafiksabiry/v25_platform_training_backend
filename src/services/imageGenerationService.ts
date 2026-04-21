@@ -19,7 +19,7 @@ export class ImageGenerationService {
 
   /**
    * Generates an SVG image buffer using Claude only (no OpenAI image API).
-   */
+  */
   static async generateImageBuffer(description: string, anthropicApiKey?: string): Promise<Buffer> {
     const scene = String(description || '').trim() || 'Training slide';
     const seed = this.hashSeed(scene).toString(16).slice(0, 8);
