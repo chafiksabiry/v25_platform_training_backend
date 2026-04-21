@@ -323,6 +323,7 @@ type VideoGenerationJobState = {
 };
 
 const videoGenerationJobs = new Map<string, VideoGenerationJobState>();
+const VIDEO_JOB_TIMEOUT_MS = 10 * 60 * 1000;
 
 type GoogleServiceAccountLike = {
   project_id?: string;
@@ -1877,10 +1878,27 @@ export const getTrainingVideoStatus = async (
   next: NextFunction
 ) => {
   try {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('Surrogate-Control', 'no-store');
+
     const jobId = String(req.params.jobId || '').trim();
     const state = videoGenerationJobs.get(jobId);
     if (!state) {
       return res.status(404).json({ success: false, error: 'Video generation job not found' });
+    }
+
+    const now = Date.now();
+    if (
+      state.status !== 'completed' &&
+      state.status !== 'failed' &&
+      now - Number(state.createdAt || now) > VIDEO_JOB_TIMEOUT_MS
+    ) {
+      state.status = 'failed';
+      state.error = state.error || 'Video generation timed out. Please try again.';
+      state.updatedAt = now;
+      videoGenerationJobs.set(jobId, state);
     }
 
     if (state.status !== 'completed' && state.status !== 'failed' && state.operationName) {
