@@ -2426,6 +2426,7 @@ export const listTrainingImages = async (
         _id: String(r._id),
         title: String(r.title || ''),
         trainingTitle: r.trainingTitle ? String(r.trainingTitle) : undefined,
+        gigId: r.gigId ? String(r.gigId) : undefined,
         language: String(r.language || 'fr'),
         items: Array.isArray(r.items)
           ? r.items.map((it: any) => ({
