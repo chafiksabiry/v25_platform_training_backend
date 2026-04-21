@@ -10,9 +10,11 @@ import Document from '../models/Document';
 import Gig from '../models/Gig';
 import TrainingChatSession from '../models/TrainingChatSession';
 import TrainingPodcast from '../models/TrainingPodcast';
+import TrainingVideo from '../models/TrainingVideo';
 import mongoose from 'mongoose';
 import fs from 'fs';
 import { promisify } from 'util';
+import crypto from 'crypto';
 
 const unlinkAsync = promisify(fs.unlink);
 const HARX_STYLE_TAG_REGEX = /<harx-style>\s*\{[\s\S]*?\}\s*<\/harx-style>/i;
@@ -304,6 +306,100 @@ const generatePodcastMp3Buffer = async (scriptText: string, language: string): P
   }
 
   throw new Error(`ElevenLabs TTS failed for all model candidates: ${lastError || 'unknown error'}`);
+};
+
+type VideoGenerationJobState = {
+  id: string;
+  provider: 'veo';
+  model: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  prompt: string;
+  operationName?: string;
+  videoUrl?: string;
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+const videoGenerationJobs = new Map<string, VideoGenerationJobState>();
+
+const extractFirstVideoUrl = (payload: any): string | undefined => {
+  const queue: any[] = [payload];
+  const seen = new Set<any>();
+  while (queue.length > 0) {
+    const node = queue.shift();
+    if (!node || typeof node !== 'object' || seen.has(node)) continue;
+    seen.add(node);
+    for (const [k, v] of Object.entries(node)) {
+      if (typeof v === 'string') {
+        const low = v.toLowerCase();
+        if (low.startsWith('https://') && (low.includes('.mp4') || low.includes('.webm') || /video/.test(k.toLowerCase()))) {
+          return v;
+        }
+      } else if (v && typeof v === 'object') {
+        queue.push(v);
+      }
+    }
+  }
+  return undefined;
+};
+
+const triggerVeoGeneration = async (params: {
+  prompt: string;
+  aspectRatio?: string;
+  durationSeconds?: number;
+}): Promise<{ operationName: string; model: string }> => {
+  const apiKey = String(process.env.GOOGLE_GENAI_API_KEY || '').trim();
+  if (!apiKey) {
+    throw new Error('GOOGLE_GENAI_API_KEY is not configured');
+  }
+  const model = String(process.env.VEO_MODEL || 'veo-2.0-generate-001').trim();
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    model
+  )}:predictLongRunning?key=${encodeURIComponent(apiKey)}`;
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      instances: [{ prompt: params.prompt }],
+      parameters: {
+        aspectRatio: params.aspectRatio || '16:9',
+        durationSeconds: Math.min(Math.max(Number(params.durationSeconds || 8), 4), 12),
+      },
+    }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '');
+    throw new Error(`Veo generation request failed (${response.status}): ${errorText.slice(0, 320)}`);
+  }
+  const data: any = await response.json().catch(() => ({}));
+  const operationName = String(data?.name || '').trim();
+  if (!operationName) {
+    throw new Error('Veo generation request succeeded but operation id is missing');
+  }
+  return { operationName, model };
+};
+
+const pollVeoOperation = async (operationName: string): Promise<{ done: boolean; videoUrl?: string; error?: string }> => {
+  const apiKey = String(process.env.GOOGLE_GENAI_API_KEY || '').trim();
+  if (!apiKey) return { done: false, error: 'GOOGLE_GENAI_API_KEY is not configured' };
+  const url = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${encodeURIComponent(apiKey)}`;
+  const response = await fetch(url, { method: 'GET' });
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '');
+    return { done: false, error: `Veo status failed (${response.status}): ${errorText.slice(0, 320)}` };
+  }
+  const data: any = await response.json().catch(() => ({}));
+  const done = Boolean(data?.done);
+  if (!done) return { done: false };
+  if (data?.error?.message) {
+    return { done: true, error: String(data.error.message) };
+  }
+  const videoUrl = extractFirstVideoUrl(data);
+  if (!videoUrl) {
+    return { done: true, error: 'Veo operation completed but no downloadable video URL was returned.' };
+  }
+  return { done: true, videoUrl };
 };
 
 type ChatTitleMessage = {
@@ -1646,6 +1742,187 @@ export const listSavedPodcasts = async (
         script: String(r.script || ''),
         scriptCloudinaryUrl: r.scriptCloudinaryUrl ? String(r.scriptCloudinaryUrl) : undefined,
         audioUrl: r.audioUrl ? String(r.audioUrl) : undefined,
+        createdAt: r.createdAt,
+      })),
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const generateTrainingVideo = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const prompt = String(req.body?.prompt || '').trim();
+    const trainingTitle = String(req.body?.trainingTitle || '').trim();
+    const aspectRatio = String(req.body?.aspectRatio || '16:9').trim();
+    const durationSeconds = Number(req.body?.durationSeconds || 8);
+    if (!prompt) {
+      return res.status(400).json({ success: false, error: 'prompt is required' });
+    }
+    const started = await triggerVeoGeneration({ prompt, aspectRatio, durationSeconds });
+    const jobId = crypto.randomUUID();
+    const now = Date.now();
+    videoGenerationJobs.set(jobId, {
+      id: jobId,
+      provider: 'veo',
+      model: started.model,
+      status: 'queued',
+      prompt,
+      operationName: started.operationName,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return res.json({
+      success: true,
+      jobId,
+      provider: 'veo',
+      model: started.model,
+      operationName: started.operationName,
+      trainingTitle: trainingTitle || undefined,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const getTrainingVideoStatus = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const jobId = String(req.params.jobId || '').trim();
+    const state = videoGenerationJobs.get(jobId);
+    if (!state) {
+      return res.status(404).json({ success: false, error: 'Video generation job not found' });
+    }
+
+    if (state.status !== 'completed' && state.status !== 'failed' && state.operationName) {
+      state.status = 'running';
+      state.updatedAt = Date.now();
+      const polled = await pollVeoOperation(state.operationName);
+      if (polled.done && polled.videoUrl) {
+        state.status = 'completed';
+        state.videoUrl = polled.videoUrl;
+      } else if (polled.done && polled.error) {
+        state.status = 'failed';
+        state.error = polled.error;
+      } else if (polled.error) {
+        state.error = polled.error;
+      }
+      state.updatedAt = Date.now();
+      videoGenerationJobs.set(jobId, state);
+    }
+
+    return res.json({
+      success: true,
+      jobId: state.id,
+      status: state.status,
+      provider: state.provider,
+      model: state.model,
+      videoUrl: state.videoUrl,
+      error: state.error,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const saveTrainingVideo = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const title = String(req.body?.title || '').trim();
+    const prompt = String(req.body?.prompt || '').trim();
+    const trainingTitle = String(req.body?.trainingTitle || '').trim();
+    const provider = String(req.body?.provider || 'veo').trim() || 'veo';
+    const model = String(req.body?.model || process.env.VEO_MODEL || 'veo-2.0-generate-001').trim();
+    const gigId = req.body?.gigId;
+    const companyId = req.body?.companyId;
+    const jobId = String(req.body?.jobId || '').trim();
+    let videoUrl = String(req.body?.videoUrl || '').trim();
+    if (!title) return res.status(400).json({ success: false, error: 'title is required' });
+    if (!prompt) return res.status(400).json({ success: false, error: 'prompt is required' });
+
+    if (!videoUrl && jobId) {
+      const state = videoGenerationJobs.get(jobId);
+      videoUrl = String(state?.videoUrl || '').trim();
+    }
+    if (!videoUrl) {
+      return res.status(400).json({ success: false, error: 'videoUrl is required (or completed jobId)' });
+    }
+
+    const safeGigId = toObjectIdOrUndefined(gigId);
+    const safeCompanyId = toObjectIdOrUndefined(companyId);
+    const uploaded = await cloudinaryService.uploadRemoteVideo(videoUrl, 'training-videos/generated');
+
+    const saved = await TrainingVideo.create({
+      gigId: safeGigId,
+      companyId: safeCompanyId,
+      title,
+      trainingTitle: trainingTitle || undefined,
+      prompt,
+      provider,
+      modelName: model,
+      status: 'saved',
+      videoUrl: uploaded.url,
+      videoCloudinaryPublicId: uploaded.publicId,
+    });
+
+    return res.json({
+      success: true,
+      video: {
+        _id: String(saved._id),
+        title: saved.title,
+        trainingTitle: saved.trainingTitle,
+        prompt: saved.prompt,
+        provider: saved.provider,
+        model: saved.modelName,
+        status: saved.status,
+        videoUrl: saved.videoUrl,
+        createdAt: saved.createdAt,
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const listSavedTrainingVideos = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const gigId = String(req.query.gigId || '').trim();
+    const companyId = String(req.query.companyId || '').trim();
+    const limitRaw = parseInt(String(req.query.limit || '20'), 10);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 20;
+
+    const filter: any = {};
+    const safeGigId = toObjectIdOrUndefined(gigId);
+    const safeCompanyId = toObjectIdOrUndefined(companyId);
+    if (safeGigId) filter.gigId = safeGigId;
+    if (safeCompanyId) filter.companyId = safeCompanyId;
+
+    const rows = await TrainingVideo.find(filter).sort({ createdAt: -1 }).limit(limit).lean();
+    return res.json({
+      success: true,
+      videos: rows.map((r: any) => ({
+        _id: String(r._id),
+        title: String(r.title || ''),
+        trainingTitle: r.trainingTitle ? String(r.trainingTitle) : undefined,
+        prompt: String(r.prompt || ''),
+        provider: String(r.provider || 'veo'),
+        model: String(r.modelName || ''),
+        status: String(r.status || 'saved'),
+        videoUrl: r.videoUrl ? String(r.videoUrl) : undefined,
         createdAt: r.createdAt,
       })),
     });

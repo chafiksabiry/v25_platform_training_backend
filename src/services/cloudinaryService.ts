@@ -94,6 +94,21 @@ class CloudinaryService {
     };
   }
 
+  async uploadRemoteVideo(
+    videoUrl: string,
+    folder: string = 'training-videos'
+  ): Promise<{ url: string; publicId: string }> {
+    const result = await cloudinary.uploader.upload(videoUrl, {
+      folder,
+      resource_type: 'video'
+    });
+
+    return {
+      url: result.secure_url,
+      publicId: result.public_id
+    };
+  }
+
   async uploadAudioBuffer(
     buffer: Buffer,
     fileName: string,

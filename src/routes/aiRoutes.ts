@@ -45,6 +45,26 @@ router.get(
 );
 
 router.post(
+  '/video/generate',
+  aiController.generateTrainingVideo
+);
+
+router.get(
+  '/video/status/:jobId',
+  aiController.getTrainingVideoStatus
+);
+
+router.post(
+  '/video/save',
+  aiController.saveTrainingVideo
+);
+
+router.get(
+  '/video/list',
+  aiController.listSavedTrainingVideos
+);
+
+router.post(
   '/chat/title',
   aiController.generateChatTitle
 );
