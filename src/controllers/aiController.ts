@@ -222,14 +222,19 @@ const generatePodcastMp3Buffer = async (scriptText: string, language: string): P
 
   const voiceId = String(process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM').trim();
   const configuredModel = String(process.env.ELEVENLABS_MODEL || '').trim();
-  const modelCandidates = configuredModel
-    ? [configuredModel]
-    : [
-        // Prefer modern models first; deprecated v1 models are intentionally excluded.
-        'eleven_flash_v2_5',
-        'eleven_turbo_v2_5',
-        'eleven_multilingual_v2',
-      ];
+  const fallbackModels = [
+    // Prefer modern models first; deprecated v1 models are intentionally excluded.
+    'eleven_flash_v2_5',
+    'eleven_turbo_v2_5',
+    'eleven_multilingual_v2',
+  ];
+  const modelCandidates = Array.from(
+    new Set(
+      [configuredModel, ...fallbackModels]
+        .map((m) => String(m || '').trim())
+        .filter(Boolean)
+    )
+  );
   const text = stripMarkdownForTts(scriptText).slice(0, 4500);
   if (!text) throw new Error('Script text is empty for TTS generation');
 
