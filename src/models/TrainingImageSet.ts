@@ -51,8 +51,9 @@ const trainingImageSetSchema = new Schema<ITrainingImageSet>(
       type: [trainingImageItemSchema],
       default: [],
       validate: {
-        validator: (arr: ITrainingImageItem[]) => Array.isArray(arr) && arr.length >= 1 && arr.length <= 20,
-        message: 'Image set must contain between 1 and 20 items.',
+        // Allow empty set at creation time; items are appended progressively by background job.
+        validator: (arr: ITrainingImageItem[]) => Array.isArray(arr) && arr.length >= 0 && arr.length <= 20,
+        message: 'Image set must contain between 0 and 20 items.',
       },
     },
   },
