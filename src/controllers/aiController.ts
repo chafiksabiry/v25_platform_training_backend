@@ -15,6 +15,7 @@ import mongoose from 'mongoose';
 import fs from 'fs';
 import { promisify } from 'util';
 import crypto from 'crypto';
+import { GoogleAuth } from 'google-auth-library';
 
 const unlinkAsync = promisify(fs.unlink);
 const HARX_STYLE_TAG_REGEX = /<harx-style>\s*\{[\s\S]*?\}\s*<\/harx-style>/i;
@@ -323,6 +324,35 @@ type VideoGenerationJobState = {
 
 const videoGenerationJobs = new Map<string, VideoGenerationJobState>();
 
+type GoogleServiceAccountLike = {
+  project_id?: string;
+  client_email?: string;
+  private_key?: string;
+};
+
+const parseGoogleServiceAccountFromEnv = (): GoogleServiceAccountLike | null => {
+  const raw = String(process.env.CLOUD_STORAGE_CREDENTIALS || '').trim();
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed as GoogleServiceAccountLike;
+  } catch {
+    return null;
+  }
+};
+
+const getGoogleCloudAuthToken = async (): Promise<string> => {
+  const creds = parseGoogleServiceAccountFromEnv();
+  const auth = new GoogleAuth({
+    credentials: creds || undefined,
+    scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+  });
+  const token = await auth.getAccessToken();
+  if (!token) throw new Error('Unable to acquire Google Cloud access token');
+  return token;
+};
+
 const extractFirstVideoUrl = (payload: any): string | undefined => {
   const queue: any[] = [payload];
   const seen = new Set<any>();
@@ -350,24 +380,44 @@ const triggerVeoGeneration = async (params: {
   durationSeconds?: number;
 }): Promise<{ operationName: string; model: string }> => {
   const apiKey = String(process.env.GOOGLE_GENAI_API_KEY || '').trim();
-  if (!apiKey) {
-    throw new Error('GOOGLE_GENAI_API_KEY is not configured');
-  }
   const model = String(process.env.VEO_MODEL || 'veo-2.0-generate-001').trim();
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-    model
-  )}:predictLongRunning?key=${encodeURIComponent(apiKey)}`;
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      instances: [{ prompt: params.prompt }],
-      parameters: {
-        aspectRatio: params.aspectRatio || '16:9',
-        durationSeconds: Math.min(Math.max(Number(params.durationSeconds || 8), 4), 12),
+  const payload = {
+    instances: [{ prompt: params.prompt }],
+    parameters: {
+      aspectRatio: params.aspectRatio || '16:9',
+      durationSeconds: Math.min(Math.max(Number(params.durationSeconds || 8), 4), 12),
+    },
+  };
+  let response: globalThis.Response;
+  if (apiKey) {
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      model
+    )}:predictLongRunning?key=${encodeURIComponent(apiKey)}`;
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } else {
+    const creds = parseGoogleServiceAccountFromEnv();
+    const project = String(process.env.GOOGLE_CLOUD_PROJECT || creds?.project_id || '').trim();
+    const location = String(process.env.GOOGLE_CLOUD_LOCATION || 'us-central1').trim();
+    if (!project) {
+      throw new Error('GOOGLE_CLOUD_PROJECT is required when GOOGLE_GENAI_API_KEY is not configured');
+    }
+    const token = await getGoogleCloudAuthToken();
+    const endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${encodeURIComponent(
+      project
+    )}/locations/${encodeURIComponent(location)}/publishers/google/models/${encodeURIComponent(model)}:predictLongRunning`;
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
       },
-    }),
-  });
+      body: JSON.stringify(payload),
+    });
+  }
   if (!response.ok) {
     const errorText = await response.text().catch(() => '');
     throw new Error(`Veo generation request failed (${response.status}): ${errorText.slice(0, 320)}`);
@@ -382,9 +432,20 @@ const triggerVeoGeneration = async (params: {
 
 const pollVeoOperation = async (operationName: string): Promise<{ done: boolean; videoUrl?: string; error?: string }> => {
   const apiKey = String(process.env.GOOGLE_GENAI_API_KEY || '').trim();
-  if (!apiKey) return { done: false, error: 'GOOGLE_GENAI_API_KEY is not configured' };
-  const url = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${encodeURIComponent(apiKey)}`;
-  const response = await fetch(url, { method: 'GET' });
+  let response: globalThis.Response;
+  if (apiKey) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${encodeURIComponent(apiKey)}`;
+    response = await fetch(url, { method: 'GET' });
+  } else {
+    const location = String(process.env.GOOGLE_CLOUD_LOCATION || 'us-central1').trim();
+    const token = await getGoogleCloudAuthToken();
+    const opPath = String(operationName || '').replace(/^\/+/, '');
+    const url = `https://${location}-aiplatform.googleapis.com/v1/${opPath}`;
+    response = await fetch(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  }
   if (!response.ok) {
     const errorText = await response.text().catch(() => '');
     return { done: false, error: `Veo status failed (${response.status}): ${errorText.slice(0, 320)}` };
