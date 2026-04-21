@@ -1077,23 +1077,21 @@ export const chat = async (
     if (!parsedContext && sessionContext) {
       parsedContext = { ...sessionContext };
     } else {
-      mergeFromSessionIfMissing('generationMode');
-      mergeFromSessionIfMissing('personalizationProfile');
       mergeFromSessionIfMissing('analyzedUploads');
       mergeFromSessionIfMissing('analyzedUploadsCount');
       mergeFromSessionIfMissing('knowledgeBaseDocuments');
       mergeFromSessionIfMissing('knowledgeBaseDocumentsCount');
-      mergeFromSessionIfMissing('selectedDuration');
-      mergeFromSessionIfMissing('selectedMethodology');
       mergeFromSessionIfMissing('selectedGigId');
       mergeFromSessionIfMissing('selectedGigTitle');
       mergeFromSessionIfMissing('gigSnapshot');
       mergeFromSessionIfMissing('useKnowledgeBase');
       mergeFromSessionIfMissing('useUploadedDocuments');
+      mergeFromSessionIfMissing('chatStyle');
     }
 
     const selectedDuration = parsedContext?.selectedDuration || 'non specifiee';
     const selectedMethodology = parsedContext?.selectedMethodology || 'Methodologie 360';
+    const isFreeChatMode = String(parsedContext?.chatStyle || '').toLowerCase() === 'free_chat';
     const inferredDomain = inferKbDomainFromContext(parsedContext);
     const effectiveContextString =
       parsedContext && typeof parsedContext === 'object'
@@ -1118,6 +1116,9 @@ export const chat = async (
       'Mirror user intent and energy: direct when user is direct, exploratory when user brainstorms, concise when user asks briefly.',
       'Do not sound templated. Vary sentence rhythm and transitions naturally.',
       'Use clean, readable formatting: short paragraphs and bullet lists only when they add value.',
+      isFreeChatMode
+        ? 'DEFAULT MODE: normal conversational assistant (Claude-like). Do not force modules, curricula, or training-plan structure unless user explicitly asks for them.'
+        : 'When the user asks for training artifacts, structure the output clearly and pedagogically.',
       'MARKDOWN (obligatoire pour les plans et contenus de modules) : rédige en Markdown valide — titres avec ## ou ### (éviter un unique titre niveau # qui occupe tout), listes à puces (- ou *), **gras**, *italique*, liens [texte](url) si utile, tableaux markdown seulement pour un vrai contenu pédagogique (pas tableaux admin).',
       'Do not output decorative separator lines (---) sauf si vraiment nécessaire pour séparer deux blocs distincts.',
       'Visual style policy: keep normal chat replies light and conversational.',
@@ -1139,7 +1140,7 @@ export const chat = async (
       ...(gigGrounding.systemRules.length
         ? gigGrounding.systemRules
         : ['Do NOT mention or infer company name, gig name, or gig description unless explicitly provided by user in current message.']),
-      'If user asks for a training plan, generate a complete draft plan immediately (modules with substantive slide-ready text, programme-level structure) without waiting for extra clarifications; for parts that become slides, obey SLIDE-READY MODULE CONTENT (no per-module timing banners in slide bodies).',
+      'If user explicitly asks for a training plan, generate a complete draft plan immediately (modules with substantive slide-ready text, programme-level structure) without waiting for extra clarifications; for parts that become slides, obey SLIDE-READY MODULE CONTENT (no per-module timing banners in slide bodies).',
       'You may finish with 2-4 optional clarification questions, but only after providing the full initial plan.',
       'NEVER include fake UI buttons, markdown button syntax, or "Valider / Enregistrer" controls in your reply; the app shows validation actions separately when appropriate.'
     ].join(' ');
@@ -1182,19 +1183,16 @@ export const chat = async (
       );
       activeSession.contextSnapshot = parsedContext && typeof parsedContext === 'object'
         ? {
-            generationMode: parsedContext.generationMode,
-            personalizationProfile: parsedContext.personalizationProfile,
             analyzedUploadsCount: parsedContext.analyzedUploadsCount,
             analyzedUploads: parsedContext.analyzedUploads,
             knowledgeBaseDocumentsCount: parsedContext.knowledgeBaseDocumentsCount,
             knowledgeBaseDocuments: parsedContext.knowledgeBaseDocuments,
-            selectedDuration: parsedContext.selectedDuration,
-            selectedMethodology: parsedContext.selectedMethodology,
             selectedGigId: parsedContext.selectedGigId,
             selectedGigTitle: parsedContext.selectedGigTitle,
             gigSnapshot: parsedContext.gigSnapshot,
             useKnowledgeBase: parsedContext.useKnowledgeBase,
             useUploadedDocuments: parsedContext.useUploadedDocuments,
+            chatStyle: parsedContext.chatStyle,
           }
         : activeSession.contextSnapshot || null;
       if (!activeSession.title || activeSession.title === 'Nouvelle conversation') {
@@ -1281,19 +1279,16 @@ export const chat = async (
     );
     activeSession.contextSnapshot = parsedContext && typeof parsedContext === 'object'
       ? {
-          generationMode: parsedContext.generationMode,
-          personalizationProfile: parsedContext.personalizationProfile,
           analyzedUploadsCount: parsedContext.analyzedUploadsCount,
           analyzedUploads: parsedContext.analyzedUploads,
           knowledgeBaseDocumentsCount: parsedContext.knowledgeBaseDocumentsCount,
           knowledgeBaseDocuments: parsedContext.knowledgeBaseDocuments,
-          selectedDuration: parsedContext.selectedDuration,
-          selectedMethodology: parsedContext.selectedMethodology,
           selectedGigId: parsedContext.selectedGigId,
           selectedGigTitle: parsedContext.selectedGigTitle,
           gigSnapshot: parsedContext.gigSnapshot,
           useKnowledgeBase: parsedContext.useKnowledgeBase,
           useUploadedDocuments: parsedContext.useUploadedDocuments,
+          chatStyle: parsedContext.chatStyle,
         }
       : activeSession.contextSnapshot || null;
     if (!activeSession.title || activeSession.title === 'Nouvelle conversation') {
