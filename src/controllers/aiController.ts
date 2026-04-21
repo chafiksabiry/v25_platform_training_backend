@@ -483,23 +483,13 @@ const processTrainingImageJob = async (
     for (let i = 0; i < storyboard.length; i += 1) {
       const scene = storyboard[i];
       const imgBuffer = await ImageGenerationService.generateImageBuffer(scene.prompt);
-      let imageUrl = '';
-      let imageCloudinaryPublicId: string | undefined;
-      try {
-        const uploaded = await cloudinaryService.uploadImageBuffer(imgBuffer, 'training-images/generated');
-        imageUrl = uploaded.url;
-        imageCloudinaryPublicId = uploaded.publicId;
-      } catch (uploadError: any) {
-        // Keep generation progressive even if CDN upload fails for one slide.
-        const encoded = Buffer.from(imgBuffer).toString('base64');
-        imageUrl = `data:image/svg+xml;base64,${encoded}`;
-        imageCloudinaryPublicId = undefined;
-        console.error('[TrainingImages] Cloudinary upload failed, using inline SVG fallback', {
-          jobId,
-          sceneIndex: i + 1,
-          error: String(uploadError?.message || uploadError),
-        });
-      }
+      const uploaded = await cloudinaryService.uploadImageBuffer(
+        imgBuffer,
+        'training-images/generated',
+        'png'
+      );
+      const imageUrl = uploaded.url;
+      const imageCloudinaryPublicId = uploaded.publicId;
       const nextItem = {
         index: i + 1,
         title: scene.title,

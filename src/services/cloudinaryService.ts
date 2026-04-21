@@ -42,13 +42,15 @@ class CloudinaryService {
 
   async uploadImageBuffer(
     buffer: Buffer,
-    folder: string = 'training-images'
+    folder: string = 'training-images',
+    format?: 'png' | 'jpg' | 'webp' | 'svg'
   ): Promise<{ url: string; publicId: string }> {
     return new Promise((resolve, reject) => {
       const stream = cloudinary.uploader.upload_stream(
         {
           folder,
-          resource_type: 'image'
+          resource_type: 'image',
+          ...(format ? { format } : {})
         },
         (error, result) => {
           if (error || !result) return reject(error || new Error('Cloudinary upload failed'));
