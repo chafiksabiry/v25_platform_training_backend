@@ -126,6 +126,10 @@ export interface ITrainingJourney extends Document {
   companyId?: string | mongoose.Types.ObjectId;
   gigId?: string | mongoose.Types.ObjectId;
   industry?: string | mongoose.Types.ObjectId;
+  /** Référence Mongo vers le dernier jeu de slides images (training_image_sets) */
+  images?: string | mongoose.Types.ObjectId;
+  /** Référence Mongo vers le podcast REP sauvegardé (training_podcasts) */
+  podcast?: string | mongoose.Types.ObjectId;
   presentationUrl?: string;
   filetraining?: string;
   presentation?: IPresentation;
@@ -244,6 +248,14 @@ const trainingJourneySchema = new Schema<ITrainingJourney>(
     industry: {
       type: Schema.Types.ObjectId,
       ref: 'Industry'
+    },
+    images: {
+      type: Schema.Types.ObjectId,
+      ref: 'TrainingImageSet',
+    },
+    podcast: {
+      type: Schema.Types.ObjectId,
+      ref: 'TrainingPodcast',
     },
     presentationUrl: {
       type: String

@@ -17,6 +17,12 @@ export const createJourney = asyncHandler(async (req: AuthRequest, res: Response
   if (journeyData.industry !== undefined && !isValidObjectId(journeyData.industry)) {
     delete journeyData.industry;
   }
+  if (journeyData.images !== undefined && !isValidObjectId(journeyData.images)) {
+    delete journeyData.images;
+  }
+  if (journeyData.podcast !== undefined && !isValidObjectId(journeyData.podcast)) {
+    delete journeyData.podcast;
+  }
 
   if (presentationData) {
     console.log('📊 [createJourney] presentationData found, slides count:', presentationData.slides?.length);
@@ -50,6 +56,12 @@ export const updateJourney = asyncHandler(async (req: AuthRequest, res: Response
 
   if (journeyData.industry !== undefined && !isValidObjectId(journeyData.industry)) {
     delete journeyData.industry;
+  }
+  if (journeyData.images !== undefined && !isValidObjectId(journeyData.images)) {
+    delete journeyData.images;
+  }
+  if (journeyData.podcast !== undefined && !isValidObjectId(journeyData.podcast)) {
+    delete journeyData.podcast;
   }
 
   if (presentationData) {

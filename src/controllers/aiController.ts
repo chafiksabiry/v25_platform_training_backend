@@ -12,6 +12,7 @@ import TrainingChatSession from '../models/TrainingChatSession';
 import TrainingPodcast from '../models/TrainingPodcast';
 import TrainingVideo from '../models/TrainingVideo';
 import TrainingImageSet from '../models/TrainingImageSet';
+import TrainingJourney from '../models/TrainingJourney';
 import mongoose from 'mongoose';
 import fs from 'fs';
 import { promisify } from 'util';
@@ -333,6 +334,8 @@ type TrainingImageGenerationJobState = {
   title: string;
   trainingTitle?: string;
   language: string;
+  /** training_journeys._id — lier le jeu d’images au parcours après génération */
+  trainingJourneyId?: string;
   gigId?: mongoose.Types.ObjectId | string;
   companyId?: mongoose.Types.ObjectId | string;
   sourceDigest: string;
@@ -514,6 +517,15 @@ const processTrainingImageJob = async (
     state.status = 'completed';
     state.updatedAt = Date.now();
     trainingImageGenerationJobs.set(jobId, state);
+
+    const journeyLinkId = state.trainingJourneyId ? toObjectIdOrUndefined(state.trainingJourneyId) : undefined;
+    if (journeyLinkId && imageSetId) {
+      try {
+        await TrainingJourney.findByIdAndUpdate(journeyLinkId, { $set: { images: imageSetId } });
+      } catch (linkErr: any) {
+        console.warn('[TrainingImages] Failed to link image set to training_journey:', linkErr?.message || linkErr);
+      }
+    }
   } catch (e: any) {
     console.error('[TrainingImages] Job failed', {
       jobId,
@@ -1963,6 +1975,7 @@ export const savePodcast = async (
       audioUrl,
       audioCloudinaryPublicId,
       chatMessages,
+      trainingJourneyId,
     } = req.body || {};
 
     const cleanTitle = String(title || '').trim();
@@ -2041,6 +2054,18 @@ export const savePodcast = async (
       audioCloudinaryPublicId: resolvedAudioCloudinaryPublicId,
       chatMessages: safeChatMessages,
     });
+
+    const journeyIdForLink = String(trainingJourneyId || '').trim();
+    const safeJourneyId = mongoose.Types.ObjectId.isValid(journeyIdForLink)
+      ? new mongoose.Types.ObjectId(journeyIdForLink)
+      : null;
+    if (safeJourneyId) {
+      try {
+        await TrainingJourney.findByIdAndUpdate(safeJourneyId, { $set: { podcast: saved._id } });
+      } catch (linkErr: any) {
+        console.warn('[savePodcast] Failed to link podcast to training_journey:', linkErr?.message || linkErr);
+      }
+    }
 
     return res.json({
       success: true,
@@ -2316,6 +2341,10 @@ export const generateTrainingImages = async (
     const title = String(req.body?.title || `${trainingTitle || 'Training'} - Images`).trim().slice(0, 240);
     const safeGigId = toObjectIdOrUndefined(req.body?.gigId);
     const safeCompanyId = toObjectIdOrUndefined(req.body?.companyId);
+    const trainingJourneyIdRaw = String(req.body?.trainingJourneyId || '').trim();
+    const trainingJourneyId = mongoose.Types.ObjectId.isValid(trainingJourneyIdRaw)
+      ? trainingJourneyIdRaw
+      : undefined;
     if (!trainingDigest) {
       return res.status(400).json({ success: false, error: 'trainingDigest is required' });
     }
@@ -2335,6 +2364,7 @@ export const generateTrainingImages = async (
       title,
       trainingTitle: trainingTitle || undefined,
       language,
+      trainingJourneyId,
       gigId: safeGigId,
       companyId: safeCompanyId,
       sourceDigest: trainingDigest.slice(0, 40000),
