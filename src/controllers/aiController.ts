@@ -476,39 +476,22 @@ const buildImageStoryboardFromDigest = async (params: {
     const parsed = aiService.parseJson(String(raw || ''), 'trainingImageStoryboard', { suppressLogs: true });
     const normalized = normalizeStoryboardRows(parsed?.images, maxImages);
     if (normalized.length > 0) return normalized;
+    console.log('[AI] Storyboard returned empty/invalid rows; using deterministic fallback.');
+    return buildDeterministicStoryboardFallback({
+      trainingDigest: params.trainingDigest,
+      trainingTitle: params.trainingTitle,
+      language: params.language,
+      maxImages,
+    });
   } catch {
-    console.log('[AI] Storyboard JSON parsing failed; retrying with compact prompt.');
+    console.log('[AI] Storyboard JSON parsing failed; using deterministic fallback.');
+    return buildDeterministicStoryboardFallback({
+      trainingDigest: params.trainingDigest,
+      trainingTitle: params.trainingTitle,
+      language: params.language,
+      maxImages,
+    });
   }
-
-  try {
-    const compactPrompt = [
-      `Return ONLY valid JSON: {"images":[...]} with exactly ${maxImages} entries.`,
-      'Each entry: {"title":"...","prompt":"...","slideRole":"cover|agenda|content|summary|conclusion"}',
-      'First cover, second agenda, last conclusion, others content.',
-      `Training: ${String(params.trainingTitle || 'Training')}`,
-      `Style: ${String(params.styleGuidance || 'professional powerpoint visual').slice(0, 300)}`,
-      `Context: ${String(params.trainingDigest || '').slice(0, 5000)}`,
-    ].join('\n');
-    const retryRaw = await aiService.generateWithClaude(
-      compactPrompt,
-      'Return valid compact JSON only.',
-      String(process.env.ANTHROPIC_API_KEY || '').trim() || undefined,
-      900,
-      { temperature: 0.25, preferredModels: [String(process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5')] }
-    );
-    const retryParsed = aiService.parseJson(String(retryRaw || ''), 'trainingImageStoryboardRetry', { suppressLogs: true });
-    const retryNormalized = normalizeStoryboardRows(retryParsed?.images, maxImages);
-    if (retryNormalized.length > 0) return retryNormalized;
-  } catch {
-    console.log('[AI] Storyboard retry failed; using deterministic fallback.');
-  }
-
-  return buildDeterministicStoryboardFallback({
-    trainingDigest: params.trainingDigest,
-    trainingTitle: params.trainingTitle,
-    language: params.language,
-    maxImages,
-  });
 };
 
 const processTrainingImageJob = async (
