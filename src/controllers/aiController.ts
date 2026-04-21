@@ -1117,12 +1117,12 @@ export const chat = async (
       'Do not sound templated. Vary sentence rhythm and transitions naturally.',
       'Use clean, readable formatting: short paragraphs and bullet lists only when they add value.',
       isFreeChatMode
-        ? 'DEFAULT MODE: normal conversational assistant (Claude-like). Do not force modules, curricula, or training-plan structure unless user explicitly asks for them.'
+        ? 'DEFAULT MODE: respond like a normal conversational assistant. Write plain flowing text with minimal formatting. Do NOT create module cards, module sections, or training-plan grids. No "Module 1 - ...", no numbered module blocks. Just natural text, short paragraphs and bullet points only when they clearly add value.'
         : 'When the user asks for training artifacts, structure the output clearly and pedagogically.',
-      'MARKDOWN (obligatoire pour les plans et contenus de modules) : rédige en Markdown valide — titres avec ## ou ### (éviter un unique titre niveau # qui occupe tout), listes à puces (- ou *), **gras**, *italique*, liens [texte](url) si utile, tableaux markdown seulement pour un vrai contenu pédagogique (pas tableaux admin).',
-      'Do not output decorative separator lines (---) sauf si vraiment nécessaire pour séparer deux blocs distincts.',
-      'Visual style policy: keep normal chat replies light and conversational.',
-      'For training plans, modules, and detailed content, always use structured Markdown optimized for rich styled rendering (headings, bullet points, compact tables when useful).',
+      'MARKDOWN: use ## or ### headings, bullet lists (- or *), **bold**, plain paragraphs. Never use hard-coded dark backgrounds, HTML, CSS or styled block structures.',
+      isFreeChatMode ? 'Do NOT produce JSON-like module structures or markdown with alternating styled blocks. Write like a human assistant, not a course generator.' : '',
+      'Do not output decorative separator lines (---) unless strictly needed to separate two distinct sections.',
+      'Visual style policy: keep normal chat replies light, conversational, and easy to read.',
       'Never output HTML, CSS, JavaScript, iframe snippets, or <harx-html> tags.',
       `INTERNAL pacing (do not paste verbatim into slide-ready module bodies): methodology ${selectedMethodology}; global target duration ${selectedDuration}.`,
       gigGrounding.systemRules.length

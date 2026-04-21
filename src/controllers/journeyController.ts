@@ -6,10 +6,18 @@ import cloudinaryService from '../services/cloudinaryService';
 import aiService from '../services/aiService';
 import { ImageGenerationService } from '../services/imageGenerationService';
 
+const isValidObjectId = (v: unknown): boolean =>
+  typeof v === 'string' && /^[a-f\d]{24}$/i.test(v);
+
 export const createJourney = asyncHandler(async (req: AuthRequest, res: Response) => {
   console.log('📦 [createJourney] Received body keys:', Object.keys(req.body));
   const { presentationData, filetraining, ...journeyData } = req.body;
-  
+
+  // Strip fields that expect ObjectId but receive a plain string (e.g. industry label)
+  if (journeyData.industry !== undefined && !isValidObjectId(journeyData.industry)) {
+    delete journeyData.industry;
+  }
+
   if (presentationData) {
     console.log('📊 [createJourney] presentationData found, slides count:', presentationData.slides?.length);
     try {
@@ -39,7 +47,11 @@ export const createJourney = asyncHandler(async (req: AuthRequest, res: Response
 export const updateJourney = asyncHandler(async (req: AuthRequest, res: Response) => {
   console.log('📦 [updateJourney] Received body keys:', Object.keys(req.body));
   const { presentationData, filetraining, ...journeyData } = req.body;
-  
+
+  if (journeyData.industry !== undefined && !isValidObjectId(journeyData.industry)) {
+    delete journeyData.industry;
+  }
+
   if (presentationData) {
     console.log('📊 [updateJourney] presentationData found, slides count:', presentationData.slides?.length);
     try {
