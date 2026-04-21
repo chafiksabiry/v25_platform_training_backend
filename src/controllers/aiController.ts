@@ -382,6 +382,7 @@ const buildDeterministicStoryboardFallback = (params: {
   trainingTitle?: string;
   language?: string;
   maxImages: number;
+  styleGuidance?: string;
 }): Array<{ title: string; prompt: string }> => {
   const lang = String(params.language || 'fr').toLowerCase();
   const isFr = lang.startsWith('fr');
@@ -402,25 +403,27 @@ const buildDeterministicStoryboardFallback = (params: {
   });
 
   const titleBase = String(params.trainingTitle || (isFr ? 'Formation' : 'Training'));
+  const styleHint = String(params.styleGuidance || '').trim();
+  const styleSuffix = styleHint ? ` Style guidance: ${styleHint.slice(0, 220)}.` : '';
   const out: Array<{ title: string; prompt: string }> = [];
   out.push({
     title: isFr ? `${titleBase} - Couverture` : `${titleBase} - Cover`,
     prompt:
       `[COVER] ${titleBase}. Slide de garde de formation, style PowerPoint professionnel, ` +
-      'grand titre visible, zone de sous-titre, fond clair avec accents bleus, mise en page éducative.',
+      `grand titre visible, zone de sous-titre, fond clair avec accents bleus, mise en page éducative.${styleSuffix}`,
   });
   out.push({
     title: isFr ? 'Plan de formation' : 'Training agenda',
     prompt:
       `[AGENDA] Sommaire de la formation ${titleBase}, slide type agenda avec liste des sections, ` +
-      'titre "Sommaire", blocs horizontaux lisibles, design cours/formation.',
+      `titre "Sommaire", blocs horizontaux lisibles, design cours/formation.${styleSuffix}`,
   });
   middleTitles.forEach((t, i) => {
     out.push({
       title: t,
       prompt:
         `[CONTENT] Slide de contenu "${t}" pour ${titleBase}, style présentation pédagogique, ` +
-        'titre en haut, paragraphes/bullets lisibles, schéma simple (boîtes/flèches), mise en page structurée.',
+        `titre en haut, paragraphes/bullets lisibles, schéma simple (boîtes/flèches), mise en page structurée.${styleSuffix}`,
     });
     if (i + 3 >= total - 1) return;
   });
@@ -428,7 +431,7 @@ const buildDeterministicStoryboardFallback = (params: {
     title: isFr ? 'Conclusion' : 'Conclusion',
     prompt:
       `[CONCLUSION] Slide de conclusion pour ${titleBase}, synthèse visuelle avec points clés, ` +
-      'style citation/récapitulatif final, design PowerPoint formation.',
+      `style citation/récapitulatif final, design PowerPoint formation.${styleSuffix}`,
   });
   return out.slice(0, total);
 };
@@ -441,57 +444,13 @@ const buildImageStoryboardFromDigest = async (params: {
   styleGuidance?: string;
 }): Promise<Array<{ title: string; prompt: string }>> => {
   const maxImages = Math.min(Math.max(Number(params.maxImages || 8), 1), 20);
-  const prompt = [
-    `Create a storyboard for a training journey as exactly ${maxImages} slide-ready visuals.`,
-    'Return strict JSON only with shape: {"images":[{"title":"","prompt":"","slideRole":""}]}',
-    'slideRole must be one of: cover, agenda, content, summary, conclusion.',
-    'Structure rules:',
-    '- Image 1 must be cover.',
-    '- Image 2 must be agenda (plan overview).',
-    '- Last image must be conclusion.',
-    '- Middle images must be content and summary visuals that follow the training progression.',
-    '- Content visuals must represent concrete concepts from the training digest (modules, process, tools, cases).',
-    'Visual requirements:',
-    '- The visuals must look like real training slides (PowerPoint style), not random stock photos.',
-    '- Include layout instructions in prompts: title area, content text blocks, bullet zones, footer area.',
-    '- Prefer educational slide templates: light background, blue accents, clean typography, simple diagrams/icons.',
-    '- Agenda slide must clearly request a "Sommaire" style layout with listed sections.',
-    '- Content slides must request text-friendly composition (paragraphs, bullets, process blocks).',
-    '- Conclusion slide must request recap/citation style ending.',
-    '- Realistic corporate learning context, no logos/watermarks.',
-    `Language for title text: ${String(params.language || 'fr')}`,
-    `Training title: ${String(params.trainingTitle || 'Training')}`,
-    `Optional style guidance from user: ${String(params.styleGuidance || '').slice(0, 800) || 'none'}`,
-    'Training digest/context:',
-    String(params.trainingDigest || '').slice(0, 12000),
-  ].join('\n');
-  try {
-    const raw = await aiService.generateWithClaude(
-      prompt,
-      'You are an instructional visual designer. Return JSON only.',
-      String(process.env.ANTHROPIC_API_KEY || '').trim() || undefined,
-      1000,
-      { temperature: 0.35, preferredModels: [String(process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5')] }
-    );
-    const parsed = aiService.parseJson(String(raw || ''), 'trainingImageStoryboard', { suppressLogs: true });
-    const normalized = normalizeStoryboardRows(parsed?.images, maxImages);
-    if (normalized.length > 0) return normalized;
-    console.log('[AI] Storyboard returned empty/invalid rows; using deterministic fallback.');
-    return buildDeterministicStoryboardFallback({
-      trainingDigest: params.trainingDigest,
-      trainingTitle: params.trainingTitle,
-      language: params.language,
-      maxImages,
-    });
-  } catch {
-    console.log('[AI] Storyboard JSON parsing failed; using deterministic fallback.');
-    return buildDeterministicStoryboardFallback({
-      trainingDigest: params.trainingDigest,
-      trainingTitle: params.trainingTitle,
-      language: params.language,
-      maxImages,
-    });
-  }
+  return buildDeterministicStoryboardFallback({
+    trainingDigest: params.trainingDigest,
+    trainingTitle: params.trainingTitle,
+    language: params.language,
+    maxImages,
+    styleGuidance: params.styleGuidance,
+  });
 };
 
 const processTrainingImageJob = async (
