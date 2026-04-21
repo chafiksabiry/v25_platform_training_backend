@@ -327,20 +327,59 @@ type VideoGenerationJobState = {
 const videoGenerationJobs = new Map<string, VideoGenerationJobState>();
 const VIDEO_JOB_TIMEOUT_MS = 10 * 60 * 1000;
 
+type TrainingImageGenerationJobState = {
+  id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  title: string;
+  trainingTitle?: string;
+  language: string;
+  gigId?: mongoose.Types.ObjectId | string;
+  companyId?: mongoose.Types.ObjectId | string;
+  sourceDigest: string;
+  total: number;
+  completed: number;
+  items: Array<{
+    index: number;
+    title: string;
+    prompt: string;
+    imageUrl: string;
+    imageCloudinaryPublicId?: string;
+  }>;
+  savedImageSetId?: string;
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+const trainingImageGenerationJobs = new Map<string, TrainingImageGenerationJobState>();
+const TRAINING_IMAGE_JOB_TIMEOUT_MS = 15 * 60 * 1000;
+
 const buildImageStoryboardFromDigest = async (params: {
   trainingDigest: string;
   trainingTitle?: string;
   language?: string;
   maxImages?: number;
+  styleGuidance?: string;
 }): Promise<Array<{ title: string; prompt: string }>> => {
   const maxImages = Math.min(Math.max(Number(params.maxImages || 8), 1), 20);
   const prompt = [
-    `Create a storyboard for a training journey as exactly ${maxImages} visual cards.`,
-    'Return strict JSON only with shape: {"images":[{"title":"","prompt":""}]}',
-    'Each prompt must be realistic corporate-learning visuals, no brand logo, no text overlay.',
-    'Each image should represent a distinct step/progression in the training.',
+    `Create a storyboard for a training journey as exactly ${maxImages} slide-ready visuals.`,
+    'Return strict JSON only with shape: {"images":[{"title":"","prompt":"","slideRole":""}]}',
+    'slideRole must be one of: cover, agenda, content, summary, conclusion.',
+    'Structure rules:',
+    '- Image 1 must be cover.',
+    '- Image 2 must be agenda (plan overview).',
+    '- Last image must be conclusion.',
+    '- Middle images must be content and summary visuals that follow the training progression.',
+    '- Content visuals must represent concrete concepts from the training digest (modules, process, tools, cases).',
+    'Visual requirements:',
+    '- Professional PowerPoint-like composition (clean layout, visual hierarchy, room for bullet text on slide).',
+    '- Realistic corporate learning context, no logos/watermarks.',
+    '- Do not generate random generic stock scenes disconnected from the digest.',
+    '- Image prompts must explicitly reference the specific section intent (e.g. agenda, module topic, conclusion).',
     `Language for title text: ${String(params.language || 'fr')}`,
     `Training title: ${String(params.trainingTitle || 'Training')}`,
+    `Optional style guidance from user: ${String(params.styleGuidance || '').slice(0, 800) || 'none'}`,
     'Training digest/context:',
     String(params.trainingDigest || '').slice(0, 24000),
   ].join('\n');
@@ -357,11 +396,68 @@ const buildImageStoryboardFromDigest = async (params: {
     .map((r: any) => ({
       title: String(r?.title || '').trim(),
       prompt: String(r?.prompt || '').trim(),
+      slideRole: String(r?.slideRole || '').trim().toLowerCase(),
     }))
-    .filter((r: { title: string; prompt: string }) => r.title && r.prompt)
+    .filter((r: { title: string; prompt: string; slideRole: string }) => r.title && r.prompt)
     .slice(0, maxImages);
   if (!normalized.length) throw new Error('Could not generate storyboard images from training content.');
-  return normalized;
+  const withFallbackRoles = normalized.map((row: any, idx: number, arr: any[]) => {
+    if (idx === 0) return { title: row.title, prompt: row.prompt, slideRole: 'cover' };
+    if (idx === 1) return { title: row.title, prompt: row.prompt, slideRole: 'agenda' };
+    if (idx === arr.length - 1) return { title: row.title, prompt: row.prompt, slideRole: 'conclusion' };
+    if (row.slideRole === 'summary') return { title: row.title, prompt: row.prompt, slideRole: 'summary' };
+    return { title: row.title, prompt: row.prompt, slideRole: 'content' };
+  });
+  return withFallbackRoles.map((row: any) => ({
+    title: row.title,
+    prompt: `[${row.slideRole.toUpperCase()}] ${row.prompt}`,
+  }));
+};
+
+const processTrainingImageJob = async (
+  jobId: string,
+  storyboard: Array<{ title: string; prompt: string }>
+): Promise<void> => {
+  const state = trainingImageGenerationJobs.get(jobId);
+  if (!state) return;
+  state.status = 'running';
+  state.updatedAt = Date.now();
+  trainingImageGenerationJobs.set(jobId, state);
+  try {
+    for (let i = 0; i < storyboard.length; i += 1) {
+      const scene = storyboard[i];
+      const imgBuffer = await ImageGenerationService.generateImageBuffer(scene.prompt);
+      const uploaded = await cloudinaryService.uploadImageBuffer(imgBuffer, 'training-images/generated');
+      state.items.push({
+        index: i + 1,
+        title: scene.title,
+        prompt: scene.prompt,
+        imageUrl: uploaded.url,
+        imageCloudinaryPublicId: uploaded.publicId,
+      });
+      state.completed = state.items.length;
+      state.updatedAt = Date.now();
+      trainingImageGenerationJobs.set(jobId, state);
+    }
+    const saved = await TrainingImageSet.create({
+      gigId: state.gigId,
+      companyId: state.companyId,
+      title: state.title,
+      trainingTitle: state.trainingTitle || undefined,
+      language: state.language,
+      sourceDigest: state.sourceDigest.slice(0, 40000),
+      items: state.items,
+    });
+    state.savedImageSetId = String(saved._id);
+    state.status = 'completed';
+    state.updatedAt = Date.now();
+    trainingImageGenerationJobs.set(jobId, state);
+  } catch (e: any) {
+    state.status = 'failed';
+    state.error = String(e?.message || 'Image generation failed');
+    state.updatedAt = Date.now();
+    trainingImageGenerationJobs.set(jobId, state);
+  }
 };
 
 type GoogleServiceAccountLike = {
@@ -2078,6 +2174,7 @@ export const generateTrainingImages = async (
   try {
     const trainingDigest = String(req.body?.trainingDigest || '').trim();
     const trainingTitle = String(req.body?.trainingTitle || '').trim();
+    const styleGuidance = String(req.body?.styleGuidance || '').trim();
     const language = String(req.body?.language || 'fr').trim().toLowerCase() || 'fr';
     const maxImages = Math.min(Math.max(Number(req.body?.maxImages || 8), 1), 20);
     const title = String(req.body?.title || `${trainingTitle || 'Training'} - Images`).trim().slice(0, 240);
@@ -2092,51 +2189,73 @@ export const generateTrainingImages = async (
       trainingTitle,
       language,
       maxImages,
+      styleGuidance,
     });
-
-    const uploadedItems: Array<{
-      index: number;
-      title: string;
-      prompt: string;
-      imageUrl: string;
-      imageCloudinaryPublicId?: string;
-    }> = [];
-    for (let i = 0; i < storyboard.length; i += 1) {
-      const scene = storyboard[i];
-      const imgBuffer = await ImageGenerationService.generateImageBuffer(scene.prompt);
-      const uploaded = await cloudinaryService.uploadImageBuffer(
-        imgBuffer,
-        'training-images/generated'
-      );
-      uploadedItems.push({
-        index: i + 1,
-        title: scene.title,
-        prompt: scene.prompt,
-        imageUrl: uploaded.url,
-        imageCloudinaryPublicId: uploaded.publicId,
-      });
-    }
-
-    const saved = await TrainingImageSet.create({
-      gigId: safeGigId,
-      companyId: safeCompanyId,
+    const jobId = crypto.randomUUID();
+    const now = Date.now();
+    const state: TrainingImageGenerationJobState = {
+      id: jobId,
+      status: 'queued',
       title,
       trainingTitle: trainingTitle || undefined,
       language,
+      gigId: safeGigId,
+      companyId: safeCompanyId,
       sourceDigest: trainingDigest.slice(0, 40000),
-      items: uploadedItems,
-    });
-
+      total: storyboard.length,
+      completed: 0,
+      items: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    trainingImageGenerationJobs.set(jobId, state);
+    void processTrainingImageJob(jobId, storyboard);
     return res.json({
       success: true,
-      imageSet: {
-        _id: String(saved._id),
-        title: saved.title,
-        trainingTitle: saved.trainingTitle,
-        language: saved.language,
-        items: saved.items,
-        createdAt: saved.createdAt,
-      },
+      jobId,
+      status: state.status,
+      total: state.total,
+      completed: state.completed,
+      items: state.items,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const getTrainingImagesStatus = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const jobId = String(req.params?.jobId || '').trim();
+    if (!jobId) return res.status(400).json({ success: false, error: 'jobId is required' });
+    const state = trainingImageGenerationJobs.get(jobId);
+    if (!state) return res.status(404).json({ success: false, error: 'Training image job not found' });
+
+    const now = Date.now();
+    if (
+      (state.status === 'queued' || state.status === 'running') &&
+      now - Number(state.createdAt || now) > TRAINING_IMAGE_JOB_TIMEOUT_MS
+    ) {
+      state.status = 'failed';
+      state.error = 'Training image generation timed out.';
+      state.updatedAt = now;
+      trainingImageGenerationJobs.set(jobId, state);
+    }
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    return res.json({
+      success: true,
+      jobId: state.id,
+      status: state.status,
+      total: state.total,
+      completed: state.completed,
+      items: state.items,
+      savedImageSetId: state.savedImageSetId,
+      error: state.error,
     });
   } catch (error) {
     return next(error);

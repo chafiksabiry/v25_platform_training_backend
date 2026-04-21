@@ -70,6 +70,11 @@ router.post(
 );
 
 router.get(
+  '/training-images/status/:jobId',
+  aiController.getTrainingImagesStatus
+);
+
+router.get(
   '/training-images/list',
   aiController.listTrainingImages
 );
