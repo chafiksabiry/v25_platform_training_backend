@@ -1,12 +1,6 @@
-import axios from 'axios';
-import OpenAI from 'openai';
 import aiService from './aiService';
 
 export class ImageGenerationService {
-  private static openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY
-  });
-
   private static async buildClaudeVisualPrompt(seed: string, anthropicApiKey?: string): Promise<string> {
     const safeSeed = String(seed || '').trim() || 'professional training thumbnail';
     const userPrompt = [
@@ -42,40 +36,58 @@ export class ImageGenerationService {
     }
   }
 
+  private static extractSvg(raw: string): string | null {
+    const txt = String(raw || '').trim();
+    const match = txt.match(/<svg[\s\S]*<\/svg>/i);
+    return match ? match[0] : null;
+  }
+
+  private static buildFallbackSvg(title: string, subtitle: string): string {
+    const safeTitle = String(title || 'Training Slide').replace(/[<>&"]/g, '');
+    const safeSubtitle = String(subtitle || '').replace(/[<>&"]/g, '');
+    return [
+      '<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">',
+      '<rect width="1920" height="1080" fill="#f8fbff"/>',
+      '<rect x="0" y="0" width="1920" height="110" fill="#dceeff"/>',
+      '<rect x="80" y="170" width="1760" height="810" rx="18" fill="#ffffff" stroke="#d7e3f4" stroke-width="4"/>',
+      `<text x="120" y="280" font-size="64" font-family="Arial, sans-serif" fill="#0f4c81" font-weight="700">${safeTitle}</text>`,
+      `<text x="120" y="350" font-size="34" font-family="Arial, sans-serif" fill="#244d70">${safeSubtitle}</text>`,
+      '<line x1="120" y1="390" x2="1780" y2="390" stroke="#e7eef8" stroke-width="3"/>',
+      '<rect x="120" y="430" width="760" height="470" rx="14" fill="#f6f9fe" stroke="#d9e6f7"/>',
+      '<rect x="920" y="430" width="860" height="220" rx="14" fill="#f6f9fe" stroke="#d9e6f7"/>',
+      '<rect x="920" y="680" width="860" height="220" rx="14" fill="#f6f9fe" stroke="#d9e6f7"/>',
+      '</svg>',
+    ].join('');
+  }
+
   /**
-   * Generates an AI image buffer that can be uploaded to Cloudinary.
-   * Prompt is first refined with Claude to improve visual relevance.
+   * Generates an SVG image buffer using Claude only (no OpenAI image API).
    */
   static async generateImageBuffer(description: string, anthropicApiKey?: string): Promise<Buffer> {
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error('OPENAI_API_KEY is missing; cannot generate AI thumbnail.');
-    }
-
     const prompt = await this.buildClaudeVisualPrompt(description, anthropicApiKey);
-    const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
-    const size = process.env.OPENAI_IMAGE_SIZE || '1024x1024';
-
-    const response: any = await this.openai.images.generate({
-      model,
-      prompt,
-      size,
-      quality: 'medium'
-    } as any);
-
-    const first = response?.data?.[0];
-    const b64 = first?.b64_json;
-    if (b64) return Buffer.from(b64, 'base64');
-
-    const imageUrl = String(first?.url || '').trim();
-    if (imageUrl) {
-      const imageResponse = await axios.get<ArrayBuffer>(imageUrl, {
-        responseType: 'arraybuffer',
-        timeout: 20000
-      });
-      return Buffer.from(imageResponse.data);
+    const svgPrompt = [
+      'Generate a valid standalone SVG for a 16:9 training slide.',
+      'Output only raw SVG markup (no markdown, no prose).',
+      'Use viewBox="0 0 1920 1080".',
+      'Style: corporate PowerPoint slide, light background, blue accents.',
+      'Include title area and text-friendly layout blocks.',
+      'Do not include external images or fonts.',
+      `Slide intent: ${prompt}`,
+    ].join('\n');
+    try {
+      const rawSvg = await aiService.generateWithClaude(
+        svgPrompt,
+        'You are an SVG designer. Return only valid SVG.',
+        anthropicApiKey,
+        1800,
+        { temperature: 0.25, preferredModels: [String(process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5')] }
+      );
+      const svg = this.extractSvg(rawSvg);
+      if (svg) return Buffer.from(svg, 'utf-8');
+    } catch {
+      // fallback below
     }
-
-    throw new Error('Image model returned no binary data and no URL.');
+    return Buffer.from(this.buildFallbackSvg('Training slide', prompt.slice(0, 120)), 'utf-8');
   }
 
   // Backward compatibility for existing journey/module illustration flows.
