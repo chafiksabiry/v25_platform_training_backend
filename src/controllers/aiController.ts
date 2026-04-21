@@ -11,11 +11,13 @@ import Gig from '../models/Gig';
 import TrainingChatSession from '../models/TrainingChatSession';
 import TrainingPodcast from '../models/TrainingPodcast';
 import TrainingVideo from '../models/TrainingVideo';
+import TrainingImageSet from '../models/TrainingImageSet';
 import mongoose from 'mongoose';
 import fs from 'fs';
 import { promisify } from 'util';
 import crypto from 'crypto';
 import { GoogleAuth } from 'google-auth-library';
+import { ImageGenerationService } from '../services/imageGenerationService';
 
 const unlinkAsync = promisify(fs.unlink);
 const HARX_STYLE_TAG_REGEX = /<harx-style>\s*\{[\s\S]*?\}\s*<\/harx-style>/i;
@@ -324,6 +326,43 @@ type VideoGenerationJobState = {
 
 const videoGenerationJobs = new Map<string, VideoGenerationJobState>();
 const VIDEO_JOB_TIMEOUT_MS = 10 * 60 * 1000;
+
+const buildImageStoryboardFromDigest = async (params: {
+  trainingDigest: string;
+  trainingTitle?: string;
+  language?: string;
+  maxImages?: number;
+}): Promise<Array<{ title: string; prompt: string }>> => {
+  const maxImages = Math.min(Math.max(Number(params.maxImages || 8), 1), 20);
+  const prompt = [
+    `Create a storyboard for a training journey as exactly ${maxImages} visual cards.`,
+    'Return strict JSON only with shape: {"images":[{"title":"","prompt":""}]}',
+    'Each prompt must be realistic corporate-learning visuals, no brand logo, no text overlay.',
+    'Each image should represent a distinct step/progression in the training.',
+    `Language for title text: ${String(params.language || 'fr')}`,
+    `Training title: ${String(params.trainingTitle || 'Training')}`,
+    'Training digest/context:',
+    String(params.trainingDigest || '').slice(0, 24000),
+  ].join('\n');
+  const raw = await aiService.generateWithClaude(
+    prompt,
+    'You are an instructional visual designer. Return JSON only.',
+    String(process.env.ANTHROPIC_API_KEY || '').trim() || undefined,
+    1400,
+    { temperature: 0.35, preferredModels: [String(process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5')] }
+  );
+  const parsed = aiService.parseJson(String(raw || ''), 'trainingImageStoryboard');
+  const rows = Array.isArray(parsed?.images) ? parsed.images : [];
+  const normalized = rows
+    .map((r: any) => ({
+      title: String(r?.title || '').trim(),
+      prompt: String(r?.prompt || '').trim(),
+    }))
+    .filter((r: { title: string; prompt: string }) => r.title && r.prompt)
+    .slice(0, maxImages);
+  if (!normalized.length) throw new Error('Could not generate storyboard images from training content.');
+  return normalized;
+};
 
 type GoogleServiceAccountLike = {
   project_id?: string;
@@ -2023,6 +2062,120 @@ export const listSavedTrainingVideos = async (
         model: String(r.modelName || ''),
         status: String(r.status || 'saved'),
         videoUrl: r.videoUrl ? String(r.videoUrl) : undefined,
+        createdAt: r.createdAt,
+      })),
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const generateTrainingImages = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const trainingDigest = String(req.body?.trainingDigest || '').trim();
+    const trainingTitle = String(req.body?.trainingTitle || '').trim();
+    const language = String(req.body?.language || 'fr').trim().toLowerCase() || 'fr';
+    const maxImages = Math.min(Math.max(Number(req.body?.maxImages || 8), 1), 20);
+    const title = String(req.body?.title || `${trainingTitle || 'Training'} - Images`).trim().slice(0, 240);
+    const safeGigId = toObjectIdOrUndefined(req.body?.gigId);
+    const safeCompanyId = toObjectIdOrUndefined(req.body?.companyId);
+    if (!trainingDigest) {
+      return res.status(400).json({ success: false, error: 'trainingDigest is required' });
+    }
+
+    const storyboard = await buildImageStoryboardFromDigest({
+      trainingDigest,
+      trainingTitle,
+      language,
+      maxImages,
+    });
+
+    const uploadedItems: Array<{
+      index: number;
+      title: string;
+      prompt: string;
+      imageUrl: string;
+      imageCloudinaryPublicId?: string;
+    }> = [];
+    for (let i = 0; i < storyboard.length; i += 1) {
+      const scene = storyboard[i];
+      const imgBuffer = await ImageGenerationService.generateImageBuffer(scene.prompt);
+      const uploaded = await cloudinaryService.uploadImageBuffer(
+        imgBuffer,
+        'training-images/generated'
+      );
+      uploadedItems.push({
+        index: i + 1,
+        title: scene.title,
+        prompt: scene.prompt,
+        imageUrl: uploaded.url,
+        imageCloudinaryPublicId: uploaded.publicId,
+      });
+    }
+
+    const saved = await TrainingImageSet.create({
+      gigId: safeGigId,
+      companyId: safeCompanyId,
+      title,
+      trainingTitle: trainingTitle || undefined,
+      language,
+      sourceDigest: trainingDigest.slice(0, 40000),
+      items: uploadedItems,
+    });
+
+    return res.json({
+      success: true,
+      imageSet: {
+        _id: String(saved._id),
+        title: saved.title,
+        trainingTitle: saved.trainingTitle,
+        language: saved.language,
+        items: saved.items,
+        createdAt: saved.createdAt,
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const listTrainingImages = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const gigId = String(req.query.gigId || '').trim();
+    const companyId = String(req.query.companyId || '').trim();
+    const limitRaw = parseInt(String(req.query.limit || '20'), 10);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 50) : 20;
+    const filter: any = {};
+    const safeGigId = toObjectIdOrUndefined(gigId);
+    const safeCompanyId = toObjectIdOrUndefined(companyId);
+    if (safeGigId) filter.gigId = safeGigId;
+    if (safeCompanyId) filter.companyId = safeCompanyId;
+
+    const rows = await TrainingImageSet.find(filter).sort({ createdAt: -1 }).limit(limit).lean();
+    return res.json({
+      success: true,
+      imageSets: rows.map((r: any) => ({
+        _id: String(r._id),
+        title: String(r.title || ''),
+        trainingTitle: r.trainingTitle ? String(r.trainingTitle) : undefined,
+        language: String(r.language || 'fr'),
+        items: Array.isArray(r.items)
+          ? r.items.map((it: any) => ({
+              index: Number(it.index || 0),
+              title: String(it.title || ''),
+              prompt: String(it.prompt || ''),
+              imageUrl: String(it.imageUrl || ''),
+              imageCloudinaryPublicId: it.imageCloudinaryPublicId ? String(it.imageCloudinaryPublicId) : undefined,
+            }))
+          : [],
         createdAt: r.createdAt,
       })),
     });

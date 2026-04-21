@@ -65,6 +65,16 @@ router.get(
 );
 
 router.post(
+  '/training-images/generate',
+  aiController.generateTrainingImages
+);
+
+router.get(
+  '/training-images/list',
+  aiController.listTrainingImages
+);
+
+router.post(
   '/chat/title',
   aiController.generateChatTitle
 );
