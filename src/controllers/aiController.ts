@@ -267,6 +267,42 @@ const generatePodcastMp3Buffer = async (scriptText: string, language: string): P
     return Buffer.from(audioArrayBuffer);
   }
 
+  const openaiApiKey = String(process.env.OPENAI_API_KEY || '').trim();
+  if (openaiApiKey) {
+    const openAiVoice = String(process.env.OPENAI_TTS_VOICE || 'alloy').trim();
+    const openAiModels = ['gpt-4o-mini-tts', 'tts-1'];
+    let openAiLastError = '';
+
+    for (const model of openAiModels) {
+      const response = await fetch('https://api.openai.com/v1/audio/speech', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${openaiApiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          voice: openAiVoice,
+          format: 'mp3',
+          input: text,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        openAiLastError = `[${model}] ${response.status}: ${errorText.slice(0, 240)}`;
+        continue;
+      }
+
+      const audioArrayBuffer = await response.arrayBuffer();
+      return Buffer.from(audioArrayBuffer);
+    }
+
+    throw new Error(
+      `ElevenLabs failed (${lastError || 'unknown'}), OpenAI TTS fallback failed (${openAiLastError || 'unknown'})`
+    );
+  }
+
   throw new Error(`ElevenLabs TTS failed for all model candidates: ${lastError || 'unknown error'}`);
 };
 
