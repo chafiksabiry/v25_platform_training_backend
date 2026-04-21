@@ -476,8 +476,8 @@ const buildImageStoryboardFromDigest = async (params: {
     const parsed = aiService.parseJson(String(raw || ''), 'trainingImageStoryboard', { suppressLogs: true });
     const normalized = normalizeStoryboardRows(parsed?.images, maxImages);
     if (normalized.length > 0) return normalized;
-  } catch (error) {
-    console.warn('[AI] Storyboard JSON parsing failed; retrying with compact prompt.', error);
+  } catch {
+    console.log('[AI] Storyboard JSON parsing failed; retrying with compact prompt.');
   }
 
   try {
@@ -499,8 +499,8 @@ const buildImageStoryboardFromDigest = async (params: {
     const retryParsed = aiService.parseJson(String(retryRaw || ''), 'trainingImageStoryboardRetry', { suppressLogs: true });
     const retryNormalized = normalizeStoryboardRows(retryParsed?.images, maxImages);
     if (retryNormalized.length > 0) return retryNormalized;
-  } catch (error) {
-    console.warn('[AI] Storyboard retry failed; using deterministic fallback.', error);
+  } catch {
+    console.log('[AI] Storyboard retry failed; using deterministic fallback.');
   }
 
   return buildDeterministicStoryboardFallback({

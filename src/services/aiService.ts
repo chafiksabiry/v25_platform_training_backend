@@ -296,7 +296,7 @@ class AIService {
         if (firstContent.type === 'text') {
           console.log(`✅ Analysis successful with Claude model: ${model}`);
           if (response.stop_reason === 'max_tokens') {
-            console.warn(`⚠️ Claude response TRUNCATED due to max_tokens (${model})`);
+            console.log(`ℹ️ Claude response truncated by max_tokens (${model}); fallback handling may apply.`);
           }
           return firstContent.text;
         }
