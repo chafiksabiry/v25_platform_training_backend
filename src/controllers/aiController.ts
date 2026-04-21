@@ -1488,15 +1488,22 @@ export const savePodcast = async (
       : [];
 
     const fileBase = `podcast_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    let audioGenerationWarning: string | undefined;
     if (!resolvedAudioUrl) {
-      const mp3Buffer = await generatePodcastMp3Buffer(cleanScript, safeLanguage);
-      const uploadedAudio = await cloudinaryService.uploadAudioBuffer(
-        mp3Buffer,
-        `${fileBase}_audio`,
-        'training-podcasts/audio'
-      );
-      resolvedAudioUrl = uploadedAudio.url;
-      resolvedAudioCloudinaryPublicId = uploadedAudio.publicId;
+      try {
+        const mp3Buffer = await generatePodcastMp3Buffer(cleanScript, safeLanguage);
+        const uploadedAudio = await cloudinaryService.uploadAudioBuffer(
+          mp3Buffer,
+          `${fileBase}_audio`,
+          'training-podcasts/audio'
+        );
+        resolvedAudioUrl = uploadedAudio.url;
+        resolvedAudioCloudinaryPublicId = uploadedAudio.publicId;
+      } catch (audioError: any) {
+        audioGenerationWarning =
+          String(audioError?.message || '').trim() || 'Audio generation failed; script saved without MP3.';
+        console.warn('[savePodcast] Audio generation/upload failed, saving script only:', audioGenerationWarning);
+      }
     }
 
     const cloudPayload = {
@@ -1532,6 +1539,7 @@ export const savePodcast = async (
 
     return res.json({
       success: true,
+      warning: audioGenerationWarning,
       podcast: {
         _id: saved._id,
         title: saved.title,
