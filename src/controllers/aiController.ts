@@ -221,34 +221,48 @@ const generatePodcastMp3Buffer = async (scriptText: string, language: string): P
   }
 
   const voiceId = String(process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM').trim();
-  const modelId = String(process.env.ELEVENLABS_MODEL || 'eleven_monolingual_v1').trim();
+  const configuredModel = String(process.env.ELEVENLABS_MODEL || '').trim();
+  const modelCandidates = configuredModel
+    ? [configuredModel]
+    : [
+        // Prefer modern models first; deprecated v1 models are intentionally excluded.
+        'eleven_flash_v2_5',
+        'eleven_turbo_v2_5',
+        'eleven_multilingual_v2',
+      ];
   const text = stripMarkdownForTts(scriptText).slice(0, 4500);
   if (!text) throw new Error('Script text is empty for TTS generation');
 
-  const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'audio/mpeg',
-      'xi-api-key': apiKey,
-    },
-    body: JSON.stringify({
-      text,
-      model_id: modelId,
-      voice_settings: {
-        stability: language.startsWith('fr') ? 0.45 : 0.5,
-        similarity_boost: 0.75,
+  let lastError = '';
+  for (const modelId of modelCandidates) {
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'audio/mpeg',
+        'xi-api-key': apiKey,
       },
-    }),
-  });
+      body: JSON.stringify({
+        text,
+        model_id: modelId,
+        voice_settings: {
+          stability: language.startsWith('fr') ? 0.45 : 0.5,
+          similarity_boost: 0.75,
+        },
+      }),
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => '');
-    throw new Error(`ElevenLabs TTS failed (${response.status}): ${errorText.slice(0, 240)}`);
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      lastError = `[${modelId}] ${response.status}: ${errorText.slice(0, 240)}`;
+      continue;
+    }
+
+    const audioArrayBuffer = await response.arrayBuffer();
+    return Buffer.from(audioArrayBuffer);
   }
 
-  const audioArrayBuffer = await response.arrayBuffer();
-  return Buffer.from(audioArrayBuffer);
+  throw new Error(`ElevenLabs TTS failed for all model candidates: ${lastError || 'unknown error'}`);
 };
 
 type ChatTitleMessage = {
