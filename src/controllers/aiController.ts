@@ -331,7 +331,11 @@ type GoogleServiceAccountLike = {
 };
 
 const parseGoogleServiceAccountFromEnv = (): GoogleServiceAccountLike | null => {
-  const raw = String(process.env.CLOUD_STORAGE_CREDENTIALS || '').trim();
+  const raw = String(
+    process.env.VERTEX_AI_CREDENTIALS ||
+      process.env.CLOUD_STORAGE_CREDENTIALS ||
+      ''
+  ).trim();
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
@@ -380,7 +384,11 @@ const triggerVeoGeneration = async (params: {
   durationSeconds?: number;
 }): Promise<{ operationName: string; model: string }> => {
   const apiKey = String(process.env.GOOGLE_GENAI_API_KEY || '').trim();
-  const model = String(process.env.VEO_MODEL || 'veo-2.0-generate-001').trim();
+  const model = String(
+    process.env.VERTEX_AI_MODEL ||
+      process.env.VEO_MODEL ||
+      'veo-2.0-generate-001'
+  ).trim();
   const payload = {
     instances: [{ prompt: params.prompt }],
     parameters: {
@@ -400,8 +408,17 @@ const triggerVeoGeneration = async (params: {
     });
   } else {
     const creds = parseGoogleServiceAccountFromEnv();
-    const project = String(process.env.GOOGLE_CLOUD_PROJECT || creds?.project_id || '').trim();
-    const location = String(process.env.GOOGLE_CLOUD_LOCATION || 'us-central1').trim();
+    const project = String(
+      process.env.VERTEX_AI_PROJECT ||
+        process.env.GOOGLE_CLOUD_PROJECT ||
+        creds?.project_id ||
+        ''
+    ).trim();
+    const location = String(
+      process.env.VERTEX_AI_LOCATION ||
+        process.env.GOOGLE_CLOUD_LOCATION ||
+        'us-central1'
+    ).trim();
     if (!project) {
       throw new Error('GOOGLE_CLOUD_PROJECT is required when GOOGLE_GENAI_API_KEY is not configured');
     }
@@ -437,7 +454,11 @@ const pollVeoOperation = async (operationName: string): Promise<{ done: boolean;
     const url = `https://generativelanguage.googleapis.com/v1beta/${operationName}?key=${encodeURIComponent(apiKey)}`;
     response = await fetch(url, { method: 'GET' });
   } else {
-    const location = String(process.env.GOOGLE_CLOUD_LOCATION || 'us-central1').trim();
+    const location = String(
+      process.env.VERTEX_AI_LOCATION ||
+        process.env.GOOGLE_CLOUD_LOCATION ||
+        'us-central1'
+    ).trim();
     const token = await getGoogleCloudAuthToken();
     const opPath = String(operationName || '').replace(/^\/+/, '');
     const url = `https://${location}-aiplatform.googleapis.com/v1/${opPath}`;
