@@ -483,13 +483,29 @@ const processTrainingImageJob = async (
     for (let i = 0; i < storyboard.length; i += 1) {
       const scene = storyboard[i];
       const imgBuffer = await ImageGenerationService.generateImageBuffer(scene.prompt);
-      const uploaded = await cloudinaryService.uploadImageBuffer(imgBuffer, 'training-images/generated');
+      let imageUrl = '';
+      let imageCloudinaryPublicId: string | undefined;
+      try {
+        const uploaded = await cloudinaryService.uploadImageBuffer(imgBuffer, 'training-images/generated');
+        imageUrl = uploaded.url;
+        imageCloudinaryPublicId = uploaded.publicId;
+      } catch (uploadError: any) {
+        // Keep generation progressive even if CDN upload fails for one slide.
+        const encoded = Buffer.from(imgBuffer).toString('base64');
+        imageUrl = `data:image/svg+xml;base64,${encoded}`;
+        imageCloudinaryPublicId = undefined;
+        console.error('[TrainingImages] Cloudinary upload failed, using inline SVG fallback', {
+          jobId,
+          sceneIndex: i + 1,
+          error: String(uploadError?.message || uploadError),
+        });
+      }
       const nextItem = {
         index: i + 1,
         title: scene.title,
         prompt: scene.prompt,
-        imageUrl: uploaded.url,
-        imageCloudinaryPublicId: uploaded.publicId,
+        imageUrl,
+        imageCloudinaryPublicId,
       };
       state.items.push(nextItem);
       if (imageSetId) {
@@ -509,6 +525,13 @@ const processTrainingImageJob = async (
     state.updatedAt = Date.now();
     trainingImageGenerationJobs.set(jobId, state);
   } catch (e: any) {
+    console.error('[TrainingImages] Job failed', {
+      jobId,
+      completed: state.completed,
+      total: state.total,
+      error: String(e?.message || e),
+      stack: e?.stack,
+    });
     state.status = 'failed';
     state.error = String(e?.message || 'Image generation failed');
     state.updatedAt = Date.now();
