@@ -354,6 +354,77 @@ type TrainingImageGenerationJobState = {
 const trainingImageGenerationJobs = new Map<string, TrainingImageGenerationJobState>();
 const TRAINING_IMAGE_JOB_TIMEOUT_MS = 15 * 60 * 1000;
 
+const normalizeStoryboardRows = (rows: any[], maxImages: number): Array<{ title: string; prompt: string }> => {
+  const normalized = (Array.isArray(rows) ? rows : [])
+    .map((r: any) => ({
+      title: String(r?.title || '').trim(),
+      prompt: String(r?.prompt || '').trim(),
+      slideRole: String(r?.slideRole || '').trim().toLowerCase(),
+    }))
+    .filter((r: { title: string; prompt: string; slideRole: string }) => r.title && r.prompt)
+    .slice(0, maxImages);
+  if (!normalized.length) return [];
+  const withFallbackRoles = normalized.map((row: any, idx: number, arr: any[]) => {
+    if (idx === 0) return { title: row.title, prompt: row.prompt, slideRole: 'cover' };
+    if (idx === 1) return { title: row.title, prompt: row.prompt, slideRole: 'agenda' };
+    if (idx === arr.length - 1) return { title: row.title, prompt: row.prompt, slideRole: 'conclusion' };
+    if (row.slideRole === 'summary') return { title: row.title, prompt: row.prompt, slideRole: 'summary' };
+    return { title: row.title, prompt: row.prompt, slideRole: 'content' };
+  });
+  return withFallbackRoles.map((row: any) => ({
+    title: row.title,
+    prompt: `[${row.slideRole.toUpperCase()}] ${row.prompt}`,
+  }));
+};
+
+const buildDeterministicStoryboardFallback = (params: {
+  trainingDigest: string;
+  trainingTitle?: string;
+  language?: string;
+  maxImages: number;
+}): Array<{ title: string; prompt: string }> => {
+  const lang = String(params.language || 'fr').toLowerCase();
+  const isFr = lang.startsWith('fr');
+  const digest = String(params.trainingDigest || '');
+  const lines = digest.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const candidateTitles = lines
+    .filter((l) => /^(#+\s*)?(module|chapitre|section|slide|partie|topic|theme)\b/i.test(l) || l.length < 90)
+    .map((l) => l.replace(/^#+\s*/, '').replace(/^[-•\d.)\s]+/, '').slice(0, 90))
+    .filter((v, i, arr) => v.length > 8 && arr.indexOf(v) === i)
+    .slice(0, Math.max(params.maxImages - 3, 1));
+
+  const total = Math.max(3, params.maxImages);
+  const middleCount = Math.max(total - 3, 1);
+  const middleTitles = Array.from({ length: middleCount }).map((_, i) => {
+    const picked = candidateTitles[i];
+    if (picked) return picked;
+    return isFr ? `Contenu ${i + 1}` : `Content ${i + 1}`;
+  });
+
+  const titleBase = String(params.trainingTitle || (isFr ? 'Formation' : 'Training'));
+  const out: Array<{ title: string; prompt: string }> = [];
+  out.push({
+    title: isFr ? `${titleBase} - Couverture` : `${titleBase} - Cover`,
+    prompt: `[COVER] ${titleBase}. Professional title-slide visual, clean PowerPoint composition, strong hero visual, no text rendered in image.`,
+  });
+  out.push({
+    title: isFr ? 'Plan de formation' : 'Training agenda',
+    prompt: `[AGENDA] Visual roadmap/agenda slide for ${titleBase}, clear sections progression, infographic layout, reserved areas for bullet points, no logo.`,
+  });
+  middleTitles.forEach((t, i) => {
+    out.push({
+      title: t,
+      prompt: `[CONTENT] Slide visual for "${t}" in ${titleBase}, concrete business/technical scenario from training context, structured layout, room for key bullets.`,
+    });
+    if (i + 3 >= total - 1) return;
+  });
+  out.push({
+    title: isFr ? 'Conclusion' : 'Conclusion',
+    prompt: `[CONCLUSION] Final recap slide visual for ${titleBase}, achievement/progress metaphor, clean corporate style, space for takeaway bullets.`,
+  });
+  return out.slice(0, total);
+};
+
 const buildImageStoryboardFromDigest = async (params: {
   trainingDigest: string;
   trainingTitle?: string;
@@ -381,37 +452,52 @@ const buildImageStoryboardFromDigest = async (params: {
     `Training title: ${String(params.trainingTitle || 'Training')}`,
     `Optional style guidance from user: ${String(params.styleGuidance || '').slice(0, 800) || 'none'}`,
     'Training digest/context:',
-    String(params.trainingDigest || '').slice(0, 24000),
+    String(params.trainingDigest || '').slice(0, 12000),
   ].join('\n');
-  const raw = await aiService.generateWithClaude(
-    prompt,
-    'You are an instructional visual designer. Return JSON only.',
-    String(process.env.ANTHROPIC_API_KEY || '').trim() || undefined,
-    1400,
-    { temperature: 0.35, preferredModels: [String(process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5')] }
-  );
-  const parsed = aiService.parseJson(String(raw || ''), 'trainingImageStoryboard');
-  const rows = Array.isArray(parsed?.images) ? parsed.images : [];
-  const normalized = rows
-    .map((r: any) => ({
-      title: String(r?.title || '').trim(),
-      prompt: String(r?.prompt || '').trim(),
-      slideRole: String(r?.slideRole || '').trim().toLowerCase(),
-    }))
-    .filter((r: { title: string; prompt: string; slideRole: string }) => r.title && r.prompt)
-    .slice(0, maxImages);
-  if (!normalized.length) throw new Error('Could not generate storyboard images from training content.');
-  const withFallbackRoles = normalized.map((row: any, idx: number, arr: any[]) => {
-    if (idx === 0) return { title: row.title, prompt: row.prompt, slideRole: 'cover' };
-    if (idx === 1) return { title: row.title, prompt: row.prompt, slideRole: 'agenda' };
-    if (idx === arr.length - 1) return { title: row.title, prompt: row.prompt, slideRole: 'conclusion' };
-    if (row.slideRole === 'summary') return { title: row.title, prompt: row.prompt, slideRole: 'summary' };
-    return { title: row.title, prompt: row.prompt, slideRole: 'content' };
+  try {
+    const raw = await aiService.generateWithClaude(
+      prompt,
+      'You are an instructional visual designer. Return JSON only.',
+      String(process.env.ANTHROPIC_API_KEY || '').trim() || undefined,
+      1000,
+      { temperature: 0.35, preferredModels: [String(process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5')] }
+    );
+    const parsed = aiService.parseJson(String(raw || ''), 'trainingImageStoryboard');
+    const normalized = normalizeStoryboardRows(parsed?.images, maxImages);
+    if (normalized.length > 0) return normalized;
+  } catch (error) {
+    console.warn('[AI] Storyboard JSON parsing failed; retrying with compact prompt.', error);
+  }
+
+  try {
+    const compactPrompt = [
+      `Return ONLY valid JSON: {"images":[...]} with exactly ${maxImages} entries.`,
+      'Each entry: {"title":"...","prompt":"...","slideRole":"cover|agenda|content|summary|conclusion"}',
+      'First cover, second agenda, last conclusion, others content.',
+      `Training: ${String(params.trainingTitle || 'Training')}`,
+      `Style: ${String(params.styleGuidance || 'professional powerpoint visual').slice(0, 300)}`,
+      `Context: ${String(params.trainingDigest || '').slice(0, 5000)}`,
+    ].join('\n');
+    const retryRaw = await aiService.generateWithClaude(
+      compactPrompt,
+      'Return valid compact JSON only.',
+      String(process.env.ANTHROPIC_API_KEY || '').trim() || undefined,
+      900,
+      { temperature: 0.25, preferredModels: [String(process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5')] }
+    );
+    const retryParsed = aiService.parseJson(String(retryRaw || ''), 'trainingImageStoryboardRetry');
+    const retryNormalized = normalizeStoryboardRows(retryParsed?.images, maxImages);
+    if (retryNormalized.length > 0) return retryNormalized;
+  } catch (error) {
+    console.warn('[AI] Storyboard retry failed; using deterministic fallback.', error);
+  }
+
+  return buildDeterministicStoryboardFallback({
+    trainingDigest: params.trainingDigest,
+    trainingTitle: params.trainingTitle,
+    language: params.language,
+    maxImages,
   });
-  return withFallbackRoles.map((row: any) => ({
-    title: row.title,
-    prompt: `[${row.slideRole.toUpperCase()}] ${row.prompt}`,
-  }));
 };
 
 const processTrainingImageJob = async (
