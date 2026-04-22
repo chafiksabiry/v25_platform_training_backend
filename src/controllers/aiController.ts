@@ -331,6 +331,7 @@ const VIDEO_JOB_TIMEOUT_MS = 10 * 60 * 1000;
 type TrainingImageGenerationJobState = {
   id: string;
   status: 'queued' | 'running' | 'completed' | 'failed';
+  renderMode: 'ai_images' | 'template_slides';
   title: string;
   trainingTitle?: string;
   language: string;
@@ -370,6 +371,55 @@ const extractPrimaryChatTrainingBlock = (digest: string): string => {
   // Long threads: keep the **end** so the latest user instructions (e.g. new training format) are not dropped.
   if (body.length <= max) return body;
   return body.slice(-max);
+};
+
+/**
+ * Titre affiché sur les slides : préfère le sujet réel (doc KB, formation citée dans le chat)
+ * plutôt que le seul intitulé gig/poste, pour éviter « Développeur Huawei » sur un cours assurance.
+ */
+const inferBrandingTitleForSlides = (digest: string, trainingTitle: string): string => {
+  const d = String(digest || '');
+  const tt = String(trainingTitle || '').trim();
+
+  const kbIdx = d.search(/---\s*Base de connaissances/i);
+  if (kbIdx !== -1) {
+    const slice = d.slice(kbIdx, kbIdx + 4000);
+    for (const line of slice.split('\n')) {
+      const m = line.match(/^\s*•\s+(.+)/);
+      if (m?.[1]) {
+        const name = String(m[1])
+          .replace(/\.(pdf|docx?|txt|png|jpe?g|webp)$/i, '')
+          .trim();
+        if (name.length > 3 && name.length < 200) return name.slice(0, 180);
+      }
+    }
+  }
+
+  const primary = extractPrimaryChatTrainingBlock(d);
+  if (primary.length > 80) {
+    const parts = primary.split(/Assistant:\s*/i);
+    const lastAssistant = parts[parts.length - 1] || '';
+    const lines = lastAssistant.split('\n').map((l) => l.trim()).filter(Boolean);
+    for (const line of lines.slice(0, 30)) {
+      if (/^#{1,3}\s+\S/.test(line)) return line.replace(/^#+\s*/, '').slice(0, 180);
+      if (/^📘\s*\S/.test(line)) return line.replace(/^📘\s*/, '').slice(0, 180);
+      if (/^formation\s*:/i.test(line)) return line.replace(/^formation\s*:\s*/i, '').slice(0, 180);
+      if (/^module\s+\d+/i.test(line)) return line.slice(0, 180);
+    }
+
+    const low = primary.toLowerCase();
+    const gigLike =
+      /\b(développeur|developer|ingénieur|engineer|consultant|commercial|opérationnel)\b/i.test(tt) &&
+      !/\b(assurance|sinistre|contrat)\b/i.test(tt);
+    if (gigLike && /\b(assurance|assureur|sinistre|prime|contrat|garantie|indemnisation)\b/.test(low)) {
+      const m = primary.match(/formation\s+assurance[^\n]*/i);
+      if (m) return m[0].trim().slice(0, 180);
+      return 'Formation assurance';
+    }
+  }
+
+  if (tt) return tt.slice(0, 180);
+  return 'Formation';
 };
 
 const chunkTextForSlides = (text: string, maxChunks: number, maxChunkLen: number): string[] => {
@@ -464,7 +514,7 @@ const buildDeterministicStoryboardFallback = (params: {
     return isFr ? `Contenu ${i + 1}` : `Content ${i + 1}`;
   });
 
-  const titleBase = String(params.trainingTitle || (isFr ? 'Formation' : 'Training'));
+  const titleBase = inferBrandingTitleForSlides(digest, String(params.trainingTitle || '').trim());
   const styleHint = String(params.styleGuidance || '').trim();
   const styleSuffix = styleHint ? ` Style guidance: ${styleHint.slice(0, 220)}.` : '';
   const out: Array<{ title: string; prompt: string }> = [];
@@ -478,7 +528,7 @@ const buildDeterministicStoryboardFallback = (params: {
   out.push({
     title: isFr ? `${titleBase} - Couverture` : `${titleBase} - Cover`,
     prompt:
-      `[COVER] ${titleBase}. Professional training title slide, clear headline and subhead, light background, educational layout.${coverContext}${styleSuffix}`,
+      `[COVER] Single coherent course title: "${titleBase}". Do NOT mix an unrelated job/gig name with this course title in headers or footers. Professional training title slide, clear headline and subhead, light background, educational layout.${coverContext}${styleSuffix}`,
   });
 
   const agendaLines =
@@ -498,7 +548,7 @@ const buildDeterministicStoryboardFallback = (params: {
   out.push({
     title: isFr ? 'Plan de formation' : 'Training agenda',
     prompt:
-      `[AGENDA] Training overview for ${titleBase}, agenda-style slide with readable section list, horizontal blocks.${agendaContext}${styleSuffix}`,
+      `[AGENDA] Training overview for "${titleBase}" only (no second unrelated brand line). Agenda-style slide with readable section list, horizontal blocks.${agendaContext}${styleSuffix}`,
   });
 
   for (let i = 0; i < middleCount; i += 1) {
@@ -511,7 +561,7 @@ const buildDeterministicStoryboardFallback = (params: {
     out.push({
       title: t,
       prompt:
-        `[CONTENT] Content slide "${t}" for "${titleBase}". Pedagogical PowerPoint look, title at top, 3–5 readable bullets, simple diagram if helpful.${sourceBlock}${styleSuffix}`,
+        `[CONTENT] Content slide "${t}" for course "${titleBase}" only. Pedagogical PowerPoint look, title at top, 3–4 short bullets (max ~90 chars each in French); if text is long, shorten wording—never clip at canvas edge. No overlapping side callouts on bullet area.${sourceBlock}${styleSuffix}`,
     });
   }
 
@@ -528,7 +578,7 @@ const buildDeterministicStoryboardFallback = (params: {
   out.push({
     title: isFr ? 'Conclusion' : 'Conclusion',
     prompt:
-      `[CONCLUSION] Closing slide for ${titleBase}, visual recap with key takeaways, quote-style recap layout.${conclusionContext}${styleSuffix}`,
+      `[CONCLUSION] Closing slide for "${titleBase}" only (one footer line, same subject as bullets—no job role + course mashup). Visual recap with 3–4 very short bullets; place any checklist/callout box fully below bullets with 40px+ gap—no overlap.${conclusionContext}${styleSuffix}`,
   });
   return out.slice(0, total);
 };
@@ -567,6 +617,7 @@ const processTrainingImageJob = async (
         companyId: state.companyId,
         title: state.title,
         trainingTitle: state.trainingTitle || undefined,
+        renderMode: state.renderMode,
         language: state.language,
         sourceDigest: state.sourceDigest.slice(0, 40000),
         items: [],
@@ -579,11 +630,21 @@ const processTrainingImageJob = async (
 
     for (let i = 0; i < storyboard.length; i += 1) {
       const scene = storyboard[i];
-      const imgBuffer = await ImageGenerationService.generateImageBuffer(scene.prompt);
+      const imgBuffer =
+        state.renderMode === 'template_slides'
+          ? ImageGenerationService.generateTemplateSlideBuffer({
+              title: scene.title,
+              prompt: scene.prompt,
+              trainingTitle: state.trainingTitle,
+              language: state.language,
+              index: i + 1,
+              total: storyboard.length,
+            })
+          : await ImageGenerationService.generateImageBuffer(scene.prompt);
       const uploaded = await cloudinaryService.uploadImageBuffer(
         imgBuffer,
         'training-images/generated',
-        'png'
+        state.renderMode === 'template_slides' ? 'svg' : 'png'
       );
       const imageUrl = uploaded.url;
       const imageCloudinaryPublicId = uploaded.publicId;
@@ -2431,8 +2492,12 @@ export const generateTrainingImages = async (
     const trainingTitle = String(req.body?.trainingTitle || '').trim();
     const styleGuidance = String(req.body?.styleGuidance || '').trim();
     const language = String(req.body?.language || 'fr').trim().toLowerCase() || 'fr';
+    const renderModeRaw = String(req.body?.renderMode || 'ai_images').trim().toLowerCase();
+    const renderMode: 'ai_images' | 'template_slides' =
+      renderModeRaw === 'template_slides' ? 'template_slides' : 'ai_images';
     const maxImages = Math.min(Math.max(Number(req.body?.maxImages || 8), 1), 20);
-    const title = String(req.body?.title || `${trainingTitle || 'Training'} - Images`).trim().slice(0, 240);
+    const defaultSuffix = renderMode === 'template_slides' ? 'Slides' : 'Images';
+    const title = String(req.body?.title || `${trainingTitle || 'Training'} - ${defaultSuffix}`).trim().slice(0, 240);
     const safeGigId = toObjectIdOrUndefined(req.body?.gigId);
     const safeCompanyId = toObjectIdOrUndefined(req.body?.companyId);
     const trainingJourneyIdRaw = String(req.body?.trainingJourneyId || '').trim();
@@ -2455,6 +2520,7 @@ export const generateTrainingImages = async (
     const state: TrainingImageGenerationJobState = {
       id: jobId,
       status: 'queued',
+      renderMode,
       title,
       trainingTitle: trainingTitle || undefined,
       language,
@@ -2474,6 +2540,7 @@ export const generateTrainingImages = async (
       success: true,
       jobId,
       status: state.status,
+      renderMode: state.renderMode,
       total: state.total,
       completed: state.completed,
       items: state.items,
@@ -2516,6 +2583,7 @@ export const getTrainingImagesStatus = async (
       success: true,
       jobId: state.id,
       status: state.status,
+      renderMode: state.renderMode,
       total: state.total,
       completed: state.completed,
       items: state.items,
@@ -2550,6 +2618,7 @@ export const listTrainingImages = async (
         _id: String(r._id),
         title: String(r.title || ''),
         trainingTitle: r.trainingTitle ? String(r.trainingTitle) : undefined,
+        renderMode: String(r.renderMode || 'ai_images') as 'ai_images' | 'template_slides',
         gigId: r.gigId ? String(r.gigId) : undefined,
         language: String(r.language || 'fr'),
         items: Array.isArray(r.items)

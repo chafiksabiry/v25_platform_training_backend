@@ -13,6 +13,7 @@ export interface ITrainingImageSet extends Document {
   companyId?: mongoose.Types.ObjectId | string;
   title: string;
   trainingTitle?: string;
+  renderMode?: 'ai_images' | 'template_slides';
   language: string;
   sourceDigest?: string;
   items: ITrainingImageItem[];
@@ -45,6 +46,7 @@ const trainingImageSetSchema = new Schema<ITrainingImageSet>(
     },
     title: { type: String, required: true, trim: true, maxlength: 240 },
     trainingTitle: { type: String, trim: true, maxlength: 280 },
+    renderMode: { type: String, enum: ['ai_images', 'template_slides'], default: 'ai_images' },
     language: { type: String, default: 'fr', trim: true, maxlength: 12 },
     sourceDigest: { type: String, trim: true, maxlength: 40000 },
     items: {

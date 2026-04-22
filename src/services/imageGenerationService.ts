@@ -17,6 +17,75 @@ export class ImageGenerationService {
     return match ? match[0] : null;
   }
 
+  private static escapeXml(txt: string): string {
+    return String(txt || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+  }
+
+  private static pickBulletsFromPrompt(prompt: string, maxBullets = 4): string[] {
+    const src = String(prompt || '');
+    const raw = src
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .filter((l) => !/^\[(COVER|AGENDA|CONTENT|CONCLUSION)\]/i.test(l))
+      .map((l) => l.replace(/^[-•*]\s+/, '').replace(/^(User|Assistant)\s*:\s*/i, '').trim())
+      .filter((l) => l.length > 20 && l.length < 180);
+    const dedup: string[] = [];
+    for (const line of raw) {
+      if (!dedup.includes(line)) dedup.push(line);
+      if (dedup.length >= maxBullets) break;
+    }
+    if (dedup.length > 0) return dedup;
+    return [
+      'Comprendre les points cles du module',
+      'Appliquer les bonnes pratiques sur le terrain',
+      'Identifier les erreurs frequentes a eviter',
+      'Retenir une checklist actionnable',
+    ].slice(0, maxBullets);
+  }
+
+  /**
+   * Deterministic non-AI slide renderer (SVG template).
+   * This avoids image-model variability and keeps text readable.
+   */
+  static generateTemplateSlideBuffer(params: {
+    title: string;
+    prompt: string;
+    trainingTitle?: string;
+    language?: string;
+    index?: number;
+    total?: number;
+  }): Buffer {
+    const title = String(params.title || 'Slide').slice(0, 92);
+    const trainingTitle = String(params.trainingTitle || 'Formation').slice(0, 100);
+    const bullets = this.pickBulletsFromPrompt(params.prompt, 4);
+    const lines = bullets.map((b) => this.escapeXml(b.slice(0, 115)));
+    const footer = `${trainingTitle} | Slide ${Math.max(1, Number(params.index || 1))}/${Math.max(1, Number(params.total || 1))}`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080">
+  <rect width="1920" height="1080" fill="#f8fafc"/>
+  <rect x="0" y="0" width="1920" height="132" fill="#b00020"/>
+  <text x="960" y="82" text-anchor="middle" fill="#ffffff" font-size="56" font-family="Arial, Helvetica, sans-serif" font-weight="700">${this.escapeXml(title)}</text>
+  <rect x="120" y="188" width="1680" height="760" rx="18" fill="#ffffff" stroke="#e2e8f0" stroke-width="2"/>
+  <g font-family="Arial, Helvetica, sans-serif" fill="#0f172a">
+    ${lines
+      .map(
+        (l, i) =>
+          `<circle cx="190" cy="${290 + i * 150}" r="10" fill="#b00020"/><text x="220" y="${300 + i * 150}" font-size="38" font-weight="600">${l}</text>`
+      )
+      .join('')}
+  </g>
+  <text x="960" y="1028" text-anchor="middle" fill="#64748b" font-size="24" font-family="Arial, Helvetica, sans-serif">${this.escapeXml(
+    footer
+  )}</text>
+</svg>`;
+    return Buffer.from(svg, 'utf-8');
+  }
+
   /**
    * Generates an SVG image buffer using Claude only (no OpenAI image API).
   */
@@ -47,7 +116,10 @@ export class ImageGenerationService {
           'Use viewBox="0 0 1920 1080".',
           'Return compact SVG under 12000 characters.',
           'Style: corporate PowerPoint slide, crisp vector style, modern clean look.',
-          'Must include readable title + 3-5 bullet points based on the provided scene.',
+          'Layout: keep all text inside x=80..1840 (max width ~1760). Title near y=72–140. Bullet block y=200–980 with generous line spacing (1.35em+).',
+          'Must include readable title + 3-4 bullet points from the scene; shorten phrasing so NO text is clipped at right or bottom edges.',
+          'If a callout/checklist box is used, place it fully below the bullet block with at least 48px vertical gap—never overlap bullets.',
+          'Prefer explicit line breaks using multiple <tspan x="..." dy="..."> lines per bullet when a line would exceed ~72 characters.',
           'Keep excellent contrast and readability.',
           'Do not include external images or fonts.',
           `Scene content: ${scene}`,
