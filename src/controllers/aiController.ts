@@ -380,6 +380,26 @@ const extractPrimaryChatTrainingBlock = (digest: string): string => {
 const inferBrandingTitleForSlides = (digest: string, trainingTitle: string): string => {
   const d = String(digest || '');
   const tt = String(trainingTitle || '').trim();
+  const primary = extractPrimaryChatTrainingBlock(d);
+
+  if (primary.length > 80) {
+    const parts = primary.split(/Assistant:\s*/i);
+    const lastAssistant = parts[parts.length - 1] || '';
+    const lines = lastAssistant.split('\n').map((l) => l.trim()).filter(Boolean);
+    for (const line of lines.slice(0, 40)) {
+      const cleaned = line
+        .replace(/^#+\s*/, '')
+        .replace(/^📘\s*/, '')
+        .replace(/^formation\s*:\s*/i, '')
+        .replace(/\*\*(.*?)\*\*/g, '$1')
+        .replace(/[*_`#]+/g, '')
+        .trim();
+      if (cleaned.length < 8 || cleaned.length > 140) continue;
+      if (/^(module|chapitre)\s+\d+/i.test(cleaned)) continue;
+      if (/^(depuis|vous|en cas|si|pour)\b/i.test(cleaned)) continue;
+      return cleaned.slice(0, 120);
+    }
+  }
 
   const kbIdx = d.search(/---\s*Base de connaissances/i);
   if (kbIdx !== -1) {
@@ -395,7 +415,6 @@ const inferBrandingTitleForSlides = (digest: string, trainingTitle: string): str
     }
   }
 
-  const primary = extractPrimaryChatTrainingBlock(d);
   if (primary.length > 80) {
     const parts = primary.split(/Assistant:\s*/i);
     const lastAssistant = parts[parts.length - 1] || '';
@@ -449,11 +468,68 @@ const slideTitleFromChunk = (chunk: string, fallback: string): string => {
       const cleaned = l
         .replace(/^[-•*]\s*/, '')
         .replace(/^(User|Assistant)\s*:\s*/i, '')
+        .replace(/\*\*(.*?)\*\*/g, '$1')
+        .replace(/^#+\s*/, '')
+        .replace(/[*_`#]+/g, '')
         .trim();
       if (cleaned.length > 12 && cleaned.length < 90) return cleaned.slice(0, 88);
     }
   }
   return fallback.slice(0, 88);
+};
+
+const extractSlideBulletsFromText = (text: string, maxBullets = 4): string[] => {
+  const src = String(text || '');
+  const lines = src
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) =>
+      l
+        .replace(/^\s*[-•*]\s+/, '')
+        .replace(/^\d+[.)]\s+/, '')
+        .replace(/^(User|Assistant)\s*:\s*/i, '')
+        .replace(/\*\*(.*?)\*\*/g, '$1')
+        .replace(/^#+\s*/, '')
+        .replace(/[*_`#]+/g, '')
+        .trim()
+    )
+    .filter((l) => l.length >= 16)
+    .filter((l) => !/^source thread/i.test(l))
+    .filter((l) => !/^agenda items derived/i.test(l))
+    .filter((l) => !/derive visible title/i.test(l))
+    .filter((l) => !/stay faithful/i.test(l))
+    .filter((l) => !/training overview for/i.test(l));
+
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const line of lines) {
+    const compact = line.replace(/\s+/g, ' ').trim();
+    if (compact.length < 16) continue;
+    const key = compact.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(compact.slice(0, 140));
+    if (out.length >= maxBullets) break;
+  }
+  if (out.length > 0) return out;
+
+  const sentenceChunks = src
+    .replace(/\n+/g, ' ')
+    .split(/[.!?]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 24);
+  const fallback: string[] = [];
+  for (const s of sentenceChunks) {
+    fallback.push(s.slice(0, 140));
+    if (fallback.length >= maxBullets) break;
+  }
+  return fallback.length > 0
+    ? fallback
+    : ['Comprendre les points cles', 'Retenir les bonnes pratiques', 'Appliquer les actions recommandees'].slice(
+        0,
+        maxBullets
+      );
 };
 
 const normalizeStoryboardRows = (rows: any[], maxImages: number): Array<{ title: string; prompt: string }> => {
@@ -485,6 +561,7 @@ const buildDeterministicStoryboardFallback = (params: {
   language?: string;
   maxImages: number;
   styleGuidance?: string;
+  renderMode?: 'ai_images' | 'template_slides';
 }): Array<{ title: string; prompt: string }> => {
   const lang = String(params.language || 'fr').toLowerCase();
   const isFr = lang.startsWith('fr');
@@ -517,6 +594,7 @@ const buildDeterministicStoryboardFallback = (params: {
   const titleBase = inferBrandingTitleForSlides(digest, String(params.trainingTitle || '').trim());
   const styleHint = String(params.styleGuidance || '').trim();
   const styleSuffix = styleHint ? ` Style guidance: ${styleHint.slice(0, 220)}.` : '';
+  const templateMode = params.renderMode === 'template_slides';
   const out: Array<{ title: string; prompt: string }> = [];
 
   const coverContext =
@@ -527,8 +605,9 @@ const buildDeterministicStoryboardFallback = (params: {
       : '';
   out.push({
     title: isFr ? `${titleBase} - Couverture` : `${titleBase} - Cover`,
-    prompt:
-      `[COVER] Single coherent course title: "${titleBase}". Do NOT mix an unrelated job/gig name with this course title in headers or footers. Professional training title slide, clear headline and subhead, light background, educational layout.${coverContext}${styleSuffix}`,
+    prompt: templateMode
+      ? extractSlideBulletsFromText(coverContext || chatPrimary || digest, 4).join('\n')
+      : `[COVER] Single coherent course title: "${titleBase}". Do NOT mix an unrelated job/gig name with this course title in headers or footers. Professional training title slide, clear headline and subhead, light background, educational layout.${coverContext}${styleSuffix}`,
   });
 
   const agendaLines =
@@ -547,8 +626,9 @@ const buildDeterministicStoryboardFallback = (params: {
         : '';
   out.push({
     title: isFr ? 'Plan de formation' : 'Training agenda',
-    prompt:
-      `[AGENDA] Training overview for "${titleBase}" only (no second unrelated brand line). Agenda-style slide with readable section list, horizontal blocks.${agendaContext}${styleSuffix}`,
+    prompt: templateMode
+      ? extractSlideBulletsFromText(agendaLines || agendaContext || chatPrimary, 6).join('\n')
+      : `[AGENDA] Training overview for "${titleBase}" only (no second unrelated brand line). Agenda-style slide with readable section list, horizontal blocks.${agendaContext}${styleSuffix}`,
   });
 
   for (let i = 0; i < middleCount; i += 1) {
@@ -560,8 +640,9 @@ const buildDeterministicStoryboardFallback = (params: {
         : '';
     out.push({
       title: t,
-      prompt:
-        `[CONTENT] Content slide "${t}" for course "${titleBase}" only. Pedagogical PowerPoint look, title at top, 3–4 short bullets (max ~90 chars each in French); if text is long, shorten wording—never clip at canvas edge. No overlapping side callouts on bullet area.${sourceBlock}${styleSuffix}`,
+      prompt: templateMode
+        ? extractSlideBulletsFromText(chunk || sourceBlock || chatPrimary, 4).join('\n')
+        : `[CONTENT] Content slide "${t}" for course "${titleBase}" only. Pedagogical PowerPoint look, title at top, 3–4 short bullets (max ~90 chars each in French); if text is long, shorten wording—never clip at canvas edge. No overlapping side callouts on bullet area.${sourceBlock}${styleSuffix}`,
     });
   }
 
@@ -577,8 +658,9 @@ const buildDeterministicStoryboardFallback = (params: {
       : '';
   out.push({
     title: isFr ? 'Conclusion' : 'Conclusion',
-    prompt:
-      `[CONCLUSION] Closing slide for "${titleBase}" only (one footer line, same subject as bullets—no job role + course mashup). Visual recap with 3–4 very short bullets; place any checklist/callout box fully below bullets with 40px+ gap—no overlap.${conclusionContext}${styleSuffix}`,
+    prompt: templateMode
+      ? extractSlideBulletsFromText(conclusionContext || closing || chatPrimary, 4).join('\n')
+      : `[CONCLUSION] Closing slide for "${titleBase}" only (one footer line, same subject as bullets—no job role + course mashup). Visual recap with 3–4 very short bullets; place any checklist/callout box fully below bullets with 40px+ gap—no overlap.${conclusionContext}${styleSuffix}`,
   });
   return out.slice(0, total);
 };
@@ -589,6 +671,7 @@ const buildImageStoryboardFromDigest = async (params: {
   language?: string;
   maxImages?: number;
   styleGuidance?: string;
+  renderMode?: 'ai_images' | 'template_slides';
 }): Promise<Array<{ title: string; prompt: string }>> => {
   const maxImages = Math.min(Math.max(Number(params.maxImages || 8), 1), 20);
   return buildDeterministicStoryboardFallback({
@@ -597,6 +680,7 @@ const buildImageStoryboardFromDigest = async (params: {
     language: params.language,
     maxImages,
     styleGuidance: params.styleGuidance,
+    renderMode: params.renderMode,
   });
 };
 
@@ -2514,6 +2598,7 @@ export const generateTrainingImages = async (
       language,
       maxImages,
       styleGuidance,
+      renderMode,
     });
     const jobId = crypto.randomUUID();
     const now = Date.now();
