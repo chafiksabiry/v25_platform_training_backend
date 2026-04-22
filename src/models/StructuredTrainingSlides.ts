@@ -51,7 +51,8 @@ const structuredTrainingSlidesSchema = new Schema<IStructuredTrainingSlides>(
     language: { type: String, default: 'fr', trim: true, maxlength: 12 },
     theme: { type: Schema.Types.Mixed },
     slides: {
-      type: [Schema.Types.Mixed],
+      // Mixed array is valid in Mongoose runtime; cast keeps TS happy during build.
+      type: [Schema.Types.Mixed] as any,
       default: [],
       validate: {
         validator: (arr: any[]) => Array.isArray(arr) && arr.length >= 0 && arr.length <= 40,
