@@ -1871,6 +1871,10 @@ export const chat = async (
             '- Start immediately with Module 1',
             '- Use dash bullets ("- ") for every item under Objectifs, Key Topics, Activites, and Indicateur d\'evaluation',
             '- Do NOT write plain sentences under these sections without dash bullets',
+            '- Bullets must be SHORT TITLE-LIKE PHRASES, not long descriptive sentences',
+            '- Prefer noun phrases (2-8 words), avoid full sentence grammar',
+            '- Avoid period "." at the end of bullets',
+            '- If needed, use "Titre : detail tres court" format, but keep it concise',
             'PLAN TEMPLATE (must follow):',
             '- Formation : <titre>',
             '- 🟢 Module 1 : <titre>',
@@ -1968,7 +1972,17 @@ export const chat = async (
       const hasTopics = /(key topics|th[eè]mes cl[eé]s|sujets cl[eé]s|topics)/i.test(txt);
       const hasPractice = /(practice activity|activit[eé] pratique|mise en pratique|atelier)/i.test(txt);
       const hasEvaluation = /(evaluation indicator|indicateur d['’]?[eé]valuation|crit[eè]re d['’]?[eé]valuation)/i.test(txt);
-      return moduleHits < 2 || lineCount < 8 || startsWithQuestion || questionMarks >= 4 || !hasObjectives || !hasTopics || !hasPractice || !hasEvaluation;
+      const bulletLines = txt
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => /^[-*•]\s+/.test(l));
+      const longSentenceBullets = bulletLines.filter((l) => {
+        const body = l.replace(/^[-*•]\s+/, '').trim();
+        const wordCount = body.split(/\s+/).filter(Boolean).length;
+        const hasTerminalPunctuation = /[.!?]\s*$/.test(body);
+        return wordCount > 14 || hasTerminalPunctuation;
+      }).length;
+      return moduleHits < 2 || lineCount < 8 || startsWithQuestion || questionMarks >= 4 || !hasObjectives || !hasTopics || !hasPractice || !hasEvaluation || longSentenceBullets >= 2;
     };
 
     const buildStylePresetByIntent = (intent: string) => {
@@ -2125,6 +2139,8 @@ STRICT OUTPUT RULE:
 - ONLY structured modules starting from Module 1
 - Every item under sections MUST be dash bullets ("- ")
 - No plain paragraph lines inside module sections
+- Bullets must be short title-like phrases (2-8 words ideally)
+- Avoid long explanatory sentences and avoid final punctuation in bullets
 
 FAILURE CONDITION:
 If format is not respected, regenerate again until compliance.`;
@@ -2225,6 +2241,8 @@ STRICT OUTPUT RULE:
 - ONLY structured modules starting from Module 1
 - Every item under sections MUST be dash bullets ("- ")
 - No plain paragraph lines inside module sections
+- Bullets must be short title-like phrases (2-8 words ideally)
+- Avoid long explanatory sentences and avoid final punctuation in bullets
 
 FAILURE CONDITION:
 If format is not respected, regenerate again until compliance.`;
