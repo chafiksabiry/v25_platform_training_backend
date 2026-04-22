@@ -1810,164 +1810,58 @@ export const chat = async (
     ].join('\n');
 
     const systemPrompt = [
-      'You are HARX AI assistant powered by Claude.',
-      'Reply in the same language as the user (French when user writes French).',
-      'Adopt a spontaneous, natural, human-like conversational style while staying professional.',
-      'Mirror user intent and energy: direct when user is direct, exploratory when user brainstorms, concise when user asks briefly.',
-      'Do not sound templated. Vary sentence rhythm and transitions naturally.',
-      'Use clean, readable formatting: short paragraphs and bullet lists only when they add value.',
-      isFreeChatMode
-        ? 'DEFAULT MODE: respond like a normal conversational assistant. Write plain flowing text with minimal formatting. Do NOT create module cards, module sections, or training-plan grids. No "Module 1 - ...", no numbered module blocks. Just natural text, short paragraphs and bullet points only when they clearly add value.'
-        : 'When the user asks for training artifacts, structure the output clearly and pedagogically.',
-      'MARKDOWN: use ## or ### headings, bullet lists (- or *), **bold**, plain paragraphs. Never use hard-coded dark backgrounds, HTML, CSS or styled block structures.',
-      isFreeChatMode ? 'Do NOT produce JSON-like module structures or markdown with alternating styled blocks. Write like a human assistant, not a course generator.' : '',
-      'Do not output decorative separator lines (---) unless strictly needed to separate two distinct sections.',
-      'Visual style policy: keep normal chat replies light, conversational, and easy to read.',
-      'Never output HTML, CSS, JavaScript, iframe snippets, or <harx-html> tags.',
-      `INTERNAL pacing (do not paste verbatim into slide-ready module bodies): methodology ${selectedMethodology}; global target duration ${selectedDuration}.`,
-      gigGrounding.systemRules.length
-        ? 'IMPORTANT: Methodology shapes pedagogy only; the GIG anchoring block defines the business/topic domain when present.'
-        : 'IMPORTANT: Methodology shapes pedagogy only; it must NOT force the business/topic domain.',
-      `KB keyword focus: ${inferredDomain.kbFocusLabel}.`,
+      'You are HARX AI. Reply in the user language. Be simple, clear, pedagogical.',
+      'Use markdown only. Never output HTML/CSS/JS or fake UI buttons.',
+      'Keep business context from conversation unless user changes it.',
+      'If critical info is missing, infer reasonably and ask max 2 focused questions at the end.',
       inferredDomain.strictTopicGuard,
-      'Do not add per-slide or per-module duration labels (e.g. "25 min", "Durée totale", "X minutes") unless the user explicitly asks for a timing breakdown.',
-      'Do NOT add reminder banners like "Rappel — Durée cible … | Méthodologie …" or similar meta lines in answers.',
-      'SLIDE-READY MODULE CONTENT: when producing content for slides, use Markdown (##/###, listes, paragraphes, **gras**) with ONLY learner-facing pedagogical text. No boilerplate section titled like "## Objectifs pédagogiques" empty or generic, no evaluation grids, no admin recap tables, no methodology/duration reminder lines in that body.',
-      'Do NOT include sections about resources/support/materials/equipment (e.g., "Supports et ressources", "Documents fournis", "Équipement nécessaire").',
-      'Focus on clear pedagogical ideas learners see on slides; keep pacing implicit unless the user asks for a schedule.',
-      'If prior conversation history is off-domain, ignore it and prioritize current user message + KB context.',
-      'Prefer useful clarity over rigid templates.',
       ...(gigGrounding.systemRules.length
         ? gigGrounding.systemRules
-        : ['Do NOT mention or infer company name, gig name, or gig description unless explicitly provided by user in current message.']),
+        : ['Do not invent company/gig context not provided by user.']),
+      isFreeChatMode
+        ? 'FREE CHAT MODE: natural concise assistant style. Do not force module structures unless user explicitly asks plan/training/module.'
+        : '',
       requestedOutput === 'training_plan'
         ? [
-            'INTENT LOCK = TRAINING PLAN',
-            'The user is requesting a structured training plan.',
-            'You MUST return ONLY a high-level training architecture (NO full lessons, NO detailed explanations).',
-            'STRICT RULES:',
-            '- Do NOT generate full course content',
-            '- Do NOT include long explanations or examples',
-            '- Do NOT ask clarification questions',
-            '- Start immediately with the plan',
-            'FORMAT REQUIREMENTS:',
-            '- Minimum 4 modules',
-            '- Each module MUST be labeled exactly: "Module 1", "Module 2", etc.',
-            '- Each module MUST include:',
-            '  - Title',
-            '  - Learning Objectives (3-5 bullets max)',
-            '  - Key Topics (3-6 bullets max)',
-            '  - Suggested Activities (practical + interactive)',
-            'PEDAGOGICAL RULE:',
-            '- Modules must follow a clear progression (basic -> advanced)',
-            '- Each module must build on the previous one',
-            '360 RULE (IMPORTANT):',
-            '- Include at least one "Practice Activity" per module',
-            '- Include at least one "Evaluation Indicator" per module (what proves mastery)',
-            'OUTPUT STYLE:',
-            '- Clean structured markdown',
-            '- No introduction',
-            '- No explanations outside modules',
-            '- Start immediately with Module 1',
-            '- Use dash bullets ("- ") for every item under Objectifs, Key Topics, Activites, and Indicateur d\'evaluation',
-            '- Do NOT write plain sentences under these sections without dash bullets',
-            '- Bullets must be SHORT TITLE-LIKE PHRASES, not long descriptive sentences',
-            '- Prefer noun phrases (2-8 words), avoid full sentence grammar',
-            '- Avoid period "." at the end of bullets',
-            '- If needed, use "Titre : detail tres court" format, but keep it concise',
-            '- Nested headings are allowed but MUST use bullet syntax only: "- Sous-theme:" then indented bullets "  - item"',
-            '- Never use numbered lists (1., 2., 3.) inside modules; always use dash bullets',
-            '- Avoid repeated sentence stems across bullets (no repeated "HARX vise ...", "La plateforme ...", etc.)',
-            '- Each bullet must introduce a distinct concept label',
-            'PLAN TEMPLATE (must follow):',
-            '- Formation : <titre>',
-            '- 🟢 Module 1 : <titre>',
-            '- 🎯 Objectifs',
-            '  - <objectif 1>',
-            '  - <objectif 2>',
-            '- 📌 Key Topics',
-            '  - <topic 1>',
-            '- 🧩 Activites',
-            '  - <activite 1>',
-            '- 📊 Indicateur d\'evaluation',
-            '  - <indicateur>',
-            '- Optional nested example:',
-            '  - Processus d\'integration:',
-            '    - Etape de cadrage',
-            '    - Parametrage initial',
-            '- Repeat same structure for Module 2, Module 3, Module 4+',
+            'INTENT LOCK: TRAINING PLAN',
+            'Output only a plan (no full lessons), start directly at Module 1.',
+            'Minimum 4 modules, progressive from basic to advanced.',
+            'Each module must include: 🎯 Objectifs, 📌 Key Topics, 🧩 Activites, 📊 Indicateur d\'evaluation.',
+            'Use short dash bullets only ("- "), title-like phrases, no long sentences, no numbering.',
+            'Use module emojis in order: 🟢 Module 1, 🟡 Module 2, 🟠 Module 3, 🔵 Module 4.',
+            'Nested format allowed: "- 📌 1.1 Sous-theme" then indented "  - item".',
+            'No intro paragraph, no clarification questions before modules.',
           ].join('\n')
         : '',
       requestedOutput === 'full_training_content'
         ? [
-            'INTENT LOCK = FULL TRAINING CONTENT',
-            'The user is requesting complete training content.',
-            'You MUST generate a full learner-facing course.',
-            'RULES:',
-            '- Expand ALL modules into detailed learning content',
-            '- Include explanations, examples, and step-by-step guidance',
-            '- Include practical exercises for each module',
-            '- Include mini quizzes (3-5 questions per module)',
-            'STRUCTURE PER MODULE:',
-            '- Title',
-            '- Objectives',
-            '- Detailed Explanation',
-            '- Real-world Examples',
-            '- Hands-on Exercise',
-            '- Mini Quiz',
-            '- Summary',
-            '360 REQUIREMENT:',
-            '- Add reflection questions at the end of each module',
-            '- Add self-assessment section (1-5 rating scale)',
-            '- Add peer review instruction',
-            'STYLE:',
-            '- Educational, clear, structured',
-            '- No fluff',
-            '- Focus on learning by doing',
+            'INTENT LOCK: FULL TRAINING CONTENT',
+            'Generate complete learner-facing content for all modules.',
+            'Per module include: Title, Objectives, Detailed Explanation, Examples, Hands-on Exercise, Mini Quiz (3-5), Summary, Reflection, Self-assessment (1-5).',
+            'Keep each module under 800 words; if more depth is needed, ask which module to expand.',
           ].join('\n')
         : '',
       requestedOutput === 'module_content'
         ? [
-            'INTENT LOCK = MODULE CONTENT',
-            `The user is requesting a single module${requestedModuleReference ? ` (${requestedModuleReference})` : ''}.`,
-            'RULES:',
-            '- Generate ONLY the requested module',
-            '- Do NOT generate other modules',
-            '- Do NOT generate full course structure',
-            'STRUCTURE:',
-            '- Module Title',
-            '- Learning Objectives (3-5)',
-            '- Deep Explanation',
-            '- Examples',
-            '- Practical Exercise',
-            '- Quick Quiz (3-5 questions)',
-            '- Self-Assessment Questions',
-            '- Skill Validation Criteria',
-            '360 REQUIREMENT:',
-            '- Include at least 1 reflection question',
-            '- Include 1 peer review instruction',
-            '- Include a success/failure indicator',
-            'STYLE:',
-            '- Deep and practical',
-            '- Focus on understanding + application',
+            `INTENT LOCK: MODULE CONTENT${requestedModuleReference ? ` (${requestedModuleReference})` : ''}`,
+            'Generate only the requested module.',
+            'Include: Module Title, Learning Objectives, Deep Explanation, Examples, Practical Exercise, Quick Quiz (3-5), Self-Assessment, Skill Validation, Success/Failure indicator.',
+            'Include one self-check with model answer or reflection prompt.',
           ].join('\n')
         : '',
       requiresTypedStyle
-        ? 'STYLE LOCK: append exactly one <harx-style>{...}</harx-style> JSON block at the END of your answer.'
+        ? 'Append exactly one <harx-style>{...}</harx-style> JSON block at the end.'
         : '',
       isPlanIntent
-        ? 'STYLE PROFILE FOR PLAN: layoutPreset="cards", cool structured palette, clean sans-serif fonts. This style must be visually different from module/full-training profiles.'
+        ? 'Style profile plan: layout cards, clean and structured.'
         : '',
       isModuleIntent
-        ? 'STYLE PROFILE FOR MODULE: layoutPreset="editorial", deeper contrast, analytical reading tone, distinct typography from plan.'
+        ? 'Style profile module: editorial, focused and deep.'
         : '',
       isFullTrainingIntent
-        ? 'STYLE PROFILE FOR FULL TRAINING: layoutPreset="minimal", warm premium palette, high readability and different identity from plan/module.'
+        ? 'Style profile full training: minimal, high readability.'
         : '',
-      'If user explicitly asks for a training plan, generate a complete draft plan immediately (modules with substantive slide-ready text, programme-level structure) without waiting for extra clarifications; for parts that become slides, obey SLIDE-READY MODULE CONTENT (no per-module timing banners in slide bodies).',
-      'You may finish with 2-4 optional clarification questions, but only after providing the full initial plan.',
-      'NEVER include fake UI buttons, markdown button syntax, or "Valider / Enregistrer" controls in your reply; the app shows validation actions separately when appropriate.'
-    ].join(' ');
+    ].filter(Boolean).join('\n');
 
     const isWeakPlanDraft = (value: string): boolean => {
       const txt = String(value || '').trim();
@@ -2138,37 +2032,14 @@ export const chat = async (
       }
       if (isPlanIntent && isWeakPlanDraft(String(response || ''))) {
         const correctivePlanPrompt = `${systemPrompt}
-HARD PLAN FORMAT ENFORCEMENT
-
-You failed to produce a valid structured training plan.
-You MUST regenerate a complete training plan immediately.
-
-MANDATORY RULES:
-- Minimum 4 modules
-- Modules must be progressive (basic -> advanced)
-- Each module MUST include:
-  - Title
-  - Objectives (3-5 bullets)
-  - Key Topics (3-6 bullets)
-  - Practical Activity
-  - Evaluation Indicator
-
-STRICT OUTPUT RULE:
-- NO questions
-- NO introduction
-- NO explanations
-- ONLY structured modules starting from Module 1
-- Every item under sections MUST be dash bullets ("- ")
-- No plain paragraph lines inside module sections
-- Bullets must be short title-like phrases (2-8 words ideally)
-- Avoid long explanatory sentences and avoid final punctuation in bullets
-- Nested headings must be in bullet form: "- Sous-theme:" then "  - item"
-- Never use numbered list items (1., 2., 3.) in modules
-- Avoid repeated bullet openings (same first words repeated 3+ times)
-- Force lexical variety across bullets
-
-FAILURE CONDITION:
-If format is not respected, regenerate again until compliance.`;
+HARD PLAN ENFORCEMENT:
+Regenerate now with strict compliance.
+- Start at 🟢 Module 1
+- Minimum 4 modules, progressive
+- Per module: 🎯 Objectifs, 📌 Key Topics, 🧩 Activites, 📊 Indicateur d'evaluation
+- Dash bullets only, short title-like phrases, no numbered lists
+- Use module emojis in order: 🟢 🟡 🟠 🔵
+- No intro, no questions, no long explanations`;
         response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
       }
       let finalResponse = await ensureVisualResponseContract(
@@ -2244,37 +2115,14 @@ If format is not respected, regenerate again until compliance.`;
       }
       if (isPlanIntent && isWeakPlanDraft(String(response || ''))) {
         const correctivePlanPrompt = `${systemPrompt}
-HARD PLAN FORMAT ENFORCEMENT
-
-You failed to produce a valid structured training plan.
-You MUST regenerate a complete training plan immediately.
-
-MANDATORY RULES:
-- Minimum 4 modules
-- Modules must be progressive (basic -> advanced)
-- Each module MUST include:
-  - Title
-  - Objectives (3-5 bullets)
-  - Key Topics (3-6 bullets)
-  - Practical Activity
-  - Evaluation Indicator
-
-STRICT OUTPUT RULE:
-- NO questions
-- NO introduction
-- NO explanations
-- ONLY structured modules starting from Module 1
-- Every item under sections MUST be dash bullets ("- ")
-- No plain paragraph lines inside module sections
-- Bullets must be short title-like phrases (2-8 words ideally)
-- Avoid long explanatory sentences and avoid final punctuation in bullets
-- Nested headings must be in bullet form: "- Sous-theme:" then "  - item"
-- Never use numbered list items (1., 2., 3.) in modules
-- Avoid repeated bullet openings (same first words repeated 3+ times)
-- Force lexical variety across bullets
-
-FAILURE CONDITION:
-If format is not respected, regenerate again until compliance.`;
+HARD PLAN ENFORCEMENT:
+Regenerate now with strict compliance.
+- Start at 🟢 Module 1
+- Minimum 4 modules, progressive
+- Per module: 🎯 Objectifs, 📌 Key Topics, 🧩 Activites, 📊 Indicateur d'evaluation
+- Dash bullets only, short title-like phrases, no numbered lists
+- Use module emojis in order: 🟢 🟡 🟠 🔵
+- No intro, no questions, no long explanations`;
         response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
       }
       fullResponse = String(response || '');
