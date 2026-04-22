@@ -500,9 +500,11 @@ const extractSlideBulletsFromText = (text: string, maxBullets = 4): string[] => 
     .filter((l) => !/derive visible title/i.test(l))
     .filter((l) => !/stay faithful/i.test(l))
     .filter((l) => !/training overview for/i.test(l))
+    .filter((l) => !/^\[(intro|conclusion|point\s*\d+).*\]/i.test(l))
+    .filter((l) => !/^\s*>\s*[«"]?/i.test(l))
     .filter((l) => !/^(parfait|ah d['’]accord|non juste|bonjour|salut)\b/i.test(l))
     .filter((l) => !/\b(je te pr[ée]pare|tu veux|peux-tu me confirmer|dis-moi simplement)\b/i.test(l))
-    .filter((l) => !/\b(script podcast|dur[ée]e cible|accroche percutante|ton conversationnel)\b/i.test(l));
+    .filter((l) => !/\b(script podcast|dur[ée]e cible|accroche percutante|ton conversationnel|ton dynamique|accueillant)\b/i.test(l));
 
   const out: string[] = [];
   const seen = new Set<string>();
@@ -578,7 +580,9 @@ const extractLastPedagogicalAssistantBlock = (primaryChat: string): string => {
     const hasBullets = /(^|\n)\s*([-•*]|\d+[.)])\s+/m.test(b) ? 5 : 0;
     const hasHeading = /(^|\n)\s*#{1,3}\s+/m.test(b) ? 4 : 0;
     const tooConversational = /\b(peux-tu|dis-moi|je peux|je te)\b/i.test(b) ? -5 : 0;
-    return hasPedagogy + hasBullets + hasHeading + tooConversational + Math.min(6, Math.floor(b.length / 500));
+    const podcastScriptLike =
+      /\[(intro|conclusion|point\s*\d+).*\]|\bscript podcast\b|\bton dynamique\b|\baccroche\b/i.test(b) ? -9 : 0;
+    return hasPedagogy + hasBullets + hasHeading + tooConversational + podcastScriptLike + Math.min(6, Math.floor(b.length / 500));
   };
 
   // Prefer latest good pedagogical block.
@@ -593,6 +597,52 @@ const extractLastPedagogicalAssistantBlock = (primaryChat: string): string => {
     }
   }
   return best;
+};
+
+const tryParseStructuredSlidesJson = (raw: string): any => {
+  const txt = String(raw || '').trim();
+  if (!txt) throw new Error('Empty structured slides payload');
+
+  const noFence = txt
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+
+  try {
+    return JSON.parse(noFence);
+  } catch {
+    // continue
+  }
+
+  const firstBrace = noFence.indexOf('{');
+  if (firstBrace === -1) throw new Error('No JSON object found');
+  const candidate = noFence.slice(firstBrace);
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < candidate.length; i += 1) {
+    const ch = candidate[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === '{') depth += 1;
+    if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        const balanced = candidate.slice(0, i + 1);
+        return JSON.parse(balanced);
+      }
+    }
+  }
+  throw new Error('Could not recover balanced JSON object');
 };
 
 const normalizeStoryboardRows = (rows: any[], maxImages: number): Array<{ title: string; prompt: string }> => {
@@ -892,10 +942,10 @@ const generateStructuredSlidesWithClaude = async (params: {
     prompt,
     'You generate strict JSON training slides only.',
     params.anthropicKey,
-    4000,
+    7000,
     { temperature: 0.2, preferredModels: [String(process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5')] }
   );
-  const parsed = aiService.parseJson(String(raw || ''), 'structuredSlides');
+  const parsed = tryParseStructuredSlidesJson(String(raw || ''));
   const slidesIn = Array.isArray(parsed?.slides) ? parsed.slides : [];
   const slides: StructuredTrainingSlide[] = slidesIn
     .map((s: any, idx: number) => ({
@@ -1464,6 +1514,64 @@ const isKbTopicMismatch = (text: string, kbKeywords: string[]): boolean => {
   const hits = kbKeywords.filter((kw) => kw && lower.includes(kw.toLowerCase())).length;
   // If almost no overlap with KB vocabulary, treat as off-topic.
   return hits < 2;
+};
+
+export const generateQuiz = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { moduleContent, numberOfQuestions, difficulty } = req.body || {};
+
+    const requestedCount = Number.isFinite(Number(numberOfQuestions))
+      ? Math.min(Math.max(parseInt(String(numberOfQuestions), 10), 1), 30)
+      : 5;
+
+    const moduleTitle = String(moduleContent?.title || '').trim();
+    const moduleDescription = String(moduleContent?.description || '').trim();
+    const sectionText = Array.isArray(moduleContent?.sections)
+      ? moduleContent.sections
+          .map((s: any) => [String(s?.title || ''), String(s?.content || '')].join(' ').trim())
+          .filter(Boolean)
+          .join('\n')
+      : '';
+
+    const topicSource = [moduleTitle, moduleDescription, sectionText]
+      .filter(Boolean)
+      .join('\n')
+      .slice(0, 6000);
+
+    const topic = topicSource || 'training content';
+    const rawQuestions = await aiService.generateQuiz(topic, requestedCount);
+
+    const questions = Array.isArray(rawQuestions)
+      ? rawQuestions
+          .map((q: any) => ({
+            question: String(q?.question || '').trim(),
+            options: Array.isArray(q?.options)
+              ? q.options.map((opt: any) => String(opt || '').trim()).filter(Boolean).slice(0, 6)
+              : [],
+            correctAnswer: Number.isInteger(q?.correctAnswer)
+              ? Number(q.correctAnswer)
+              : 0,
+            explanation: String(q?.explanation || '').trim(),
+            difficulty: String(difficulty || 'medium').trim().toLowerCase() || 'medium',
+            type: 'multiple-choice',
+          }))
+          .filter((q: any) => q.question && q.options.length >= 2)
+          .slice(0, requestedCount)
+      : [];
+
+    return res.json({
+      success: true,
+      data: {
+        questions,
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
 };
 
 export const generateTrainingFromGig = async (
@@ -2991,11 +3099,11 @@ export const generateTrainingSlidesJson = async (
         maxSlides,
       });
     } else {
+      const anthropicKey =
+        String(req.headers['x-anthropic-api-key'] || '').trim() ||
+        String(req.body?.anthropicApiKey || '').trim() ||
+        undefined;
       try {
-        const anthropicKey =
-          String(req.headers['x-anthropic-api-key'] || '').trim() ||
-          String(req.body?.anthropicApiKey || '').trim() ||
-          undefined;
         structured = await generateStructuredSlidesWithClaude({
           trainingDigest,
           trainingTitle,
@@ -3003,14 +3111,11 @@ export const generateTrainingSlidesJson = async (
           maxSlides,
           anthropicKey,
         });
-      } catch (aiErr) {
-        console.warn('[training-slides-json] Claude generation failed, fallback deterministic:', aiErr);
-        structured = buildStructuredSlidesFromDigest({
-          trainingDigest,
-          trainingTitle,
-          language,
-          maxSlides,
-        });
+      } catch (aiErr: any) {
+        throw new AppError(
+          `Claude structured slides generation failed: ${String(aiErr?.message || aiErr)}`,
+          502
+        );
       }
     }
     if (withCoverImage && Array.isArray(structured.slides) && structured.slides.length > 0) {

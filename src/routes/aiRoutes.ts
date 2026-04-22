@@ -116,6 +116,11 @@ router.post(
 );
 
 router.post(
+  '/generate-quiz',
+  aiController.generateQuiz
+);
+
+router.post(
   '/generate-curriculum',
   aiController.generateProgramFromAnalysis
 );
