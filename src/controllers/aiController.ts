@@ -1869,6 +1869,21 @@ export const chat = async (
             '- No introduction',
             '- No explanations outside modules',
             '- Start immediately with Module 1',
+            '- Use dash bullets ("- ") for every item under Objectifs, Key Topics, Activites, and Indicateur d\'evaluation',
+            '- Do NOT write plain sentences under these sections without dash bullets',
+            'PLAN TEMPLATE (must follow):',
+            '- Formation : <titre>',
+            '- 🟢 Module 1 : <titre>',
+            '- 🎯 Objectifs',
+            '  - <objectif 1>',
+            '  - <objectif 2>',
+            '- 📌 Key Topics',
+            '  - <topic 1>',
+            '- 🧩 Activites',
+            '  - <activite 1>',
+            '- 📊 Indicateur d\'evaluation',
+            '  - <indicateur>',
+            '- Repeat same structure for Module 2, Module 3, Module 4+',
           ].join('\n')
         : '',
       requestedOutput === 'full_training_content'
@@ -2108,6 +2123,8 @@ STRICT OUTPUT RULE:
 - NO introduction
 - NO explanations
 - ONLY structured modules starting from Module 1
+- Every item under sections MUST be dash bullets ("- ")
+- No plain paragraph lines inside module sections
 
 FAILURE CONDITION:
 If format is not respected, regenerate again until compliance.`;
@@ -2206,6 +2223,8 @@ STRICT OUTPUT RULE:
 - NO introduction
 - NO explanations
 - ONLY structured modules starting from Module 1
+- Every item under sections MUST be dash bullets ("- ")
+- No plain paragraph lines inside module sections
 
 FAILURE CONDITION:
 If format is not respected, regenerate again until compliance.`;
