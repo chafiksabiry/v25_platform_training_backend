@@ -357,6 +357,52 @@ type TrainingImageGenerationJobState = {
 const trainingImageGenerationJobs = new Map<string, TrainingImageGenerationJobState>();
 const TRAINING_IMAGE_JOB_TIMEOUT_MS = 15 * 60 * 1000;
 
+/** REP training digest: chat thread marked PRIMARY in ContentUploader. */
+const extractPrimaryChatTrainingBlock = (digest: string): string => {
+  const d = String(digest || '');
+  const marker = '--- Training chat (PRIMARY';
+  const idx = d.indexOf(marker);
+  if (idx === -1) return '';
+  const tail = d.slice(idx);
+  const stop = tail.indexOf('\n--- Supporting reference');
+  const body = (stop === -1 ? tail : tail.slice(0, stop)).trim();
+  return body.slice(0, 16000);
+};
+
+const chunkTextForSlides = (text: string, maxChunks: number, maxChunkLen: number): string[] => {
+  const t = String(text || '').trim();
+  if (!t) return [];
+  const paras = t.split(/\n\n+/).map((p) => p.trim()).filter(Boolean);
+  const chunks: string[] = [];
+  let buf = '';
+  for (const p of paras) {
+    const next = buf ? `${buf}\n\n${p}` : p;
+    if (next.length > maxChunkLen && buf) {
+      chunks.push(buf);
+      buf = p;
+    } else {
+      buf = next;
+    }
+  }
+  if (buf) chunks.push(buf);
+  if (!chunks.length) chunks.push(t.slice(0, maxChunkLen));
+  return chunks.slice(0, Math.max(1, maxChunks));
+};
+
+const slideTitleFromChunk = (chunk: string, fallback: string): string => {
+  const lines = String(chunk || '').split(/\n/).map((l) => l.trim());
+  for (const l of lines) {
+    if (l.length > 12 && l.length < 90) {
+      const cleaned = l
+        .replace(/^[-•*]\s*/, '')
+        .replace(/^(User|Assistant)\s*:\s*/i, '')
+        .trim();
+      if (cleaned.length > 12 && cleaned.length < 90) return cleaned.slice(0, 88);
+    }
+  }
+  return fallback.slice(0, 88);
+};
+
 const normalizeStoryboardRows = (rows: any[], maxImages: number): Array<{ title: string; prompt: string }> => {
   const normalized = (Array.isArray(rows) ? rows : [])
     .map((r: any) => ({
@@ -390,6 +436,10 @@ const buildDeterministicStoryboardFallback = (params: {
   const lang = String(params.language || 'fr').toLowerCase();
   const isFr = lang.startsWith('fr');
   const digest = String(params.trainingDigest || '');
+  const chatPrimary = extractPrimaryChatTrainingBlock(digest);
+  const digestChunks =
+    chatPrimary.length > 120 ? chunkTextForSlides(chatPrimary, Math.max(params.maxImages, 10), 2000) : [];
+
   const lines = digest.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const candidateTitles = lines
     .filter((l) => /^(#+\s*)?(module|chapitre|section|slide|partie|topic|theme)\b/i.test(l) || l.length < 90)
@@ -400,6 +450,10 @@ const buildDeterministicStoryboardFallback = (params: {
   const total = Math.max(3, params.maxImages);
   const middleCount = Math.max(total - 3, 1);
   const middleTitles = Array.from({ length: middleCount }).map((_, i) => {
+    const chunk = digestChunks[i];
+    if (chunk) {
+      return slideTitleFromChunk(chunk, isFr ? `Contenu ${i + 1}` : `Content ${i + 1}`);
+    }
     const picked = candidateTitles[i];
     if (picked) return picked;
     return isFr ? `Contenu ${i + 1}` : `Content ${i + 1}`;
@@ -409,32 +463,61 @@ const buildDeterministicStoryboardFallback = (params: {
   const styleHint = String(params.styleGuidance || '').trim();
   const styleSuffix = styleHint ? ` Style guidance: ${styleHint.slice(0, 220)}.` : '';
   const out: Array<{ title: string; prompt: string }> = [];
+
+  const coverContext =
+    chatPrimary.length > 120
+      ? ` Base the main title and subtitle on this learner conversation (same role and themes):\n${chatPrimary.slice(0, 1600)}`
+      : '';
   out.push({
     title: isFr ? `${titleBase} - Couverture` : `${titleBase} - Cover`,
     prompt:
-      `[COVER] ${titleBase}. Slide de garde de formation, style PowerPoint professionnel, ` +
-      `grand titre visible, zone de sous-titre, fond clair avec accents bleus, mise en page éducative.${styleSuffix}`,
+      `[COVER] ${titleBase}. Professional training title slide, clear headline and subhead, light background, educational layout.${coverContext}${styleSuffix}`,
   });
+
+  const agendaLines =
+    digestChunks.length > 0
+      ? digestChunks
+          .slice(0, Math.min(8, middleCount + 2))
+          .map((c, j) => `${j + 1}. ${slideTitleFromChunk(c, `Section ${j + 1}`)}`)
+          .join('\n')
+          .slice(0, 1400)
+      : '';
+  const agendaContext =
+    agendaLines.length > 40
+      ? `\nAgenda items derived from the training chat thread:\n${agendaLines}`
+      : chatPrimary.length > 120
+        ? `\nSummarize key themes from the chat as 4–7 short agenda lines:\n${chatPrimary.slice(0, 1200)}`
+        : '';
   out.push({
     title: isFr ? 'Plan de formation' : 'Training agenda',
     prompt:
-      `[AGENDA] Sommaire de la formation ${titleBase}, slide type agenda avec liste des sections, ` +
-      `titre "Sommaire", blocs horizontaux lisibles, design cours/formation.${styleSuffix}`,
+      `[AGENDA] Training overview for ${titleBase}, agenda-style slide with readable section list, horizontal blocks.${agendaContext}${styleSuffix}`,
   });
-  middleTitles.forEach((t, i) => {
+
+  for (let i = 0; i < middleCount; i += 1) {
+    const t = middleTitles[i];
+    const chunk = digestChunks[i] || (chatPrimary.length > 120 ? chatPrimary.slice(0, 2200) : '');
+    const sourceBlock =
+      chunk.length > 80
+        ? `\n\nSource thread (stay faithful — derive visible title and 3–5 bullets from this text):\n${chunk.slice(0, 3200)}`
+        : '';
     out.push({
       title: t,
       prompt:
-        `[CONTENT] Slide de contenu "${t}" pour ${titleBase}, style présentation pédagogique, ` +
-        `titre en haut, paragraphes/bullets lisibles, schéma simple (boîtes/flèches), mise en page structurée.${styleSuffix}`,
+        `[CONTENT] Content slide "${t}" for "${titleBase}". Pedagogical PowerPoint look, title at top, 3–5 readable bullets, simple diagram if helpful.${sourceBlock}${styleSuffix}`,
     });
-    if (i + 3 >= total - 1) return;
-  });
+  }
+
+  const closing =
+    digestChunks.length > 0 ? digestChunks[digestChunks.length - 1] : chatPrimary.length > 120 ? chatPrimary : '';
+  const conclusionContext =
+    String(closing).length > 120
+      ? `\n\nClosing summary grounded in:\n${String(closing).slice(0, 2800)}`
+      : '';
   out.push({
     title: isFr ? 'Conclusion' : 'Conclusion',
     prompt:
-      `[CONCLUSION] Slide de conclusion pour ${titleBase}, synthèse visuelle avec points clés, ` +
-      `style citation/récapitulatif final, design PowerPoint formation.${styleSuffix}`,
+      `[CONCLUSION] Closing slide for ${titleBase}, visual recap with key takeaways, quote-style recap layout.${conclusionContext}${styleSuffix}`,
   });
   return out.slice(0, total);
 };
