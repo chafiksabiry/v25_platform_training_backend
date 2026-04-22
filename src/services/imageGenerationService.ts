@@ -28,13 +28,28 @@ export class ImageGenerationService {
 
   private static pickBulletsFromPrompt(prompt: string, maxBullets = 4): string[] {
     const src = String(prompt || '');
-    const raw = src
-      .split(/\r?\n/)
+    const afterSource = src.match(/Source thread[\s\S]*?:\s*([\s\S]*)$/i);
+    const working = (afterSource?.[1] || src).trim();
+    const normalized = working
+      .replace(/\r/g, '\n')
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/\*\*(.*?)\*\*/g, '$1')
+      .replace(/__(.*?)__/g, '$1')
+      .replace(/(^|\s)[#*_`]+/g, ' ')
+      .replace(/\s{2,}/g, ' ');
+
+    const raw = normalized
+      .split(/\n+/)
       .map((l) => l.trim())
       .filter(Boolean)
       .filter((l) => !/^\[(COVER|AGENDA|CONTENT|CONCLUSION)\]/i.test(l))
-      .map((l) => l.replace(/^[-•*]\s+/, '').replace(/^(User|Assistant)\s*:\s*/i, '').trim())
-      .filter((l) => l.length > 20 && l.length < 180);
+      .filter((l) => !/^source thread/i.test(l))
+      .filter((l) => !/^agenda items derived/i.test(l))
+      .filter((l) => !/derive visible title/i.test(l))
+      .filter((l) => !/training overview/i.test(l))
+      .filter((l) => !/closing summary grounded/i.test(l))
+      .map((l) => l.replace(/^[-•*]\s+/, '').replace(/^\d+[.)]\s+/, '').replace(/^(User|Assistant)\s*:\s*/i, '').trim())
+      .filter((l) => l.length > 18 && l.length < 180);
     const dedup: string[] = [];
     for (const line of raw) {
       if (!dedup.includes(line)) dedup.push(line);
@@ -61,7 +76,13 @@ export class ImageGenerationService {
     index?: number;
     total?: number;
   }): Buffer {
-    const title = String(params.title || 'Slide').slice(0, 92);
+    const title = String(params.title || 'Slide')
+      .replace(/\*\*(.*?)\*\*/g, '$1')
+      .replace(/^#+\s*/, '')
+      .replace(/[*_`#]+/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+      .slice(0, 92);
     const trainingTitle = String(params.trainingTitle || 'Formation').slice(0, 100);
     const bullets = this.pickBulletsFromPrompt(params.prompt, 4);
     const lines = bullets.map((b) => this.escapeXml(b.slice(0, 115)));
