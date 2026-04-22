@@ -1788,6 +1788,9 @@ export const chat = async (
     const isFreeChatMode = String(parsedContext?.chatStyle || '').toLowerCase() === 'free_chat';
     const requestedOutput = String(parsedContext?.requestedOutput || '').toLowerCase();
     const requestedModuleReference = String(parsedContext?.requestedModuleReference || '').trim();
+    const isPlanIntent = requestedOutput === 'training_plan';
+    const isModuleIntent = requestedOutput === 'module_content';
+    const isFullTrainingIntent = requestedOutput === 'full_training_content';
     const inferredDomain = inferKbDomainFromContext(parsedContext);
     const effectiveContextString =
       parsedContext && typeof parsedContext === 'object'
@@ -1837,7 +1840,7 @@ export const chat = async (
         ? gigGrounding.systemRules
         : ['Do NOT mention or infer company name, gig name, or gig description unless explicitly provided by user in current message.']),
       requestedOutput === 'training_plan'
-        ? 'INTENT LOCK = TRAINING PLAN: user is asking for a plan. Return a structured training plan only (program architecture, modules, learning goals per module, suggested activities). Do NOT generate the full detailed course body of each module.'
+        ? 'INTENT LOCK = TRAINING PLAN: user is asking for a plan. Return a structured training plan only (program architecture, modules, learning goals per module, suggested activities). Do NOT generate the full detailed course body of each module. Start immediately with the plan, do NOT ask preliminary clarification questions first.'
         : '',
       requestedOutput === 'full_training_content'
         ? 'INTENT LOCK = FULL TRAINING CONTENT: user is asking for a complete training content. Return complete learner-facing content across modules with substantial detail, examples, and practical exercises (slide-ready markdown style).'
@@ -1850,6 +1853,16 @@ export const chat = async (
       'NEVER include fake UI buttons, markdown button syntax, or "Valider / Enregistrer" controls in your reply; the app shows validation actions separately when appropriate.'
     ].join(' ');
 
+    const isWeakPlanDraft = (value: string): boolean => {
+      const txt = String(value || '').trim();
+      if (!txt) return true;
+      const moduleHits = (txt.match(/module\s*\d+/gi) || []).length;
+      const lineCount = txt.split('\n').filter((l) => l.trim()).length;
+      const startsWithQuestion = /^\s*(avant|pour commencer|j['’]ai besoin|peux-tu|quel|quelle|quels|quelles)\b/i.test(txt);
+      const questionMarks = (txt.match(/\?/g) || []).length;
+      return moduleHits < 2 || lineCount < 8 || startsWithQuestion || questionMarks >= 4;
+    };
+
     const streamEnabled = String(req.query.stream ?? 'true').toLowerCase() !== 'false';
     const shouldValidateDomain = inferredDomain.kbKeywords.length > 0;
     if (!streamEnabled) {
@@ -1861,6 +1874,10 @@ export const chat = async (
       if (shouldValidateDomain && isKbTopicMismatch(String(response || ''), inferredDomain.kbKeywords)) {
         const correctiveSystemPrompt = `${systemPrompt} CRITICAL DOMAIN LOCK: ${inferredDomain.strictTopicGuard} If draft is off-domain, regenerate fully in the correct domain.`;
         response = await aiService.generateWithClaude(prompt, correctiveSystemPrompt, anthropicKey);
+      }
+      if (isPlanIntent && isWeakPlanDraft(String(response || ''))) {
+        const correctivePlanPrompt = `${systemPrompt} HARD PLAN FORMAT: Output a complete training plan immediately with at least 4 modules labelled "Module 1", "Module 2", etc. Each module must include objectives and key topics. Do not start with clarification questions.`;
+        response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
       }
       let finalResponse = await ensureVisualResponseContract(
         String(response || ''),
@@ -1924,12 +1941,17 @@ export const chat = async (
     }
 
     let fullResponse = '';
-    if (shouldValidateDomain) {
+    const forceLockedIntentResponse = isPlanIntent || isModuleIntent || isFullTrainingIntent;
+    if (shouldValidateDomain || forceLockedIntentResponse) {
       // For strict domain lock, generate once then stream-safe write validated content.
       let response = await aiService.generateWithClaude(prompt, systemPrompt, anthropicKey);
       if (isKbTopicMismatch(String(response || ''), inferredDomain.kbKeywords)) {
         const correctiveSystemPrompt = `${systemPrompt} CRITICAL DOMAIN LOCK: ${inferredDomain.strictTopicGuard} If draft is off-domain, regenerate fully in the correct domain.`;
         response = await aiService.generateWithClaude(prompt, correctiveSystemPrompt, anthropicKey);
+      }
+      if (isPlanIntent && isWeakPlanDraft(String(response || ''))) {
+        const correctivePlanPrompt = `${systemPrompt} HARD PLAN FORMAT: Output a complete training plan immediately with at least 4 modules labelled "Module 1", "Module 2", etc. Each module must include objectives and key topics. Do not start with clarification questions.`;
+        response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
       }
       fullResponse = String(response || '');
       res.write(fullResponse);
