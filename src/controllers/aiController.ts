@@ -499,7 +499,10 @@ const extractSlideBulletsFromText = (text: string, maxBullets = 4): string[] => 
     .filter((l) => !/^agenda items derived/i.test(l))
     .filter((l) => !/derive visible title/i.test(l))
     .filter((l) => !/stay faithful/i.test(l))
-    .filter((l) => !/training overview for/i.test(l));
+    .filter((l) => !/training overview for/i.test(l))
+    .filter((l) => !/^(parfait|ah d['’]accord|non juste|bonjour|salut)\b/i.test(l))
+    .filter((l) => !/\b(je te pr[ée]pare|tu veux|peux-tu me confirmer|dis-moi simplement)\b/i.test(l))
+    .filter((l) => !/\b(script podcast|dur[ée]e cible|accroche percutante|ton conversationnel)\b/i.test(l));
 
   const out: string[] = [];
   const seen = new Set<string>();
@@ -530,6 +533,38 @@ const extractSlideBulletsFromText = (text: string, maxBullets = 4): string[] => 
         0,
         maxBullets
       );
+};
+
+const extractLastPedagogicalAssistantBlock = (primaryChat: string): string => {
+  const text = String(primaryChat || '');
+  if (!text) return '';
+  const blocks = text
+    .split(/\n(?=Assistant:\s*)/g)
+    .map((b) => b.trim())
+    .filter((b) => /^Assistant:\s*/i.test(b))
+    .map((b) => b.replace(/^Assistant:\s*/i, '').trim());
+  if (blocks.length === 0) return '';
+
+  const quality = (b: string): number => {
+    const hasPedagogy = /\b(module|plan|objectifs?|conclusion|exclusion|indemnisation|sinistre|formation|cl[ée]s?)\b/i.test(b) ? 6 : 0;
+    const hasBullets = /(^|\n)\s*([-•*]|\d+[.)])\s+/m.test(b) ? 5 : 0;
+    const hasHeading = /(^|\n)\s*#{1,3}\s+/m.test(b) ? 4 : 0;
+    const tooConversational = /\b(peux-tu|dis-moi|je peux|je te)\b/i.test(b) ? -5 : 0;
+    return hasPedagogy + hasBullets + hasHeading + tooConversational + Math.min(6, Math.floor(b.length / 500));
+  };
+
+  // Prefer latest good pedagogical block.
+  let best = blocks[blocks.length - 1];
+  let bestScore = -Infinity;
+  for (let i = blocks.length - 1; i >= Math.max(0, blocks.length - 8); i -= 1) {
+    const b = blocks[i];
+    const s = quality(b);
+    if (s >= bestScore) {
+      bestScore = s;
+      best = b;
+    }
+  }
+  return best;
 };
 
 const normalizeStoryboardRows = (rows: any[], maxImages: number): Array<{ title: string; prompt: string }> => {
@@ -703,7 +738,9 @@ const buildStructuredSlidesFromDigest = (params: {
   const trainingDigest = String(params.trainingDigest || '');
   const titleBase = inferBrandingTitleForSlides(trainingDigest, String(params.trainingTitle || '').trim());
   const primary = extractPrimaryChatTrainingBlock(trainingDigest);
-  const chunks = chunkTextForSlides(primary || trainingDigest, Math.max(maxSlides, 10), 2200);
+  const assistantPedagogical = extractLastPedagogicalAssistantBlock(primary);
+  const sourceText = assistantPedagogical || primary || trainingDigest;
+  const chunks = chunkTextForSlides(sourceText, Math.max(maxSlides, 10), 2200);
   const agendaBullets = extractSlideBulletsFromText(chunks.slice(0, 3).join('\n'), 6);
   const slides: StructuredTrainingSlide[] = [];
 
@@ -711,7 +748,7 @@ const buildStructuredSlidesFromDigest = (params: {
     index: 1,
     kind: 'cover',
     title: titleBase,
-    bullets: extractSlideBulletsFromText(primary.slice(0, 1200) || trainingDigest.slice(0, 1200), 3),
+    bullets: extractSlideBulletsFromText(sourceText.slice(0, 1400), 3),
     notes: 'Introduction',
   });
   slides.push({
@@ -723,7 +760,7 @@ const buildStructuredSlidesFromDigest = (params: {
 
   const contentCount = Math.max(1, maxSlides - 3);
   for (let i = 0; i < contentCount; i += 1) {
-    const c = chunks[i] || chunks[chunks.length - 1] || trainingDigest;
+    const c = chunks[i] || chunks[chunks.length - 1] || sourceText;
     const t = slideTitleFromChunk(c, language.startsWith('fr') ? `Contenu ${i + 1}` : `Content ${i + 1}`);
     slides.push({
       index: slides.length + 1,
@@ -738,11 +775,85 @@ const buildStructuredSlidesFromDigest = (params: {
     index: slides.length + 1,
     kind: 'conclusion',
     title: language.startsWith('fr') ? 'Conclusion' : 'Conclusion',
-    bullets: extractSlideBulletsFromText(primary.slice(-1800) || trainingDigest.slice(-1800), 4),
+    bullets: extractSlideBulletsFromText(sourceText.slice(-2200), 4),
     notes: language.startsWith('fr') ? 'Messages a retenir' : 'Key takeaways',
   });
 
   return { title: titleBase, language, slides: slides.slice(0, maxSlides) };
+};
+
+const generateStructuredSlidesWithClaude = async (params: {
+  trainingDigest: string;
+  trainingTitle?: string;
+  language: string;
+  maxSlides: number;
+  anthropicKey?: string;
+}): Promise<{ title: string; language: string; slides: StructuredTrainingSlide[] }> => {
+  const titleBase = inferBrandingTitleForSlides(params.trainingDigest, String(params.trainingTitle || '').trim());
+  const lang = String(params.language || 'fr').toLowerCase();
+  const maxSlides = Math.min(Math.max(Number(params.maxSlides || 12), 3), 30);
+  const primary = extractPrimaryChatTrainingBlock(params.trainingDigest);
+  const pedagogical = extractLastPedagogicalAssistantBlock(primary);
+  const source = (pedagogical || primary || params.trainingDigest).slice(-22000);
+
+  const prompt = [
+    'Create structured pedagogical slides JSON from this training chat content.',
+    `Language: ${lang}`,
+    `Max slides: ${maxSlides}`,
+    `Course title seed: ${titleBase}`,
+    '',
+    'SOURCE CONTENT (authoritative):',
+    source,
+    '',
+    'Return ONLY valid JSON with this exact schema:',
+    '{"title":"", "language":"fr", "slides":[{"index":1,"kind":"cover|agenda|content|conclusion","title":"","bullets":[""],"notes":""}]}',
+    'Rules:',
+    '- Base every bullet on source content (no meta-dialogue, no "I prepare", no Q/A chatter).',
+    '- Cover/agenda/content/conclusion progression.',
+    '- 3 to 5 bullets per slide, concise, professional.',
+    '- Remove markdown symbols (** ### etc).',
+    '- Keep slide titles short and meaningful.',
+  ].join('\n');
+
+  const raw = await aiService.generateWithClaude(
+    prompt,
+    'You generate strict JSON training slides only.',
+    params.anthropicKey,
+    4000,
+    { temperature: 0.2, preferredModels: [String(process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5')] }
+  );
+  const parsed = aiService.parseJson(String(raw || ''), 'structuredSlides');
+  const slidesIn = Array.isArray(parsed?.slides) ? parsed.slides : [];
+  const slides: StructuredTrainingSlide[] = slidesIn
+    .map((s: any, idx: number) => ({
+      index: idx + 1,
+      kind:
+        s?.kind === 'cover' || s?.kind === 'agenda' || s?.kind === 'content' || s?.kind === 'conclusion'
+          ? s.kind
+          : idx === 0
+            ? 'cover'
+            : idx === 1
+              ? 'agenda'
+              : idx === slidesIn.length - 1
+                ? 'conclusion'
+                : 'content',
+      title: String(s?.title || '').replace(/[*_`#]+/g, '').trim().slice(0, 120),
+      bullets: (Array.isArray(s?.bullets) ? s.bullets : [])
+        .map((b: any) => String(b || '').replace(/[*_`#]+/g, '').trim())
+        .filter(Boolean)
+        .slice(0, 5),
+      notes: s?.notes ? String(s.notes).slice(0, 240) : undefined,
+    }))
+    .filter((s: StructuredTrainingSlide) => s.title && s.bullets.length > 0)
+    .slice(0, maxSlides);
+  if (slides.length < 3) {
+    throw new Error('Claude structured slides result too small');
+  }
+  return {
+    title: String(parsed?.title || titleBase).trim().slice(0, 180) || titleBase,
+    language: String(parsed?.language || lang).trim() || lang,
+    slides,
+  };
 };
 
 const processTrainingImageJob = async (
@@ -2706,17 +2817,44 @@ export const generateTrainingSlidesJson = async (
     const trainingTitle = String(req.body?.trainingTitle || '').trim();
     const language = String(req.body?.language || 'fr').trim().toLowerCase() || 'fr';
     const maxSlides = Math.min(Math.max(Number(req.body?.maxSlides || 12), 3), 30);
+    const generator = String(req.body?.generator || 'ai').trim().toLowerCase();
     if (!trainingDigest) {
       return res.status(400).json({ success: false, error: 'trainingDigest is required' });
     }
-    const structured = buildStructuredSlidesFromDigest({
-      trainingDigest,
-      trainingTitle,
-      language,
-      maxSlides,
-    });
+    let structured: { title: string; language: string; slides: StructuredTrainingSlide[] };
+    if (generator === 'deterministic') {
+      structured = buildStructuredSlidesFromDigest({
+        trainingDigest,
+        trainingTitle,
+        language,
+        maxSlides,
+      });
+    } else {
+      try {
+        const anthropicKey =
+          String(req.headers['x-anthropic-api-key'] || '').trim() ||
+          String(req.body?.anthropicApiKey || '').trim() ||
+          undefined;
+        structured = await generateStructuredSlidesWithClaude({
+          trainingDigest,
+          trainingTitle,
+          language,
+          maxSlides,
+          anthropicKey,
+        });
+      } catch (aiErr) {
+        console.warn('[training-slides-json] Claude generation failed, fallback deterministic:', aiErr);
+        structured = buildStructuredSlidesFromDigest({
+          trainingDigest,
+          trainingTitle,
+          language,
+          maxSlides,
+        });
+      }
+    }
     return res.json({
       success: true,
+      generator: generator === 'deterministic' ? 'deterministic' : 'ai',
       title: structured.title,
       language: structured.language,
       slides: structured.slides,
