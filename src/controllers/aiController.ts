@@ -1875,6 +1875,8 @@ export const chat = async (
             '- Prefer noun phrases (2-8 words), avoid full sentence grammar',
             '- Avoid period "." at the end of bullets',
             '- If needed, use "Titre : detail tres court" format, but keep it concise',
+            '- Nested headings are allowed but MUST use bullet syntax only: "- Sous-theme:" then indented bullets "  - item"',
+            '- Never use numbered lists (1., 2., 3.) inside modules; always use dash bullets',
             'PLAN TEMPLATE (must follow):',
             '- Formation : <titre>',
             '- 🟢 Module 1 : <titre>',
@@ -1887,6 +1889,10 @@ export const chat = async (
             '  - <activite 1>',
             '- 📊 Indicateur d\'evaluation',
             '  - <indicateur>',
+            '- Optional nested example:',
+            '  - Processus d\'integration:',
+            '    - Etape de cadrage',
+            '    - Parametrage initial',
             '- Repeat same structure for Module 2, Module 3, Module 4+',
           ].join('\n')
         : '',
@@ -1982,7 +1988,11 @@ export const chat = async (
         const hasTerminalPunctuation = /[.!?]\s*$/.test(body);
         return wordCount > 14 || hasTerminalPunctuation;
       }).length;
-      return moduleHits < 2 || lineCount < 8 || startsWithQuestion || questionMarks >= 4 || !hasObjectives || !hasTopics || !hasPractice || !hasEvaluation || longSentenceBullets >= 2;
+      const numberedListLines = txt
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => /^\d+[.)]\s+/.test(l)).length;
+      return moduleHits < 2 || lineCount < 8 || startsWithQuestion || questionMarks >= 4 || !hasObjectives || !hasTopics || !hasPractice || !hasEvaluation || longSentenceBullets >= 2 || numberedListLines >= 2;
     };
 
     const buildStylePresetByIntent = (intent: string) => {
@@ -2141,6 +2151,8 @@ STRICT OUTPUT RULE:
 - No plain paragraph lines inside module sections
 - Bullets must be short title-like phrases (2-8 words ideally)
 - Avoid long explanatory sentences and avoid final punctuation in bullets
+- Nested headings must be in bullet form: "- Sous-theme:" then "  - item"
+- Never use numbered list items (1., 2., 3.) in modules
 
 FAILURE CONDITION:
 If format is not respected, regenerate again until compliance.`;
@@ -2243,6 +2255,8 @@ STRICT OUTPUT RULE:
 - No plain paragraph lines inside module sections
 - Bullets must be short title-like phrases (2-8 words ideally)
 - Avoid long explanatory sentences and avoid final punctuation in bullets
+- Nested headings must be in bullet form: "- Sous-theme:" then "  - item"
+- Never use numbered list items (1., 2., 3.) in modules
 
 FAILURE CONDITION:
 If format is not respected, regenerate again until compliance.`;
