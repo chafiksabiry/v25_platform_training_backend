@@ -535,6 +535,34 @@ const extractSlideBulletsFromText = (text: string, maxBullets = 4): string[] => 
       );
 };
 
+const buildDefaultBlocksFromBullets = (
+  title: string,
+  bullets: string[],
+  notes?: string
+): StructuredSlideBlock[] => {
+  const out: StructuredSlideBlock[] = [];
+  const cleanBullets = (Array.isArray(bullets) ? bullets : []).filter(Boolean).slice(0, 6);
+  if (cleanBullets.length > 0) {
+    out.push({ type: 'bullets', title, items: cleanBullets });
+  }
+  if (cleanBullets.length > 0) {
+    const statLike = cleanBullets.find((b) => /\d+[%kKmM]?|\beuros?\b|\bans?\b|\bheures?\b/i.test(b));
+    if (statLike) {
+      const m = statLike.match(/(\d+[%kKmM]?)/);
+      out.push({
+        type: 'stat',
+        value: m?.[1] || statLike.slice(0, 24),
+        label: 'Indicateur clé',
+        source: statLike.slice(0, 120),
+      });
+    }
+  }
+  if (notes) {
+    out.push({ type: 'quote', text: notes.slice(0, 220) });
+  }
+  return out;
+};
+
 const extractLastPedagogicalAssistantBlock = (primaryChat: string): string => {
   const text = String(primaryChat || '');
   if (!text) return '';
@@ -726,12 +754,27 @@ type StructuredTrainingSlide = {
   bullets: string[];
   notes?: string;
   layout?: 'standard' | 'split' | 'highlight' | 'timeline';
+  blocks?: StructuredSlideBlock[];
+};
+
+type StructuredSlideBlock = {
+  type: 'paragraph' | 'bullets' | 'kpi' | 'quote' | 'table' | 'stat' | 'image_prompt';
+  title?: string;
+  text?: string;
+  items?: string[];
+  value?: string;
+  label?: string;
+  headers?: string[];
+  rows?: string[][];
+  source?: string;
 };
 
 type StructuredTrainingTheme = {
   template: 'corporate' | 'dark' | 'minimal' | 'learning' | 'executive';
   accentColor: string;
   backgroundStyle?: 'light' | 'gradient' | 'dark';
+  coverImageUrl?: string;
+  coverImagePrompt?: string;
 };
 
 const buildStructuredSlidesFromDigest = (params: {
@@ -758,6 +801,7 @@ const buildStructuredSlidesFromDigest = (params: {
     bullets: extractSlideBulletsFromText(sourceText.slice(0, 1400), 3),
     notes: 'Introduction',
     layout: 'highlight',
+    blocks: buildDefaultBlocksFromBullets(titleBase, extractSlideBulletsFromText(sourceText.slice(0, 1400), 3), 'Introduction'),
   });
   slides.push({
     index: 2,
@@ -765,29 +809,41 @@ const buildStructuredSlidesFromDigest = (params: {
     title: language.startsWith('fr') ? 'Plan de formation' : 'Training agenda',
     bullets: agendaBullets.length ? agendaBullets : [language.startsWith('fr') ? 'Objectifs de la session' : 'Session goals'],
     layout: 'timeline',
+    blocks: buildDefaultBlocksFromBullets(
+      language.startsWith('fr') ? 'Plan' : 'Agenda',
+      agendaBullets.length ? agendaBullets : [language.startsWith('fr') ? 'Objectifs de la session' : 'Session goals']
+    ),
   });
 
   const contentCount = Math.max(1, maxSlides - 3);
   for (let i = 0; i < contentCount; i += 1) {
     const c = chunks[i] || chunks[chunks.length - 1] || sourceText;
     const t = slideTitleFromChunk(c, language.startsWith('fr') ? `Contenu ${i + 1}` : `Content ${i + 1}`);
+    const contentBullets = extractSlideBulletsFromText(c, 5);
     slides.push({
       index: slides.length + 1,
       kind: 'content',
       title: t,
-      bullets: extractSlideBulletsFromText(c, 5),
+      bullets: contentBullets,
       layout: i % 2 === 0 ? 'standard' : 'split',
+      blocks: buildDefaultBlocksFromBullets(t, contentBullets),
     });
     if (slides.length >= maxSlides - 1) break;
   }
 
+  const conclusionBullets = extractSlideBulletsFromText(sourceText.slice(-2200), 4);
   slides.push({
     index: slides.length + 1,
     kind: 'conclusion',
     title: language.startsWith('fr') ? 'Conclusion' : 'Conclusion',
-    bullets: extractSlideBulletsFromText(sourceText.slice(-2200), 4),
+    bullets: conclusionBullets,
     notes: language.startsWith('fr') ? 'Messages a retenir' : 'Key takeaways',
     layout: 'highlight',
+    blocks: buildDefaultBlocksFromBullets(
+      language.startsWith('fr') ? 'À retenir' : 'Key takeaways',
+      conclusionBullets,
+      language.startsWith('fr') ? 'Messages a retenir' : 'Key takeaways'
+    ),
   });
 
   return {
@@ -822,13 +878,14 @@ const generateStructuredSlidesWithClaude = async (params: {
     source,
     '',
     'Return ONLY valid JSON with this exact schema:',
-    '{"title":"", "language":"fr", "theme":{"template":"corporate|dark|minimal|learning|executive","accentColor":"#RRGGBB","backgroundStyle":"light|gradient|dark"},"slides":[{"index":1,"kind":"cover|agenda|content|conclusion","layout":"standard|split|highlight|timeline","title":"","bullets":[""],"notes":""}]}',
+    '{"title":"", "language":"fr", "theme":{"template":"corporate|dark|minimal|learning|executive","accentColor":"#RRGGBB","backgroundStyle":"light|gradient|dark"},"slides":[{"index":1,"kind":"cover|agenda|content|conclusion","layout":"standard|split|highlight|timeline","title":"","bullets":[""],"notes":"","blocks":[{"type":"paragraph|bullets|kpi|quote|table|stat|image_prompt","title":"","text":"","items":[""],"value":"","label":"","headers":[""],"rows":[[""]],"source":""}]}]}',
     'Rules:',
     '- Base every bullet on source content (no meta-dialogue, no "I prepare", no Q/A chatter).',
     '- Cover/agenda/content/conclusion progression.',
     '- 3 to 5 bullets per slide, concise, professional.',
     '- Remove markdown symbols (** ### etc).',
     '- Keep slide titles short and meaningful.',
+    '- Prefer rich blocks in "blocks": mix bullets, paragraph, stat/kpi, quote, simple table when relevant.',
   ].join('\n');
 
   const raw = await aiService.generateWithClaude(
@@ -867,8 +924,42 @@ const generateStructuredSlidesWithClaude = async (params: {
         .filter(Boolean)
         .slice(0, 5),
       notes: s?.notes ? String(s.notes).slice(0, 240) : undefined,
+      blocks: Array.isArray(s?.blocks)
+        ? (s.blocks as any[])
+            .map((b: any) => ({
+              type:
+                b?.type === 'paragraph' ||
+                b?.type === 'bullets' ||
+                b?.type === 'kpi' ||
+                b?.type === 'quote' ||
+                b?.type === 'table' ||
+                b?.type === 'stat' ||
+                b?.type === 'image_prompt'
+                  ? b.type
+                  : 'paragraph',
+              title: b?.title ? String(b.title).slice(0, 120) : undefined,
+              text: b?.text ? String(b.text).slice(0, 500) : undefined,
+              items: Array.isArray(b?.items) ? b.items.map((x: any) => String(x).slice(0, 160)).filter(Boolean).slice(0, 8) : undefined,
+              value: b?.value ? String(b.value).slice(0, 40) : undefined,
+              label: b?.label ? String(b.label).slice(0, 80) : undefined,
+              headers: Array.isArray(b?.headers) ? b.headers.map((x: any) => String(x).slice(0, 40)).filter(Boolean).slice(0, 5) : undefined,
+              rows: Array.isArray(b?.rows)
+                ? b.rows
+                    .map((r: any) => (Array.isArray(r) ? r.map((c: any) => String(c).slice(0, 80)).slice(0, 5) : []))
+                    .filter((r: string[]) => r.length > 0)
+                    .slice(0, 6)
+                : undefined,
+              source: b?.source ? String(b.source).slice(0, 120) : undefined,
+            }))
+            .filter((b: StructuredSlideBlock) => b.type && (b.text || (b.items && b.items.length) || b.value || (b.rows && b.rows.length)))
+            .slice(0, 6)
+        : undefined,
     }))
-    .filter((s: StructuredTrainingSlide) => s.title && s.bullets.length > 0)
+    .map((s: StructuredTrainingSlide) => ({
+      ...s,
+      blocks: s.blocks && s.blocks.length > 0 ? s.blocks : buildDefaultBlocksFromBullets(s.title, s.bullets, s.notes),
+    }))
+    .filter((s: StructuredTrainingSlide) => s.title && (s.bullets.length > 0 || (s.blocks && s.blocks.length > 0)))
     .slice(0, maxSlides);
   if (slides.length < 3) {
     throw new Error('Claude structured slides result too small');
@@ -892,6 +983,37 @@ const generateStructuredSlidesWithClaude = async (params: {
     },
     slides,
   };
+};
+
+const generateStructuredCoverImage = async (params: {
+  title: string;
+  language: string;
+  bullets: string[];
+}): Promise<{ coverImageUrl?: string; coverImagePrompt?: string }> => {
+  try {
+    const lang = String(params.language || 'fr').toLowerCase();
+    const bullets = (params.bullets || []).slice(0, 4).join(' | ').slice(0, 320);
+    const prompt = [
+      lang.startsWith('fr')
+        ? `Couverture de formation: ${params.title}.`
+        : `Training cover: ${params.title}.`,
+      lang.startsWith('fr')
+        ? 'Illustration corporate moderne, professionnelle, 16:9, sans texte incruste.'
+        : 'Modern corporate 16:9 cover illustration, no embedded text.',
+      bullets ? `Key themes: ${bullets}` : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const imgBuffer = await ImageGenerationService.generateImageBuffer(prompt, undefined, 'thumbnail');
+    const uploaded = await cloudinaryService.uploadImageBuffer(imgBuffer, 'training-images/generated', 'png');
+    return {
+      coverImageUrl: uploaded.url,
+      coverImagePrompt: prompt,
+    };
+  } catch (e: any) {
+    console.warn('[training-slides-json] Cover image generation failed:', String(e?.message || e));
+    return {};
+  }
 };
 
 const processTrainingImageJob = async (
@@ -2856,6 +2978,7 @@ export const generateTrainingSlidesJson = async (
     const language = String(req.body?.language || 'fr').trim().toLowerCase() || 'fr';
     const maxSlides = Math.min(Math.max(Number(req.body?.maxSlides || 12), 3), 30);
     const generator = String(req.body?.generator || 'ai').trim().toLowerCase();
+    const withCoverImage = req.body?.withCoverImage !== false;
     if (!trainingDigest) {
       return res.status(400).json({ success: false, error: 'trainingDigest is required' });
     }
@@ -2889,6 +3012,18 @@ export const generateTrainingSlidesJson = async (
           maxSlides,
         });
       }
+    }
+    if (withCoverImage && Array.isArray(structured.slides) && structured.slides.length > 0) {
+      const first = structured.slides[0];
+      const coverAsset = await generateStructuredCoverImage({
+        title: structured.title || first?.title || trainingTitle || 'Formation',
+        language: structured.language || language,
+        bullets: Array.isArray(first?.bullets) ? first.bullets : [],
+      });
+      structured.theme = {
+        ...structured.theme,
+        ...coverAsset,
+      };
     }
     return res.json({
       success: true,
