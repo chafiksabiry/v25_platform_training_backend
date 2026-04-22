@@ -1841,13 +1841,89 @@ export const chat = async (
         ? gigGrounding.systemRules
         : ['Do NOT mention or infer company name, gig name, or gig description unless explicitly provided by user in current message.']),
       requestedOutput === 'training_plan'
-        ? 'INTENT LOCK = TRAINING PLAN: user is asking for a plan. Return a structured training plan only (program architecture, modules, learning goals per module, suggested activities). Do NOT generate the full detailed course body of each module. Start immediately with the plan, do NOT ask preliminary clarification questions first.'
+        ? [
+            'INTENT LOCK = TRAINING PLAN',
+            'The user is requesting a structured training plan.',
+            'You MUST return ONLY a high-level training architecture (NO full lessons, NO detailed explanations).',
+            'STRICT RULES:',
+            '- Do NOT generate full course content',
+            '- Do NOT include long explanations or examples',
+            '- Do NOT ask clarification questions',
+            '- Start immediately with the plan',
+            'FORMAT REQUIREMENTS:',
+            '- Minimum 4 modules',
+            '- Each module MUST be labeled exactly: "Module 1", "Module 2", etc.',
+            '- Each module MUST include:',
+            '  - Title',
+            '  - Learning Objectives (3-5 bullets max)',
+            '  - Key Topics (3-6 bullets max)',
+            '  - Suggested Activities (practical + interactive)',
+            'PEDAGOGICAL RULE:',
+            '- Modules must follow a clear progression (basic -> advanced)',
+            '- Each module must build on the previous one',
+            '360 RULE (IMPORTANT):',
+            '- Include at least one "Practice Activity" per module',
+            '- Include at least one "Evaluation Indicator" per module (what proves mastery)',
+            'OUTPUT STYLE:',
+            '- Clean structured markdown',
+            '- No introduction',
+            '- No explanations outside modules',
+            '- Start immediately with Module 1',
+          ].join('\n')
         : '',
       requestedOutput === 'full_training_content'
-        ? 'INTENT LOCK = FULL TRAINING CONTENT: user is asking for a complete training content. Return complete learner-facing content across modules with substantial detail, examples, and practical exercises (slide-ready markdown style).'
+        ? [
+            'INTENT LOCK = FULL TRAINING CONTENT',
+            'The user is requesting complete training content.',
+            'You MUST generate a full learner-facing course.',
+            'RULES:',
+            '- Expand ALL modules into detailed learning content',
+            '- Include explanations, examples, and step-by-step guidance',
+            '- Include practical exercises for each module',
+            '- Include mini quizzes (3-5 questions per module)',
+            'STRUCTURE PER MODULE:',
+            '- Title',
+            '- Objectives',
+            '- Detailed Explanation',
+            '- Real-world Examples',
+            '- Hands-on Exercise',
+            '- Mini Quiz',
+            '- Summary',
+            '360 REQUIREMENT:',
+            '- Add reflection questions at the end of each module',
+            '- Add self-assessment section (1-5 rating scale)',
+            '- Add peer review instruction',
+            'STYLE:',
+            '- Educational, clear, structured',
+            '- No fluff',
+            '- Focus on learning by doing',
+          ].join('\n')
         : '',
       requestedOutput === 'module_content'
-        ? `INTENT LOCK = MODULE CONTENT: user is asking for one module only${requestedModuleReference ? ` (${requestedModuleReference})` : ''}. Return only that module content in depth (objectives, explanation, examples, practice, quick check). Do NOT regenerate the whole training plan.`
+        ? [
+            'INTENT LOCK = MODULE CONTENT',
+            `The user is requesting a single module${requestedModuleReference ? ` (${requestedModuleReference})` : ''}.`,
+            'RULES:',
+            '- Generate ONLY the requested module',
+            '- Do NOT generate other modules',
+            '- Do NOT generate full course structure',
+            'STRUCTURE:',
+            '- Module Title',
+            '- Learning Objectives (3-5)',
+            '- Deep Explanation',
+            '- Examples',
+            '- Practical Exercise',
+            '- Quick Quiz (3-5 questions)',
+            '- Self-Assessment Questions',
+            '- Skill Validation Criteria',
+            '360 REQUIREMENT:',
+            '- Include at least 1 reflection question',
+            '- Include 1 peer review instruction',
+            '- Include a success/failure indicator',
+            'STYLE:',
+            '- Deep and practical',
+            '- Focus on understanding + application',
+          ].join('\n')
         : '',
       requiresTypedStyle
         ? 'STYLE LOCK: append exactly one <harx-style>{...}</harx-style> JSON block at the END of your answer.'
@@ -1873,7 +1949,11 @@ export const chat = async (
       const lineCount = txt.split('\n').filter((l) => l.trim()).length;
       const startsWithQuestion = /^\s*(avant|pour commencer|j['’]ai besoin|peux-tu|quel|quelle|quels|quelles)\b/i.test(txt);
       const questionMarks = (txt.match(/\?/g) || []).length;
-      return moduleHits < 2 || lineCount < 8 || startsWithQuestion || questionMarks >= 4;
+      const hasObjectives = /(learning objectives|objectifs? d['’]apprentissage|objectifs?)/i.test(txt);
+      const hasTopics = /(key topics|th[eè]mes cl[eé]s|sujets cl[eé]s|topics)/i.test(txt);
+      const hasPractice = /(practice activity|activit[eé] pratique|mise en pratique|atelier)/i.test(txt);
+      const hasEvaluation = /(evaluation indicator|indicateur d['’]?[eé]valuation|crit[eè]re d['’]?[eé]valuation)/i.test(txt);
+      return moduleHits < 2 || lineCount < 8 || startsWithQuestion || questionMarks >= 4 || !hasObjectives || !hasTopics || !hasPractice || !hasEvaluation;
     };
 
     const buildStylePresetByIntent = (intent: string) => {
@@ -2007,7 +2087,30 @@ export const chat = async (
         response = await aiService.generateWithClaude(prompt, correctiveSystemPrompt, anthropicKey);
       }
       if (isPlanIntent && isWeakPlanDraft(String(response || ''))) {
-        const correctivePlanPrompt = `${systemPrompt} HARD PLAN FORMAT: Output a complete training plan immediately with at least 4 modules labelled "Module 1", "Module 2", etc. Each module must include objectives and key topics. Do not start with clarification questions.`;
+        const correctivePlanPrompt = `${systemPrompt}
+HARD PLAN FORMAT ENFORCEMENT
+
+You failed to produce a valid structured training plan.
+You MUST regenerate a complete training plan immediately.
+
+MANDATORY RULES:
+- Minimum 4 modules
+- Modules must be progressive (basic -> advanced)
+- Each module MUST include:
+  - Title
+  - Objectives (3-5 bullets)
+  - Key Topics (3-6 bullets)
+  - Practical Activity
+  - Evaluation Indicator
+
+STRICT OUTPUT RULE:
+- NO questions
+- NO introduction
+- NO explanations
+- ONLY structured modules starting from Module 1
+
+FAILURE CONDITION:
+If format is not respected, regenerate again until compliance.`;
         response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
       }
       let finalResponse = await ensureVisualResponseContract(
@@ -2082,7 +2185,30 @@ export const chat = async (
         response = await aiService.generateWithClaude(prompt, correctiveSystemPrompt, anthropicKey);
       }
       if (isPlanIntent && isWeakPlanDraft(String(response || ''))) {
-        const correctivePlanPrompt = `${systemPrompt} HARD PLAN FORMAT: Output a complete training plan immediately with at least 4 modules labelled "Module 1", "Module 2", etc. Each module must include objectives and key topics. Do not start with clarification questions.`;
+        const correctivePlanPrompt = `${systemPrompt}
+HARD PLAN FORMAT ENFORCEMENT
+
+You failed to produce a valid structured training plan.
+You MUST regenerate a complete training plan immediately.
+
+MANDATORY RULES:
+- Minimum 4 modules
+- Modules must be progressive (basic -> advanced)
+- Each module MUST include:
+  - Title
+  - Objectives (3-5 bullets)
+  - Key Topics (3-6 bullets)
+  - Practical Activity
+  - Evaluation Indicator
+
+STRICT OUTPUT RULE:
+- NO questions
+- NO introduction
+- NO explanations
+- ONLY structured modules starting from Module 1
+
+FAILURE CONDITION:
+If format is not respected, regenerate again until compliance.`;
         response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
       }
       fullResponse = String(response || '');
