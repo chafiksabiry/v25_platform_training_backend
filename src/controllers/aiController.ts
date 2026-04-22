@@ -1779,11 +1779,15 @@ export const chat = async (
       mergeFromSessionIfMissing('useKnowledgeBase');
       mergeFromSessionIfMissing('useUploadedDocuments');
       mergeFromSessionIfMissing('chatStyle');
+      mergeFromSessionIfMissing('requestedOutput');
+      mergeFromSessionIfMissing('requestedModuleReference');
     }
 
     const selectedDuration = parsedContext?.selectedDuration || 'non specifiee';
     const selectedMethodology = parsedContext?.selectedMethodology || 'Methodologie 360';
     const isFreeChatMode = String(parsedContext?.chatStyle || '').toLowerCase() === 'free_chat';
+    const requestedOutput = String(parsedContext?.requestedOutput || '').toLowerCase();
+    const requestedModuleReference = String(parsedContext?.requestedModuleReference || '').trim();
     const inferredDomain = inferKbDomainFromContext(parsedContext);
     const effectiveContextString =
       parsedContext && typeof parsedContext === 'object'
@@ -1832,6 +1836,15 @@ export const chat = async (
       ...(gigGrounding.systemRules.length
         ? gigGrounding.systemRules
         : ['Do NOT mention or infer company name, gig name, or gig description unless explicitly provided by user in current message.']),
+      requestedOutput === 'training_plan'
+        ? 'INTENT LOCK = TRAINING PLAN: user is asking for a plan. Return a structured training plan only (program architecture, modules, learning goals per module, suggested activities). Do NOT generate the full detailed course body of each module.'
+        : '',
+      requestedOutput === 'full_training_content'
+        ? 'INTENT LOCK = FULL TRAINING CONTENT: user is asking for a complete training content. Return complete learner-facing content across modules with substantial detail, examples, and practical exercises (slide-ready markdown style).'
+        : '',
+      requestedOutput === 'module_content'
+        ? `INTENT LOCK = MODULE CONTENT: user is asking for one module only${requestedModuleReference ? ` (${requestedModuleReference})` : ''}. Return only that module content in depth (objectives, explanation, examples, practice, quick check). Do NOT regenerate the whole training plan.`
+        : '',
       'If user explicitly asks for a training plan, generate a complete draft plan immediately (modules with substantive slide-ready text, programme-level structure) without waiting for extra clarifications; for parts that become slides, obey SLIDE-READY MODULE CONTENT (no per-module timing banners in slide bodies).',
       'You may finish with 2-4 optional clarification questions, but only after providing the full initial plan.',
       'NEVER include fake UI buttons, markdown button syntax, or "Valider / Enregistrer" controls in your reply; the app shows validation actions separately when appropriate.'
