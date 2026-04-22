@@ -366,7 +366,10 @@ const extractPrimaryChatTrainingBlock = (digest: string): string => {
   const tail = d.slice(idx);
   const stop = tail.indexOf('\n--- Supporting reference');
   const body = (stop === -1 ? tail : tail.slice(0, stop)).trim();
-  return body.slice(0, 16000);
+  const max = 16000;
+  // Long threads: keep the **end** so the latest user instructions (e.g. new training format) are not dropped.
+  if (body.length <= max) return body;
+  return body.slice(-max);
 };
 
 const chunkTextForSlides = (text: string, maxChunks: number, maxChunkLen: number): string[] => {
@@ -437,8 +440,10 @@ const buildDeterministicStoryboardFallback = (params: {
   const isFr = lang.startsWith('fr');
   const digest = String(params.trainingDigest || '');
   const chatPrimary = extractPrimaryChatTrainingBlock(digest);
-  const digestChunks =
+  const digestChunksRaw =
     chatPrimary.length > 120 ? chunkTextForSlides(chatPrimary, Math.max(params.maxImages, 10), 2000) : [];
+  /** Newest chat chunks first so early content slides follow the latest learner intent. */
+  const digestChunks = [...digestChunksRaw].reverse();
 
   const lines = digest.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const candidateTitles = lines
@@ -466,7 +471,9 @@ const buildDeterministicStoryboardFallback = (params: {
 
   const coverContext =
     chatPrimary.length > 120
-      ? ` Base the main title and subtitle on this learner conversation (same role and themes):\n${chatPrimary.slice(0, 1600)}`
+      ? chatPrimary.length > 2000
+        ? ` Reflect the **latest** learner goal (end of thread) in the title and subtitle:\n${chatPrimary.slice(-2400)}`
+        : ` Base the main title and subtitle on this learner conversation:\n${chatPrimary.slice(0, 1600)}`
       : '';
   out.push({
     title: isFr ? `${titleBase} - Couverture` : `${titleBase} - Cover`,
@@ -486,7 +493,7 @@ const buildDeterministicStoryboardFallback = (params: {
     agendaLines.length > 40
       ? `\nAgenda items derived from the training chat thread:\n${agendaLines}`
       : chatPrimary.length > 120
-        ? `\nSummarize key themes from the chat as 4–7 short agenda lines:\n${chatPrimary.slice(0, 1200)}`
+        ? `\nSummarize key themes from the **latest** part of the chat as 4–7 short agenda lines:\n${chatPrimary.slice(-1400)}`
         : '';
   out.push({
     title: isFr ? 'Plan de formation' : 'Training agenda',
@@ -496,7 +503,7 @@ const buildDeterministicStoryboardFallback = (params: {
 
   for (let i = 0; i < middleCount; i += 1) {
     const t = middleTitles[i];
-    const chunk = digestChunks[i] || (chatPrimary.length > 120 ? chatPrimary.slice(0, 2200) : '');
+    const chunk = digestChunks[i] || (chatPrimary.length > 120 ? chatPrimary.slice(-2400) : '');
     const sourceBlock =
       chunk.length > 80
         ? `\n\nSource thread (stay faithful — derive visible title and 3–5 bullets from this text):\n${chunk.slice(0, 3200)}`
@@ -509,7 +516,11 @@ const buildDeterministicStoryboardFallback = (params: {
   }
 
   const closing =
-    digestChunks.length > 0 ? digestChunks[digestChunks.length - 1] : chatPrimary.length > 120 ? chatPrimary : '';
+    chatPrimary.length > 120
+      ? chatPrimary.slice(-3400)
+      : digestChunks.length > 0
+        ? digestChunks[0]
+        : '';
   const conclusionContext =
     String(closing).length > 120
       ? `\n\nClosing summary grounded in:\n${String(closing).slice(0, 2800)}`
