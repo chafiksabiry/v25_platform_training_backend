@@ -12,6 +12,7 @@ import TrainingChatSession from '../models/TrainingChatSession';
 import TrainingPodcast from '../models/TrainingPodcast';
 import TrainingVideo from '../models/TrainingVideo';
 import TrainingImageSet from '../models/TrainingImageSet';
+import StructuredTrainingSlides from '../models/StructuredTrainingSlides';
 import TrainingJourney from '../models/TrainingJourney';
 import mongoose from 'mongoose';
 import fs from 'fs';
@@ -3225,6 +3226,186 @@ export const listTrainingImages = async (
           : [],
         createdAt: r.createdAt,
       })),
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const saveTrainingImageSet = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const imageSetId = String(req.body?.imageSetId || '').trim();
+    const title = String(req.body?.title || '').trim().slice(0, 240);
+    const trainingTitle = String(req.body?.trainingTitle || '').trim().slice(0, 280);
+    const language = String(req.body?.language || 'fr').trim().toLowerCase() || 'fr';
+    const renderModeRaw = String(req.body?.renderMode || 'ai_images').trim().toLowerCase();
+    const renderMode: 'ai_images' | 'template_slides' =
+      renderModeRaw === 'template_slides' ? 'template_slides' : 'ai_images';
+    const safeGigId = toObjectIdOrUndefined(req.body?.gigId);
+    const safeCompanyId = toObjectIdOrUndefined(req.body?.companyId);
+    const safeJourneyId = toObjectIdOrUndefined(req.body?.trainingJourneyId);
+    const incomingItems = Array.isArray(req.body?.items) ? req.body.items : [];
+    const items = incomingItems
+      .map((it: any, idx: number) => ({
+        index: Number.isFinite(Number(it?.index)) ? Number(it.index) : idx + 1,
+        title: String(it?.title || '').trim().slice(0, 200),
+        prompt: String(it?.prompt || '').trim().slice(0, 1200),
+        imageUrl: String(it?.imageUrl || '').trim(),
+        imageCloudinaryPublicId: String(it?.imageCloudinaryPublicId || '').trim() || undefined,
+      }))
+      .filter((it: any) => it.title && it.prompt && it.imageUrl)
+      .slice(0, 20)
+      .map((it: any, idx: number) => ({ ...it, index: idx + 1 }));
+
+    if (!title) return res.status(400).json({ success: false, error: 'title is required' });
+
+    const safeId = toObjectIdOrUndefined(imageSetId);
+    let doc: any = null;
+    if (safeId) {
+      doc = await TrainingImageSet.findById(safeId);
+    }
+    if (!doc) {
+      doc = await TrainingImageSet.create({
+        gigId: safeGigId,
+        companyId: safeCompanyId,
+        title,
+        trainingTitle: trainingTitle || undefined,
+        language,
+        renderMode,
+        items,
+      });
+    } else {
+      const previousItems = Array.isArray(doc.items) ? doc.items : [];
+      const removedPublicIds = previousItems
+        .map((it: any) => String(it?.imageCloudinaryPublicId || '').trim())
+        .filter(Boolean)
+        .filter((publicId: string) => !items.some((next: any) => String(next?.imageCloudinaryPublicId || '').trim() === publicId));
+      for (const publicId of removedPublicIds) {
+        try {
+          await cloudinaryService.deleteFile(publicId);
+        } catch (e) {
+          console.warn('[saveTrainingImageSet] cloudinary delete failed:', publicId, e);
+        }
+      }
+      doc.title = title;
+      doc.trainingTitle = trainingTitle || undefined;
+      doc.language = language;
+      doc.renderMode = renderMode;
+      doc.items = items;
+      if (safeGigId) doc.gigId = safeGigId;
+      if (safeCompanyId) doc.companyId = safeCompanyId;
+      await doc.save();
+    }
+
+    if (safeJourneyId) {
+      await TrainingJourney.updateOne(
+        { _id: safeJourneyId },
+        { $set: { images: doc._id, updatedAt: new Date() } }
+      );
+    }
+
+    return res.json({
+      success: true,
+      imageSet: {
+        _id: String(doc._id),
+        title: String(doc.title || ''),
+        trainingTitle: doc.trainingTitle ? String(doc.trainingTitle) : undefined,
+        renderMode: String(doc.renderMode || 'ai_images'),
+        language: String(doc.language || 'fr'),
+        gigId: doc.gigId ? String(doc.gigId) : undefined,
+        items: Array.isArray(doc.items)
+          ? doc.items.map((it: any) => ({
+              index: Number(it.index || 0),
+              title: String(it.title || ''),
+              prompt: String(it.prompt || ''),
+              imageUrl: String(it.imageUrl || ''),
+              imageCloudinaryPublicId: it.imageCloudinaryPublicId ? String(it.imageCloudinaryPublicId) : undefined,
+            }))
+          : [],
+        createdAt: doc.createdAt,
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const saveStructuredSlides = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const slidesSetId = String(req.body?.slidesSetId || '').trim();
+    const title = String(req.body?.title || '').trim().slice(0, 240);
+    const language = String(req.body?.language || 'fr').trim().toLowerCase() || 'fr';
+    const theme = req.body?.theme && typeof req.body.theme === 'object' ? req.body.theme : undefined;
+    const safeGigId = toObjectIdOrUndefined(req.body?.gigId);
+    const safeCompanyId = toObjectIdOrUndefined(req.body?.companyId);
+    const safeJourneyId = toObjectIdOrUndefined(req.body?.trainingJourneyId);
+    const slides = Array.isArray(req.body?.slides)
+      ? req.body.slides
+          .map((s: any, idx: number) => ({
+            index: Number.isFinite(Number(s?.index)) ? Number(s.index) : idx + 1,
+            kind: String(s?.kind || 'content'),
+            layout: s?.layout ? String(s.layout) : undefined,
+            title: String(s?.title || '').trim().slice(0, 240),
+            bullets: Array.isArray(s?.bullets)
+              ? s.bullets.map((b: any) => String(b || '').trim()).filter(Boolean).slice(0, 20)
+              : [],
+            notes: s?.notes ? String(s.notes).trim().slice(0, 4000) : undefined,
+            blocks: Array.isArray(s?.blocks) ? s.blocks.slice(0, 24) : undefined,
+          }))
+          .filter((s: any) => s.title)
+          .slice(0, 40)
+          .map((s: any, idx: number) => ({ ...s, index: idx + 1 }))
+      : [];
+
+    if (!title) return res.status(400).json({ success: false, error: 'title is required' });
+
+    const safeId = toObjectIdOrUndefined(slidesSetId);
+    let doc: any = null;
+    if (safeId) {
+      doc = await StructuredTrainingSlides.findById(safeId);
+    }
+    if (!doc) {
+      doc = await StructuredTrainingSlides.create({
+        gigId: safeGigId,
+        companyId: safeCompanyId,
+        trainingJourneyId: safeJourneyId,
+        title,
+        language,
+        theme,
+        slides,
+      });
+    } else {
+      doc.title = title;
+      doc.language = language;
+      doc.theme = theme;
+      doc.slides = slides;
+      if (safeGigId) doc.gigId = safeGigId;
+      if (safeCompanyId) doc.companyId = safeCompanyId;
+      if (safeJourneyId) doc.trainingJourneyId = safeJourneyId;
+      await doc.save();
+    }
+
+    return res.json({
+      success: true,
+      slidesSet: {
+        _id: String(doc._id),
+        title: String(doc.title || ''),
+        language: String(doc.language || 'fr'),
+        theme: doc.theme || undefined,
+        slides: Array.isArray(doc.slides) ? doc.slides : [],
+        gigId: doc.gigId ? String(doc.gigId) : undefined,
+        companyId: doc.companyId ? String(doc.companyId) : undefined,
+        trainingJourneyId: doc.trainingJourneyId ? String(doc.trainingJourneyId) : undefined,
+        createdAt: doc.createdAt,
+      },
     });
   } catch (error) {
     return next(error);

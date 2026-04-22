@@ -70,8 +70,18 @@ router.post(
 );
 
 router.post(
+  '/training-images/save',
+  aiController.saveTrainingImageSet
+);
+
+router.post(
   '/training-slides-json/generate',
   aiController.generateTrainingSlidesJson
+);
+
+router.post(
+  '/training-slides-json/save',
+  aiController.saveStructuredSlides
 );
 
 router.get(
