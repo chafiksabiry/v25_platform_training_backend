@@ -1791,6 +1791,7 @@ export const chat = async (
     const isPlanIntent = requestedOutput === 'training_plan';
     const isModuleIntent = requestedOutput === 'module_content';
     const isFullTrainingIntent = requestedOutput === 'full_training_content';
+    const requiresTypedStyle = isPlanIntent || isModuleIntent || isFullTrainingIntent;
     const inferredDomain = inferKbDomainFromContext(parsedContext);
     const effectiveContextString =
       parsedContext && typeof parsedContext === 'object'
@@ -1848,6 +1849,18 @@ export const chat = async (
       requestedOutput === 'module_content'
         ? `INTENT LOCK = MODULE CONTENT: user is asking for one module only${requestedModuleReference ? ` (${requestedModuleReference})` : ''}. Return only that module content in depth (objectives, explanation, examples, practice, quick check). Do NOT regenerate the whole training plan.`
         : '',
+      requiresTypedStyle
+        ? 'STYLE LOCK: append exactly one <harx-style>{...}</harx-style> JSON block at the END of your answer.'
+        : '',
+      isPlanIntent
+        ? 'STYLE PROFILE FOR PLAN: layoutPreset="cards", cool structured palette, clean sans-serif fonts. This style must be visually different from module/full-training profiles.'
+        : '',
+      isModuleIntent
+        ? 'STYLE PROFILE FOR MODULE: layoutPreset="editorial", deeper contrast, analytical reading tone, distinct typography from plan.'
+        : '',
+      isFullTrainingIntent
+        ? 'STYLE PROFILE FOR FULL TRAINING: layoutPreset="minimal", warm premium palette, high readability and different identity from plan/module.'
+        : '',
       'If user explicitly asks for a training plan, generate a complete draft plan immediately (modules with substantive slide-ready text, programme-level structure) without waiting for extra clarifications; for parts that become slides, obey SLIDE-READY MODULE CONTENT (no per-module timing banners in slide bodies).',
       'You may finish with 2-4 optional clarification questions, but only after providing the full initial plan.',
       'NEVER include fake UI buttons, markdown button syntax, or "Valider / Enregistrer" controls in your reply; the app shows validation actions separately when appropriate.'
@@ -1861,6 +1874,124 @@ export const chat = async (
       const startsWithQuestion = /^\s*(avant|pour commencer|j['’]ai besoin|peux-tu|quel|quelle|quels|quelles)\b/i.test(txt);
       const questionMarks = (txt.match(/\?/g) || []).length;
       return moduleHits < 2 || lineCount < 8 || startsWithQuestion || questionMarks >= 4;
+    };
+
+    const buildStylePresetByIntent = (intent: string) => {
+      if (intent === 'training_plan') {
+        return {
+          layoutPreset: 'cards',
+          titleColor: '#0f2744',
+          accentColor: '#0ea5a0',
+          typography: {
+            bodyFont: 'Inter, system-ui, sans-serif',
+            headingFont: '"Segoe UI", Inter, system-ui, sans-serif',
+          },
+          moduleCardThemes: [
+            { bg: '#eafbf5', border: '#9ddfc8', text: '#153427' },
+            { bg: '#ecf8ff', border: '#9ecde7', text: '#163043' },
+            { bg: '#f3f1ff', border: '#c2b9ef', text: '#2a2352' },
+            { bg: '#fff5eb', border: '#efc998', text: '#402a12' },
+          ],
+          contentTheme: {
+            bodyColor: '#1c2a33',
+            headingColor: '#0f2138',
+            tableBorder: '#c9e4de',
+            tableHeaderBg: '#e6f8f4',
+            tableHeaderText: '#10313a',
+            tableRowBg: '#f9fffd',
+            kpiBg: '#ecfbf7',
+            kpiBorder: '#c8ece1',
+            kpiLabel: '#2f6f67',
+            kpiValue: '#11353b',
+            moduleShape: 'soft',
+            panelBg: '#f4fffc',
+            panelBorder: '#cdece4',
+            badgeBg: '#e5f8f2',
+            badgeText: '#0f766e',
+            canvasBg: '#ffffff',
+          },
+        };
+      }
+      if (intent === 'module_content') {
+        return {
+          layoutPreset: 'editorial',
+          titleColor: '#1f2a44',
+          accentColor: '#6366f1',
+          typography: {
+            bodyFont: '"Source Sans 3", "Segoe UI", sans-serif',
+            headingFont: '"Merriweather", "Segoe UI", serif',
+          },
+          moduleCardThemes: [
+            { bg: '#f2f5ff', border: '#b8c8f5', text: '#1b2a4a' },
+            { bg: '#eef8ff', border: '#b8d8ee', text: '#1a3347' },
+            { bg: '#f7f2ff', border: '#d0baf0', text: '#34244f' },
+            { bg: '#fff5f7', border: '#efbfd0', text: '#4a2030' },
+          ],
+          contentTheme: {
+            bodyColor: '#1f2d3f',
+            headingColor: '#112241',
+            tableBorder: '#d1d9ee',
+            tableHeaderBg: '#eaf0ff',
+            tableHeaderText: '#13274a',
+            tableRowBg: '#fbfcff',
+            kpiBg: '#eef2ff',
+            kpiBorder: '#d4dcf4',
+            kpiLabel: '#4d5f95',
+            kpiValue: '#1a2d4d',
+            moduleShape: 'rounded',
+            panelBg: '#f8faff',
+            panelBorder: '#d8e0f6',
+            badgeBg: '#e8eeff',
+            badgeText: '#3949ab',
+            canvasBg: '#ffffff',
+          },
+        };
+      }
+      return {
+        layoutPreset: 'minimal',
+        titleColor: '#1b2238',
+        accentColor: '#f59e0b',
+        typography: {
+          bodyFont: '"Trebuchet MS", "Segoe UI", sans-serif',
+          headingFont: '"Trebuchet MS", "Segoe UI", sans-serif',
+        },
+        moduleCardThemes: [
+          { bg: '#fff8ea', border: '#efd7aa', text: '#352814' },
+          { bg: '#fff2df', border: '#efc58b', text: '#3c260f' },
+          { bg: '#fff9f1', border: '#ebd4b2', text: '#362918' },
+          { bg: '#f5f9ed', border: '#cfe2a5', text: '#25341a' },
+        ],
+        contentTheme: {
+          bodyColor: '#2d2419',
+          headingColor: '#1a2440',
+          tableBorder: '#e7d9bd',
+          tableHeaderBg: '#fff3de',
+          tableHeaderText: '#2a2218',
+          tableRowBg: '#fffaf2',
+          kpiBg: '#fff6e9',
+          kpiBorder: '#ecd8b3',
+          kpiLabel: '#8b6a32',
+          kpiValue: '#2e2618',
+          moduleShape: 'soft',
+          panelBg: '#fffbf3',
+          panelBorder: '#ecdab8',
+          badgeBg: '#fff1da',
+          badgeText: '#b86f09',
+          canvasBg: '#fffdf8',
+        },
+      };
+    };
+
+    const enforceHarxStyleByIntent = (raw: string, intent: string): string => {
+      if (!(intent === 'training_plan' || intent === 'module_content' || intent === 'full_training_content')) {
+        return String(raw || '');
+      }
+      const text = String(raw || '').trim();
+      const preset = buildStylePresetByIntent(intent);
+      const styleBlock = `<harx-style>${JSON.stringify(preset)}</harx-style>`;
+      if (!text) return styleBlock;
+      const withoutExisting = text.replace(/<harx-style>[\s\S]*?<\/harx-style>/gi, '').trim();
+      return `${withoutExisting}\n\n${styleBlock}`;
     };
 
     const streamEnabled = String(req.query.stream ?? 'true').toLowerCase() !== 'false';
@@ -1886,6 +2017,7 @@ export const chat = async (
         message.trim(),
         anthropicKey
       );
+      finalResponse = enforceHarxStyleByIntent(finalResponse, requestedOutput);
 
       const readinessExtra = await appendTrainingReadinessBlock({
         assistantMessage: finalResponse,
@@ -1976,6 +2108,7 @@ export const chat = async (
       message.trim(),
       anthropicKey
     );
+    assistantMessageText = enforceHarxStyleByIntent(assistantMessageText, requestedOutput);
     if (assistantMessageText !== String(fullResponse || '').trim()) {
       const appended = assistantMessageText.slice(String(fullResponse || '').trim().length);
       if (appended) {
