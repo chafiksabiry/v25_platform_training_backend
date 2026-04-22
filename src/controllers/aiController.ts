@@ -1877,6 +1877,8 @@ export const chat = async (
             '- If needed, use "Titre : detail tres court" format, but keep it concise',
             '- Nested headings are allowed but MUST use bullet syntax only: "- Sous-theme:" then indented bullets "  - item"',
             '- Never use numbered lists (1., 2., 3.) inside modules; always use dash bullets',
+            '- Avoid repeated sentence stems across bullets (no repeated "HARX vise ...", "La plateforme ...", etc.)',
+            '- Each bullet must introduce a distinct concept label',
             'PLAN TEMPLATE (must follow):',
             '- Formation : <titre>',
             '- 🟢 Module 1 : <titre>',
@@ -1992,7 +1994,16 @@ export const chat = async (
         .split('\n')
         .map((l) => l.trim())
         .filter((l) => /^\d+[.)]\s+/.test(l)).length;
-      return moduleHits < 2 || lineCount < 8 || startsWithQuestion || questionMarks >= 4 || !hasObjectives || !hasTopics || !hasPractice || !hasEvaluation || longSentenceBullets >= 2 || numberedListLines >= 2;
+      const normalizedBullets = bulletLines
+        .map((l) => l.replace(/^[-*•]\s+/, '').trim().toLowerCase())
+        .filter(Boolean);
+      const bulletPrefixes = normalizedBullets.map((b) => b.split(/\s+/).slice(0, 3).join(' '));
+      const prefixCounts = bulletPrefixes.reduce((acc, p) => {
+        acc[p] = (acc[p] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+      const repetitivePrefixDetected = Object.values(prefixCounts).some((count) => count >= 3);
+      return moduleHits < 2 || lineCount < 8 || startsWithQuestion || questionMarks >= 4 || !hasObjectives || !hasTopics || !hasPractice || !hasEvaluation || longSentenceBullets >= 2 || numberedListLines >= 2 || repetitivePrefixDetected;
     };
 
     const buildStylePresetByIntent = (intent: string) => {
@@ -2153,6 +2164,8 @@ STRICT OUTPUT RULE:
 - Avoid long explanatory sentences and avoid final punctuation in bullets
 - Nested headings must be in bullet form: "- Sous-theme:" then "  - item"
 - Never use numbered list items (1., 2., 3.) in modules
+- Avoid repeated bullet openings (same first words repeated 3+ times)
+- Force lexical variety across bullets
 
 FAILURE CONDITION:
 If format is not respected, regenerate again until compliance.`;
@@ -2257,6 +2270,8 @@ STRICT OUTPUT RULE:
 - Avoid long explanatory sentences and avoid final punctuation in bullets
 - Nested headings must be in bullet form: "- Sous-theme:" then "  - item"
 - Never use numbered list items (1., 2., 3.) in modules
+- Avoid repeated bullet openings (same first words repeated 3+ times)
+- Force lexical variety across bullets
 
 FAILURE CONDITION:
 If format is not respected, regenerate again until compliance.`;
