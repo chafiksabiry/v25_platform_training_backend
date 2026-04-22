@@ -69,6 +69,11 @@ router.post(
   aiController.generateTrainingImages
 );
 
+router.post(
+  '/training-slides-json/generate',
+  aiController.generateTrainingSlidesJson
+);
+
 router.get(
   '/training-images/status/:jobId',
   aiController.getTrainingImagesStatus

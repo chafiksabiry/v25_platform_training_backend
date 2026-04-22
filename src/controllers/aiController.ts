@@ -684,6 +684,67 @@ const buildImageStoryboardFromDigest = async (params: {
   });
 };
 
+type StructuredTrainingSlide = {
+  index: number;
+  kind: 'cover' | 'agenda' | 'content' | 'conclusion';
+  title: string;
+  bullets: string[];
+  notes?: string;
+};
+
+const buildStructuredSlidesFromDigest = (params: {
+  trainingDigest: string;
+  trainingTitle?: string;
+  language?: string;
+  maxSlides?: number;
+}): { title: string; language: string; slides: StructuredTrainingSlide[] } => {
+  const language = String(params.language || 'fr').trim().toLowerCase() || 'fr';
+  const maxSlides = Math.min(Math.max(Number(params.maxSlides || 12), 3), 30);
+  const trainingDigest = String(params.trainingDigest || '');
+  const titleBase = inferBrandingTitleForSlides(trainingDigest, String(params.trainingTitle || '').trim());
+  const primary = extractPrimaryChatTrainingBlock(trainingDigest);
+  const chunks = chunkTextForSlides(primary || trainingDigest, Math.max(maxSlides, 10), 2200);
+  const agendaBullets = extractSlideBulletsFromText(chunks.slice(0, 3).join('\n'), 6);
+  const slides: StructuredTrainingSlide[] = [];
+
+  slides.push({
+    index: 1,
+    kind: 'cover',
+    title: titleBase,
+    bullets: extractSlideBulletsFromText(primary.slice(0, 1200) || trainingDigest.slice(0, 1200), 3),
+    notes: 'Introduction',
+  });
+  slides.push({
+    index: 2,
+    kind: 'agenda',
+    title: language.startsWith('fr') ? 'Plan de formation' : 'Training agenda',
+    bullets: agendaBullets.length ? agendaBullets : [language.startsWith('fr') ? 'Objectifs de la session' : 'Session goals'],
+  });
+
+  const contentCount = Math.max(1, maxSlides - 3);
+  for (let i = 0; i < contentCount; i += 1) {
+    const c = chunks[i] || chunks[chunks.length - 1] || trainingDigest;
+    const t = slideTitleFromChunk(c, language.startsWith('fr') ? `Contenu ${i + 1}` : `Content ${i + 1}`);
+    slides.push({
+      index: slides.length + 1,
+      kind: 'content',
+      title: t,
+      bullets: extractSlideBulletsFromText(c, 5),
+    });
+    if (slides.length >= maxSlides - 1) break;
+  }
+
+  slides.push({
+    index: slides.length + 1,
+    kind: 'conclusion',
+    title: language.startsWith('fr') ? 'Conclusion' : 'Conclusion',
+    bullets: extractSlideBulletsFromText(primary.slice(-1800) || trainingDigest.slice(-1800), 4),
+    notes: language.startsWith('fr') ? 'Messages a retenir' : 'Key takeaways',
+  });
+
+  return { title: titleBase, language, slides: slides.slice(0, maxSlides) };
+};
+
 const processTrainingImageJob = async (
   jobId: string,
   storyboard: Array<{ title: string; prompt: string }>
@@ -2629,6 +2690,36 @@ export const generateTrainingImages = async (
       total: state.total,
       completed: state.completed,
       items: state.items,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const generateTrainingSlidesJson = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const trainingDigest = String(req.body?.trainingDigest || '').trim();
+    const trainingTitle = String(req.body?.trainingTitle || '').trim();
+    const language = String(req.body?.language || 'fr').trim().toLowerCase() || 'fr';
+    const maxSlides = Math.min(Math.max(Number(req.body?.maxSlides || 12), 3), 30);
+    if (!trainingDigest) {
+      return res.status(400).json({ success: false, error: 'trainingDigest is required' });
+    }
+    const structured = buildStructuredSlidesFromDigest({
+      trainingDigest,
+      trainingTitle,
+      language,
+      maxSlides,
+    });
+    return res.json({
+      success: true,
+      title: structured.title,
+      language: structured.language,
+      slides: structured.slides,
     });
   } catch (error) {
     return next(error);
