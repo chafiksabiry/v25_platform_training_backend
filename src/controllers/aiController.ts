@@ -725,6 +725,13 @@ type StructuredTrainingSlide = {
   title: string;
   bullets: string[];
   notes?: string;
+  layout?: 'standard' | 'split' | 'highlight' | 'timeline';
+};
+
+type StructuredTrainingTheme = {
+  template: 'corporate' | 'dark' | 'minimal' | 'learning' | 'executive';
+  accentColor: string;
+  backgroundStyle?: 'light' | 'gradient' | 'dark';
 };
 
 const buildStructuredSlidesFromDigest = (params: {
@@ -732,7 +739,7 @@ const buildStructuredSlidesFromDigest = (params: {
   trainingTitle?: string;
   language?: string;
   maxSlides?: number;
-}): { title: string; language: string; slides: StructuredTrainingSlide[] } => {
+}): { title: string; language: string; theme: StructuredTrainingTheme; slides: StructuredTrainingSlide[] } => {
   const language = String(params.language || 'fr').trim().toLowerCase() || 'fr';
   const maxSlides = Math.min(Math.max(Number(params.maxSlides || 12), 3), 30);
   const trainingDigest = String(params.trainingDigest || '');
@@ -750,12 +757,14 @@ const buildStructuredSlidesFromDigest = (params: {
     title: titleBase,
     bullets: extractSlideBulletsFromText(sourceText.slice(0, 1400), 3),
     notes: 'Introduction',
+    layout: 'highlight',
   });
   slides.push({
     index: 2,
     kind: 'agenda',
     title: language.startsWith('fr') ? 'Plan de formation' : 'Training agenda',
     bullets: agendaBullets.length ? agendaBullets : [language.startsWith('fr') ? 'Objectifs de la session' : 'Session goals'],
+    layout: 'timeline',
   });
 
   const contentCount = Math.max(1, maxSlides - 3);
@@ -767,6 +776,7 @@ const buildStructuredSlidesFromDigest = (params: {
       kind: 'content',
       title: t,
       bullets: extractSlideBulletsFromText(c, 5),
+      layout: i % 2 === 0 ? 'standard' : 'split',
     });
     if (slides.length >= maxSlides - 1) break;
   }
@@ -777,9 +787,15 @@ const buildStructuredSlidesFromDigest = (params: {
     title: language.startsWith('fr') ? 'Conclusion' : 'Conclusion',
     bullets: extractSlideBulletsFromText(sourceText.slice(-2200), 4),
     notes: language.startsWith('fr') ? 'Messages a retenir' : 'Key takeaways',
+    layout: 'highlight',
   });
 
-  return { title: titleBase, language, slides: slides.slice(0, maxSlides) };
+  return {
+    title: titleBase,
+    language,
+    theme: { template: 'corporate', accentColor: '#be123c', backgroundStyle: 'light' },
+    slides: slides.slice(0, maxSlides),
+  };
 };
 
 const generateStructuredSlidesWithClaude = async (params: {
@@ -788,7 +804,7 @@ const generateStructuredSlidesWithClaude = async (params: {
   language: string;
   maxSlides: number;
   anthropicKey?: string;
-}): Promise<{ title: string; language: string; slides: StructuredTrainingSlide[] }> => {
+}): Promise<{ title: string; language: string; theme: StructuredTrainingTheme; slides: StructuredTrainingSlide[] }> => {
   const titleBase = inferBrandingTitleForSlides(params.trainingDigest, String(params.trainingTitle || '').trim());
   const lang = String(params.language || 'fr').toLowerCase();
   const maxSlides = Math.min(Math.max(Number(params.maxSlides || 12), 3), 30);
@@ -806,7 +822,7 @@ const generateStructuredSlidesWithClaude = async (params: {
     source,
     '',
     'Return ONLY valid JSON with this exact schema:',
-    '{"title":"", "language":"fr", "slides":[{"index":1,"kind":"cover|agenda|content|conclusion","title":"","bullets":[""],"notes":""}]}',
+    '{"title":"", "language":"fr", "theme":{"template":"corporate|dark|minimal|learning|executive","accentColor":"#RRGGBB","backgroundStyle":"light|gradient|dark"},"slides":[{"index":1,"kind":"cover|agenda|content|conclusion","layout":"standard|split|highlight|timeline","title":"","bullets":[""],"notes":""}]}',
     'Rules:',
     '- Base every bullet on source content (no meta-dialogue, no "I prepare", no Q/A chatter).',
     '- Cover/agenda/content/conclusion progression.',
@@ -837,6 +853,14 @@ const generateStructuredSlidesWithClaude = async (params: {
               : idx === slidesIn.length - 1
                 ? 'conclusion'
                 : 'content',
+      layout:
+        s?.layout === 'standard' || s?.layout === 'split' || s?.layout === 'highlight' || s?.layout === 'timeline'
+          ? s.layout
+          : idx === 0
+            ? 'highlight'
+            : idx === 1
+              ? 'timeline'
+              : 'standard',
       title: String(s?.title || '').replace(/[*_`#]+/g, '').trim().slice(0, 120),
       bullets: (Array.isArray(s?.bullets) ? s.bullets : [])
         .map((b: any) => String(b || '').replace(/[*_`#]+/g, '').trim())
@@ -852,6 +876,20 @@ const generateStructuredSlidesWithClaude = async (params: {
   return {
     title: String(parsed?.title || titleBase).trim().slice(0, 180) || titleBase,
     language: String(parsed?.language || lang).trim() || lang,
+    theme: {
+      template:
+        parsed?.theme?.template === 'dark' ||
+        parsed?.theme?.template === 'minimal' ||
+        parsed?.theme?.template === 'learning' ||
+        parsed?.theme?.template === 'executive'
+          ? parsed.theme.template
+          : 'corporate',
+      accentColor: /^#[0-9a-f]{6}$/i.test(String(parsed?.theme?.accentColor || '')) ? String(parsed.theme.accentColor) : '#be123c',
+      backgroundStyle:
+        parsed?.theme?.backgroundStyle === 'gradient' || parsed?.theme?.backgroundStyle === 'dark'
+          ? parsed.theme.backgroundStyle
+          : 'light',
+    },
     slides,
   };
 };
@@ -2821,7 +2859,7 @@ export const generateTrainingSlidesJson = async (
     if (!trainingDigest) {
       return res.status(400).json({ success: false, error: 'trainingDigest is required' });
     }
-    let structured: { title: string; language: string; slides: StructuredTrainingSlide[] };
+    let structured: { title: string; language: string; theme: StructuredTrainingTheme; slides: StructuredTrainingSlide[] };
     if (generator === 'deterministic') {
       structured = buildStructuredSlidesFromDigest({
         trainingDigest,
@@ -2857,6 +2895,7 @@ export const generateTrainingSlidesJson = async (
       generator: generator === 'deterministic' ? 'deterministic' : 'ai',
       title: structured.title,
       language: structured.language,
+      theme: structured.theme,
       slides: structured.slides,
     });
   } catch (error) {
