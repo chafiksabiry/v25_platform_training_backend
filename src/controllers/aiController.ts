@@ -1872,9 +1872,11 @@ export const chat = async (
           .select('_id modulePlan modules methodologyData')
           .lean()
       : null;
-    const isPlanFrozen =
-      Boolean((linkedJourney as any)?.methodologyData?.planFrozenFromChat) ||
-      Boolean((linkedJourney as any)?.modulePlan?.length);
+    /**
+     * "Plan validated/frozen" must only reflect explicit chat confirmation save,
+     * not merely the presence of a draft modulePlan.
+     */
+    const isPlanFrozen = Boolean((linkedJourney as any)?.methodologyData?.planFrozenFromChat);
     if (parsedContext && typeof parsedContext === 'object') {
       (parsedContext as any).planValidatedFromDb = isPlanFrozen;
     }
@@ -2214,7 +2216,8 @@ export const chat = async (
     ].join('\n');
 
     const systemPrompt = [
-      'You are HARX AI. Reply in the user language. Be simple, clear, pedagogical.',
+      'You are Professor academic. Reply in the user language. Be simple, clear, pedagogical.',
+      'If replying in French, use correct spelling/grammar and avoid typos.',
       'Use markdown only. Never output HTML/CSS/JS or fake UI buttons.',
       'Keep business context from conversation unless user changes it.',
       'If critical info is missing, infer reasonably and ask max 2 focused questions at the end.',
