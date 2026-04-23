@@ -188,6 +188,13 @@ const isPlanEditRequest = (message: string): boolean =>
     String(message || '')
   );
 
+const sanitizeAssistantPlanText = (raw: string): string =>
+  String(raw || '')
+    .replace(/<harx-style>[\s\S]*?<\/harx-style>/gi, '')
+    .replace(HARX_TRAINING_STATUS_REGEX, '')
+    .replace(HARX_PLAN_CONFIRM_REGEX, '')
+    .trim();
+
 const buildSavedPlanAnchor = (journey: any): string => {
   if (!journey) return '';
   const modulePlan = Array.isArray(journey.modulePlan) ? journey.modulePlan : [];
@@ -1881,9 +1888,14 @@ export const chat = async (
       .reverse()
       .find((m: any) => String(m?.role || '').toLowerCase() === 'assistant');
     const lastAssistantPlanCandidate = String(lastAssistantEntry?.text || '').trim();
+    const trimmedMessage = String(message || '').trim();
+    const lastAssistantPlanSanitized = sanitizeAssistantPlanText(lastAssistantPlanCandidate);
+    const isPlanPatchRequest =
+      requestedOutput === 'training_plan' &&
+      isPlanEditRequest(trimmedMessage) &&
+      looksLikeTrainingPlanText(lastAssistantPlanSanitized);
     const pendingPlanMarkdown = String((sessionContext as any)?.pendingPlanMarkdown || '').trim();
     const pendingPlanSaveToken = String((sessionContext as any)?.pendingPlanSaveToken || '').trim();
-    const trimmedMessage = String(message || '').trim();
 
     if (
       isJourneyBuilderApp(parsedContext) &&
@@ -2142,6 +2154,9 @@ export const chat = async (
       effectiveContextString,
       gigGrounding.promptAppend,
       savedPlanAnchor,
+      isPlanPatchRequest
+        ? `\n--- CURRENT PLAN TO PATCH (KEEP OTHER MODULES UNCHANGED) ---\n${lastAssistantPlanSanitized.slice(0, 15000)}\n`
+        : '',
       '',
       'User message:',
       message.trim()
@@ -2162,6 +2177,12 @@ export const chat = async (
       requestedOutput === 'training_plan'
         ? [
             'INTENT LOCK: TRAINING PLAN',
+            isPlanPatchRequest
+              ? 'PLAN PATCH MODE: modify only the module(s) explicitly requested by the user. Keep all other existing modules unchanged (same order, same titles, same content).'
+              : '',
+            isPlanPatchRequest
+              ? 'Return the full plan after patching, but do not regenerate untouched modules.'
+              : '',
             'Output only a plan (no full lessons), start directly at Module 1.',
             'Minimum 4 modules, progressive from basic to advanced.',
             'Use short dash bullets only ("- "), title-like phrases, no long sentences, no numbering.',
