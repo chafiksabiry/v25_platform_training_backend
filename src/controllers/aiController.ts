@@ -2678,6 +2678,9 @@ export const listChatHistory = async (
           title: session.title || 'Nouvelle conversation',
           lastActivityAt: session.lastActivityAt || session.updatedAt || session.createdAt,
           messagesCount: messages.length,
+          trainingJourneyId: session?.contextSnapshot?.trainingJourneyId
+            ? String(session.contextSnapshot.trainingJourneyId)
+            : undefined,
           preview: preview.length > 160 ? `${preview.slice(0, 157)}...` : preview,
         };
       }),
@@ -2712,6 +2715,9 @@ export const getChatSession = async (
         _id: String((session as any)._id),
         title: (session as any).title || 'Nouvelle conversation',
         gigId: (session as any).gigId ? String((session as any).gigId) : null,
+        trainingJourneyId: (session as any)?.contextSnapshot?.trainingJourneyId
+          ? String((session as any).contextSnapshot.trainingJourneyId)
+          : undefined,
         lastActivityAt: (session as any).lastActivityAt || (session as any).updatedAt || (session as any).createdAt,
         messages: ((session as any).messages || []).map((m: any) => ({
           role: m.role === 'assistant' ? 'assistant' : 'user',
