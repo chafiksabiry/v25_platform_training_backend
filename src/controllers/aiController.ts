@@ -2164,6 +2164,40 @@ export const chat = async (
       return res.end();
     }
 
+    if (
+      isJourneyBuilderApp(parsedContext) &&
+      !isPlanFrozen &&
+      (requestedOutput === 'module_content' || requestedOutput === 'full_training_content')
+    ) {
+      const lockMsg =
+        "Aucun plan validé n'est encore enregistré pour ce parcours. Générez et confirmez d'abord le plan de formation avant de demander le contenu d'un module ou de la formation complète.";
+      activeSession.messages.push(
+        { role: 'user', text: message.trim(), createdAt: new Date() } as any,
+        { role: 'assistant', text: lockMsg, createdAt: new Date() } as any
+      );
+      activeSession.lastActivityAt = new Date();
+      await activeSession.save();
+      const streamEnabledEarly = String(req.query.stream ?? 'true').toLowerCase() !== 'false';
+      if (!streamEnabledEarly) {
+        return res.status(200).json({
+          success: true,
+          response: lockMsg,
+          sessionId: String(activeSession._id),
+        });
+      }
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.setHeader('X-Chat-Session-Id', String(activeSession._id));
+      res.status(200);
+      if (typeof (res as any).flushHeaders === 'function') {
+        (res as any).flushHeaders();
+      }
+      res.write(lockMsg);
+      return res.end();
+    }
+
     const gigGrounding = await buildGigGroundingBlocks(safeGigId, parsedContext);
 
     const prompt = [
