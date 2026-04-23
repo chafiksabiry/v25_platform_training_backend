@@ -30,6 +30,8 @@ const unlinkAsync = promisify(fs.unlink);
 const HARX_STYLE_TAG_REGEX = /<harx-style>\s*\{[\s\S]*?\}\s*<\/harx-style>/i;
 const HARX_TRAINING_STATUS_REGEX = /<harx-training-status>\s*([\s\S]*?)\s*<\/harx-training-status>/i;
 const CHAT_CONFIRM_PLAN_CMD_REGEX = /^__CONFIRM_PLAN_SAVE__(?::([a-zA-Z0-9_-]{6,64}))?$/;
+const CHAT_VALIDATE_MODULE_CONTENT_CMD = '__VALIDATE_MODULE_CONTENT__';
+const CHAT_VALIDATE_ALL_MODULES_CONTENT_CMD = '__VALIDATE_ALL_MODULES_CONTENT__';
 const HARX_PLAN_CONFIRM_TOKEN = '__CONFIRM_PLAN_SAVE__';
 const HARX_PLAN_CONFIRM_REGEX = /<harx-plan-confirm>\s*([\s\S]*?)\s*<\/harx-plan-confirm>/i;
 
@@ -141,9 +143,16 @@ const appendTrainingReadinessBlock = async (params: {
 
   if (readiness === 'not_applicable') return '';
 
+  const requestedOutput = String(parsedContext?.requestedOutput || '').toLowerCase();
   const actions: { id: string; label: string }[] = [];
   if (readiness === 'ready' && missingModules.length === 0) {
-    actions.push({ id: 'validate_training', label: 'Valider la formation' });
+    if (requestedOutput === 'module_content') {
+      actions.push({ id: 'validate_module_content', label: 'Valider ce contenu module' });
+    } else if (requestedOutput === 'full_training_content') {
+      actions.push({ id: 'validate_all_modules_content', label: 'Valider le contenu de tous les modules' });
+    } else {
+      actions.push({ id: 'validate_training', label: 'Valider la formation' });
+    }
   } else if (readiness === 'incomplete' && missingModules.length > 0) {
     actions.push({
       id: 'save_without_missing',
@@ -1865,6 +1874,71 @@ export const chat = async (
     const lastAssistantPlanCandidate = String(lastAssistantEntry?.text || '').trim();
     const pendingPlanMarkdown = String((sessionContext as any)?.pendingPlanMarkdown || '').trim();
     const pendingPlanSaveToken = String((sessionContext as any)?.pendingPlanSaveToken || '').trim();
+    const trimmedMessage = String(message || '').trim();
+
+    if (
+      isJourneyBuilderApp(parsedContext) &&
+      (trimmedMessage === CHAT_VALIDATE_MODULE_CONTENT_CMD ||
+        trimmedMessage === CHAT_VALIDATE_ALL_MODULES_CONTENT_CMD)
+    ) {
+      const linkedJourneyId =
+        toObjectIdOrUndefined(parsedContext?.trainingJourneyId) ||
+        toObjectIdOrUndefined(req.body?.trainingJourneyId);
+      if (!linkedJourneyId) {
+        return res.status(400).json({ success: false, error: 'trainingJourneyId is required for content validation.' });
+      }
+      const journey = await TrainingJourney.findById(linkedJourneyId);
+      if (!journey) {
+        return res.status(404).json({ success: false, error: 'Journey not found.' });
+      }
+      const md = ((journey as any).methodologyData && typeof (journey as any).methodologyData === 'object')
+        ? { ...(journey as any).methodologyData }
+        : {};
+      if (trimmedMessage === CHAT_VALIDATE_MODULE_CONTENT_CMD) {
+        const moduleRef = String(parsedContext?.requestedModuleReference || '').trim();
+        const validated = Array.isArray(md.validatedModuleContents) ? [...md.validatedModuleContents] : [];
+        const item = {
+          moduleReference: moduleRef || 'module',
+          validatedAt: new Date().toISOString(),
+        };
+        validated.push(item);
+        md.validatedModuleContents = validated.slice(-100);
+      } else {
+        md.validatedAllModulesContentAt = new Date().toISOString();
+      }
+      (journey as any).methodologyData = md;
+      await journey.save();
+
+      const ack =
+        trimmedMessage === CHAT_VALIDATE_MODULE_CONTENT_CMD
+          ? 'Contenu du module validé et enregistré.'
+          : 'Contenu de tous les modules validé et enregistré.';
+      activeSession.messages.push(
+        { role: 'user', text: trimmedMessage, createdAt: new Date() } as any,
+        { role: 'assistant', text: ack, createdAt: new Date() } as any
+      );
+      activeSession.lastActivityAt = new Date();
+      await activeSession.save();
+      const streamEnabledEarly = String(req.query.stream ?? 'true').toLowerCase() !== 'false';
+      if (!streamEnabledEarly) {
+        return res.status(200).json({
+          success: true,
+          response: ack,
+          sessionId: String(activeSession._id),
+        });
+      }
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.setHeader('X-Chat-Session-Id', String(activeSession._id));
+      res.status(200);
+      if (typeof (res as any).flushHeaders === 'function') {
+        (res as any).flushHeaders();
+      }
+      res.write(ack);
+      return res.end();
+    }
 
     const confirmPlanCmd = message.trim().match(CHAT_CONFIRM_PLAN_CMD_REGEX);
     if (isJourneyBuilderApp(parsedContext) && confirmPlanCmd && pendingPlanMarkdown) {
