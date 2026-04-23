@@ -15,7 +15,6 @@ import TrainingImageSet from '../models/TrainingImageSet';
 import StructuredTrainingSlides from '../models/StructuredTrainingSlides';
 import TrainingJourney from '../models/TrainingJourney';
 import {
-  buildModulesFromPlanMarkdown,
   looksLikeTrainingPlanText,
   persistValidatedChatPlan,
 } from '../utils/chatPlanValidation';
@@ -1517,11 +1516,16 @@ const ensureVisualResponseContract = async (
   selectedDuration: string,
   selectedMethodology: string,
   seedText: string,
-  anthropicKey: string
+  anthropicKey: string,
+  options?: { skip?: boolean }
 ): Promise<string> => {
   let text = String(rawText || '').trim();
   if (!text) text = "Je n'ai pas pu generer une reponse pour le moment.";
   text = text.replace(/<harx-html>[\s\S]*?<\/harx-html>/gi, '').trim();
+
+  if (options?.skip) {
+    return text.replace(HARX_STYLE_TAG_REGEX, '').trim();
+  }
 
   const lowerSeed = String(seedText || '').toLowerCase();
   const asksStructuredPlan =
@@ -1614,41 +1618,6 @@ const isKbTopicMismatch = (text: string, kbKeywords: string[]): boolean => {
   const hits = kbKeywords.filter((kw) => kw && lower.includes(kw.toLowerCase())).length;
   // If almost no overlap with KB vocabulary, treat as off-topic.
   return hits < 2;
-};
-
-const normalizePlanToStrictTemplate = (raw: string): string => {
-  const input = String(raw || '').trim();
-  if (!input) return input;
-  const parsed = buildModulesFromPlanMarkdown(input);
-  const modulePlan = Array.isArray(parsed?.modulePlan) ? parsed.modulePlan : [];
-  if (modulePlan.length < 2) return input;
-  const lines: string[] = [];
-  modulePlan.forEach((m: any, idx: number) => {
-    const titleRaw = String(m?.title || '').trim();
-    const title = titleRaw.replace(/^module\s*\d+\s*[-:]\s*/i, '').trim() || `Module ${idx + 1}`;
-    const objectifs = Array.isArray(m?.objectifs) ? m.objectifs.filter(Boolean) : [];
-    const keyTopics = Array.isArray(m?.keyTopics) ? m.keyTopics.filter(Boolean) : [];
-    const activitesSource = Array.isArray(m?.activites) ? m.activites.filter(Boolean) : [];
-    const activites = activitesSource.length > 0 ? activitesSource : ['Activité pratique à définir'];
-
-    lines.push(`Module ${idx + 1}: ${title}`);
-    lines.push('🎯 Objectifs');
-    (objectifs.length > 0 ? objectifs : ['Objectif à définir']).forEach((item: string) => {
-      lines.push(`- ${String(item).trim()}`);
-    });
-    lines.push('📌 Key Topics');
-    (keyTopics.length > 0 ? keyTopics : ['Topic à définir']).forEach((item: string) => {
-      lines.push(`- ${String(item).trim()}`);
-    });
-    lines.push('🧩 Activités');
-    activites.forEach((item: string) => {
-      lines.push(`- ${String(item).trim()}`);
-    });
-    lines.push('📊 Indicateur d’évaluation');
-    lines.push('- Validation du module via quiz/simulation');
-    lines.push('');
-  });
-  return lines.join('\n').trim();
 };
 
 export const generateQuiz = async (
@@ -2029,7 +1998,7 @@ export const chat = async (
     const isPlanIntent = requestedOutput === 'training_plan';
     const isModuleIntent = requestedOutput === 'module_content';
     const isFullTrainingIntent = requestedOutput === 'full_training_content';
-    const requiresTypedStyle = isPlanIntent || isModuleIntent || isFullTrainingIntent;
+    const requiresTypedStyle = isModuleIntent || isFullTrainingIntent;
     const savedPlanAnchor = buildSavedPlanAnchor(linkedJourney);
 
     const priorMessages = Array.isArray(activeSession.messages) ? activeSession.messages : [];
@@ -2221,24 +2190,35 @@ export const chat = async (
             isPlanPatchRequest
               ? 'Return the full plan after patching, but do not regenerate untouched modules.'
               : '',
-            'Output only a plan (no full lessons), start directly at Module 1.',
-            'Minimum 4 modules, progressive from basic to advanced.',
-            'STRICT OUTPUT TEMPLATE (mandatory, same structure for every module):',
-            'Module X: <short title>',
-            '🎯 Objectifs',
-            '- <objectif 1>',
-            '- <objectif 2>',
-            '📌 Key Topics',
-            '- <topic 1>',
-            '- <topic 2>',
-            '🧩 Activités',
-            '- <activité 1>',
-            '- <activité 2>',
-            '📊 Indicateur d’évaluation',
-            '- <indicateur 1>',
-            'Use dash bullets only ("- "), no numbered lists.',
-            'Do not add intro, outro, or questions.',
-            'Keep phrases short (title-like), not long sentences.',
+            'Output a structured LMS-style training plan (markdown only). No intro paragraph, no questions.',
+            'Start immediately with "## Module 1: <titre court>". Minimum 4 modules, progressive du débutant vers l’avancé.',
+            'STRUCTURE (obligatoire, même logique pour chaque module):',
+            '- Use nested headings: ## for module title, ### for sections.',
+            '- Under each "### 📌 X.Y <sous-partie>" section, use dash bullets ("- ").',
+            '- You MAY use nested numbering in headings (X.1, X.2) inside the ### title text.',
+            '',
+            'TEMPLATE:',
+            '## Module X: <titre>',
+            '### 🎯 Objectifs',
+            '- <objectif>',
+            '- <objectif>',
+            '### 📌 X.1 <sous-partie>',
+            '- <élément>',
+            '- <élément>',
+            '### 📌 X.2 <sous-partie>',
+            '- <élément>',
+            '- <élément>',
+            '### 🧩 Activités',
+            '- <activité pratique>',
+            '- <activité réflexion>',
+            '### 📊 Indicateur d’évaluation',
+            '- <indicateur mesurable>',
+            '### 🔁 Amélioration (Méthodologie 360)',
+            '- Feedback',
+            '- Auto-évaluation',
+            '- Itération',
+            '',
+            'Avoid long narrative paragraphs; prefer short bullets.',
           ].join('\n')
         : '',
       requestedOutput === 'full_training_content'
@@ -2267,9 +2247,6 @@ export const chat = async (
       requiresTypedStyle
         ? 'Append exactly one <harx-style>{...}</harx-style> JSON block at the end.'
         : '',
-      isPlanIntent
-        ? 'Style profile plan: layout cards, clean and structured.'
-        : '',
       isModuleIntent
         ? 'Style profile module: editorial, focused and deep.'
         : '',
@@ -2282,12 +2259,14 @@ export const chat = async (
       const txt = String(value || '').trim();
       if (!txt) return true;
       const moduleHits = (txt.match(/module\s*\d+/gi) || []).length;
+      const moduleHeadingHits = (txt.match(/^##\s+module\s*\d+/gim) || []).length;
       const lineCount = txt.split('\n').filter((l) => l.trim()).length;
       const startsWithQuestion = /^\s*(avant|pour commencer|j['’]ai besoin|peux-tu|quel|quelle|quels|quelles)\b/i.test(txt);
       const questionMarks = (txt.match(/\?/g) || []).length;
-      const hasObjectives = /(learning objectives|objectifs? d['’]apprentissage|objectifs?)/i.test(txt);
-      const hasTopics = /(key topics|th[eè]mes cl[eé]s|sujets cl[eé]s|topics)/i.test(txt);
-      const hasDeliverables = /(livrables?|livrable|deliverables?)/i.test(txt);
+      const hasObjectives = /(###\s*🎯\s*objectifs|learning objectives|objectifs? d['’]apprentissage|objectifs?)/i.test(txt);
+      const hasTopics = /(###\s*📌|key topics|th[eè]mes cl[eé]s|sujets cl[eé]s|topics)/i.test(txt);
+      const hasActivities = /(###\s*🧩\s*activit|practice activity|activit[eé] pratique|mise en pratique|atelier)/i.test(txt);
+      const hasEvaluation = /(###\s*📊|evaluation indicator|indicateur d['’]?[eé]valuation|crit[eè]re d['’]?[eé]valuation)/i.test(txt);
       const bulletLines = txt
         .split('\n')
         .map((l) => l.trim())
@@ -2311,7 +2290,20 @@ export const chat = async (
         return acc;
       }, {} as Record<string, number>);
       const repetitivePrefixDetected = Object.values(prefixCounts).some((count) => count >= 3);
-      return moduleHits < 2 || lineCount < 8 || startsWithQuestion || questionMarks >= 4 || !hasObjectives || !hasTopics || !hasDeliverables || longSentenceBullets >= 2 || numberedListLines >= 2 || repetitivePrefixDetected;
+      const moduleCountOk = moduleHits >= 2 || moduleHeadingHits >= 2;
+      return (
+        !moduleCountOk ||
+        lineCount < 10 ||
+        startsWithQuestion ||
+        questionMarks >= 4 ||
+        !hasObjectives ||
+        !hasTopics ||
+        !hasActivities ||
+        !hasEvaluation ||
+        longSentenceBullets >= 4 ||
+        numberedListLines >= 6 ||
+        repetitivePrefixDetected
+      );
     };
 
     const buildStylePresetByIntent = (intent: string) => {
@@ -2452,34 +2444,21 @@ export const chat = async (
         const correctivePlanPrompt = `${systemPrompt}
 HARD PLAN ENFORCEMENT:
 Regenerate now with strict compliance.
-- Start at Module 1
+- Start at "## Module 1: <titre>"
 - Minimum 4 modules, progressive
-- Use this exact structure per module:
-  Module X: <short title>
-  🎯 Objectifs
-  - item
-  - item
-  📌 Key Topics
-  - item
-  - item
-  🧩 Activités
-  - item
-  - item
-  📊 Indicateur d’évaluation
-  - item
-- Dash bullets only, short title-like phrases, no numbered lists
-- No intro, no questions, no long explanations`;
+- Use nested markdown headings (## / ###) exactly like the LMS template in INTENT LOCK: TRAINING PLAN
+- Each module must include: ### 🎯 Objectifs, at least two "### 📌 X.Y ..." sections, ### 🧩 Activités, ### 📊 Indicateur d’évaluation, ### 🔁 Amélioration (Méthodologie 360)
+- Use dash bullets under each ### section
+- No intro, no questions, no long narrative paragraphs`;
         response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
-      }
-      if (isPlanIntent) {
-        response = normalizePlanToStrictTemplate(String(response || ''));
       }
       let finalResponse = await ensureVisualResponseContract(
         String(response || ''),
         selectedDuration,
         selectedMethodology,
         message.trim(),
-        anthropicKey
+        anthropicKey,
+        { skip: isPlanIntent }
       );
       finalResponse = enforceHarxStyleByIntent(finalResponse, requestedOutput);
 
@@ -2552,27 +2531,13 @@ Regenerate now with strict compliance.
         const correctivePlanPrompt = `${systemPrompt}
 HARD PLAN ENFORCEMENT:
 Regenerate now with strict compliance.
-- Start at Module 1
+- Start at "## Module 1: <titre>"
 - Minimum 4 modules, progressive
-- Use this exact structure per module:
-  Module X: <short title>
-  🎯 Objectifs
-  - item
-  - item
-  📌 Key Topics
-  - item
-  - item
-  🧩 Activités
-  - item
-  - item
-  📊 Indicateur d’évaluation
-  - item
-- Dash bullets only, short title-like phrases, no numbered lists
-- No intro, no questions, no long explanations`;
+- Use nested markdown headings (## / ###) exactly like the LMS template in INTENT LOCK: TRAINING PLAN
+- Each module must include: ### 🎯 Objectifs, at least two "### 📌 X.Y ..." sections, ### 🧩 Activités, ### 📊 Indicateur d’évaluation, ### 🔁 Amélioration (Méthodologie 360)
+- Use dash bullets under each ### section
+- No intro, no questions, no long narrative paragraphs`;
         response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
-      }
-      if (isPlanIntent) {
-        response = normalizePlanToStrictTemplate(String(response || ''));
       }
       fullResponse = String(response || '');
       res.write(fullResponse);
@@ -2595,7 +2560,8 @@ Regenerate now with strict compliance.
       selectedDuration,
       selectedMethodology,
       message.trim(),
-      anthropicKey
+      anthropicKey,
+      { skip: isPlanIntent }
     );
     assistantMessageText = enforceHarxStyleByIntent(assistantMessageText, requestedOutput);
     if (assistantMessageText !== String(fullResponse || '').trim()) {
