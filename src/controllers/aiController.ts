@@ -15,6 +15,7 @@ import TrainingImageSet from '../models/TrainingImageSet';
 import StructuredTrainingSlides from '../models/StructuredTrainingSlides';
 import TrainingJourney from '../models/TrainingJourney';
 import {
+  buildModulesFromPlanMarkdown,
   looksLikeTrainingPlanText,
   persistValidatedChatPlan,
 } from '../utils/chatPlanValidation';
@@ -197,6 +198,41 @@ const sanitizeAssistantPlanText = (raw: string): string =>
     .replace(HARX_TRAINING_STATUS_REGEX, '')
     .replace(/<harx-plan-confirm>[\s\S]*?<\/harx-plan-confirm>/gi, '')
     .trim();
+
+const normalizeTrainingPlanStructure = (raw: string): string => {
+  const clean = sanitizeAssistantPlanText(raw);
+  const parsed = buildModulesFromPlanMarkdown(clean);
+  const modulePlan = Array.isArray(parsed?.modulePlan) ? parsed.modulePlan : [];
+  if (modulePlan.length < 2) return clean;
+
+  const lines: string[] = [];
+  modulePlan.forEach((mod: any, index: number) => {
+    const objectifs = Array.isArray(mod?.objectifs) ? mod.objectifs : [];
+    const keyTopics = Array.isArray(mod?.keyTopics) ? mod.keyTopics : [];
+    const livrables = Array.isArray(mod?.activites) ? mod.activites : [];
+    lines.push(`Module ${index + 1}:`);
+    lines.push('  Objectifs:');
+    if (objectifs.length > 0) {
+      objectifs.forEach((item: string) => lines.push(`    - ${String(item || '').trim()}`));
+    } else {
+      lines.push('    - A definir');
+    }
+    lines.push('  Key Topics:');
+    if (keyTopics.length > 0) {
+      keyTopics.forEach((item: string) => lines.push(`    - ${String(item || '').trim()}`));
+    } else {
+      lines.push('    - A definir');
+    }
+    lines.push('  Livrables:');
+    if (livrables.length > 0) {
+      livrables.forEach((item: string) => lines.push(`    - ${String(item || '').trim()}`));
+    } else {
+      lines.push('    - A definir');
+    }
+    lines.push('');
+  });
+  return lines.join('\n').trim();
+};
 
 const buildSavedPlanAnchor = (journey: any): string => {
   if (!journey) return '';
@@ -2156,11 +2192,15 @@ export const chat = async (
               : '',
             'Output only a plan (no full lessons), start directly at Module 1.',
             'Minimum 4 modules, progressive from basic to advanced.',
-            'Use short dash bullets only ("- "), title-like phrases, no long sentences, no numbering.',
-            'Each module must include: 🎯 Objectifs, 📌 Key Topics, 🧩 Activites, 📊 Indicateur d\'evaluation.',
-            'Use module emojis in order: 🟢 Module 1, 🟡 Module 2, 🟠 Module 3, 🔵 Module 4.',
-            'Nested format allowed: "- 📌 1.1 Sous-theme" then indented "  - item".',
-            'No intro paragraph, no clarification questions before modules.',
+            'Use this exact structure for every module (same headings, same order):',
+            'Module X:',
+            '  Objectifs:',
+            '    - ...',
+            '  Key Topics:',
+            '    - ...',
+            '  Livrables:',
+            '    - ...',
+            'No intro paragraph, no questions, no emojis, no numbering outside "Module X:".',
           ].join('\n')
         : '',
       requestedOutput === 'full_training_content'
@@ -2209,8 +2249,7 @@ export const chat = async (
       const questionMarks = (txt.match(/\?/g) || []).length;
       const hasObjectives = /(learning objectives|objectifs? d['’]apprentissage|objectifs?)/i.test(txt);
       const hasTopics = /(key topics|th[eè]mes cl[eé]s|sujets cl[eé]s|topics)/i.test(txt);
-      const hasPractice = /(practice activity|activit[eé] pratique|mise en pratique|atelier)/i.test(txt);
-      const hasEvaluation = /(evaluation indicator|indicateur d['’]?[eé]valuation|crit[eè]re d['’]?[eé]valuation)/i.test(txt);
+      const hasDeliverables = /(livrables?|deliverables?|outputs?)/i.test(txt);
       const bulletLines = txt
         .split('\n')
         .map((l) => l.trim())
@@ -2234,7 +2273,7 @@ export const chat = async (
         return acc;
       }, {} as Record<string, number>);
       const repetitivePrefixDetected = Object.values(prefixCounts).some((count) => count >= 3);
-      return moduleHits < 2 || lineCount < 8 || startsWithQuestion || questionMarks >= 4 || !hasObjectives || !hasTopics || !hasPractice || !hasEvaluation || longSentenceBullets >= 2 || numberedListLines >= 2 || repetitivePrefixDetected;
+      return moduleHits < 2 || lineCount < 8 || startsWithQuestion || questionMarks >= 4 || !hasObjectives || !hasTopics || !hasDeliverables || longSentenceBullets >= 2 || numberedListLines >= 2 || repetitivePrefixDetected;
     };
 
     const buildStylePresetByIntent = (intent: string) => {
@@ -2371,11 +2410,17 @@ export const chat = async (
         const correctivePlanPrompt = `${systemPrompt}
 HARD PLAN ENFORCEMENT:
 Regenerate now with strict compliance.
-- Start at 🟢 Module 1
+- Start at Module 1
 - Minimum 4 modules, progressive
-- Per module: 🎯 Objectifs, 📌 Key Topics, 🧩 Activites, 📊 Indicateur d'evaluation
-- Dash bullets only, short title-like phrases, no numbered lists
-- Use module emojis in order: 🟢 🟡 🟠 🔵
+- Per module use this exact structure:
+  Module X:
+    Objectifs:
+      - ...
+    Key Topics:
+      - ...
+    Livrables:
+      - ...
+- Dash bullets only for list items, short title-like phrases, no numbered lists
 - No intro, no questions, no long explanations`;
         response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
       }
@@ -2386,6 +2431,9 @@ Regenerate now with strict compliance.
         message.trim(),
         anthropicKey
       );
+      if (isPlanIntent) {
+        finalResponse = normalizeTrainingPlanStructure(finalResponse);
+      }
       finalResponse = enforceHarxStyleByIntent(finalResponse, requestedOutput);
 
       const readinessExtra = await appendTrainingReadinessBlock({
@@ -2457,11 +2505,17 @@ Regenerate now with strict compliance.
         const correctivePlanPrompt = `${systemPrompt}
 HARD PLAN ENFORCEMENT:
 Regenerate now with strict compliance.
-- Start at 🟢 Module 1
+- Start at Module 1
 - Minimum 4 modules, progressive
-- Per module: 🎯 Objectifs, 📌 Key Topics, 🧩 Activites, 📊 Indicateur d'evaluation
-- Dash bullets only, short title-like phrases, no numbered lists
-- Use module emojis in order: 🟢 🟡 🟠 🔵
+- Per module use this exact structure:
+  Module X:
+    Objectifs:
+      - ...
+    Key Topics:
+      - ...
+    Livrables:
+      - ...
+- Dash bullets only for list items, short title-like phrases, no numbered lists
 - No intro, no questions, no long explanations`;
         response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
       }
@@ -2488,6 +2542,9 @@ Regenerate now with strict compliance.
       message.trim(),
       anthropicKey
     );
+    if (isPlanIntent) {
+      assistantMessageText = normalizeTrainingPlanStructure(assistantMessageText);
+    }
     assistantMessageText = enforceHarxStyleByIntent(assistantMessageText, requestedOutput);
     if (assistantMessageText !== String(fullResponse || '').trim()) {
       const appended = assistantMessageText.slice(String(fullResponse || '').trim().length);
