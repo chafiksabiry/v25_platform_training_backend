@@ -81,6 +81,7 @@ const appendTrainingReadinessBlock = async (params: {
     '- ready: contenu suffisant pour valider / enregistrer la formation.',
     '- incomplete: au moins un module important manque de contenu substantiel.',
     '- not_applicable: pas de plan de formation clair dans cette reponse (banalites, questions seules, hors sujet).',
+    'Si curriculumOutline est vide/incomplet, deduis les modules depuis la reponse assistant (patterns "Module X" ou emojis 🟢🟡🟠🔵) avant de conclure.',
     'REGLE ABSOLUE: si missingModules contient au moins un module, readiness DOIT etre incomplete (jamais ready). ready implique missingModules vide [].',
     'messageFr: phrase courte en francais pour l utilisateur (ex: ce qui manque).',
   ].join('\n');
@@ -2181,6 +2182,9 @@ export const chat = async (
               ? 'PLAN PATCH MODE: modify only the module(s) explicitly requested by the user. Keep all other existing modules unchanged (same order, same titles, same content).'
               : '',
             isPlanPatchRequest
+              ? 'If user references module position (for example "module 2"), map it to the corresponding saved plan module index. If ambiguous, ask one clarifying question before patching.'
+              : '',
+            isPlanPatchRequest
               ? 'Return the full plan after patching, but do not regenerate untouched modules.'
               : '',
             'Output only a plan (no full lessons), start directly at Module 1.',
@@ -2211,6 +2215,7 @@ export const chat = async (
               : '',
             'Generate only the requested module.',
             'Include: Module Title, Learning Objectives, Deep Explanation, Examples, Practical Exercise, Quick Quiz (3-5), Self-Assessment, Skill Validation, Success/Failure indicator.',
+            'Keep content under 600 words for a single module.',
             'Include one self-check with model answer or reflection prompt.',
           ].join('\n')
         : '',
