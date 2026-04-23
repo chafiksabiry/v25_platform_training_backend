@@ -15,9 +15,7 @@ import TrainingImageSet from '../models/TrainingImageSet';
 import StructuredTrainingSlides from '../models/StructuredTrainingSlides';
 import TrainingJourney from '../models/TrainingJourney';
 import {
-  isPlanAffirmationMessage,
   looksLikeTrainingPlanText,
-  persistValidatedChatPlan,
 } from '../utils/chatPlanValidation';
 import mongoose from 'mongoose';
 import fs from 'fs';
@@ -29,11 +27,8 @@ import { ImageGenerationService } from '../services/imageGenerationService';
 const unlinkAsync = promisify(fs.unlink);
 const HARX_STYLE_TAG_REGEX = /<harx-style>\s*\{[\s\S]*?\}\s*<\/harx-style>/i;
 const HARX_TRAINING_STATUS_REGEX = /<harx-training-status>\s*([\s\S]*?)\s*<\/harx-training-status>/i;
-const CHAT_CONFIRM_PLAN_CMD_REGEX = /^__CONFIRM_PLAN_SAVE__(?::([a-zA-Z0-9_-]{6,64}))?$/;
 const CHAT_VALIDATE_MODULE_CONTENT_CMD = '__VALIDATE_MODULE_CONTENT__';
 const CHAT_VALIDATE_ALL_MODULES_CONTENT_CMD = '__VALIDATE_ALL_MODULES_CONTENT__';
-const HARX_PLAN_CONFIRM_TOKEN = '__CONFIRM_PLAN_SAVE__';
-const HARX_PLAN_CONFIRM_REGEX = /<harx-plan-confirm>\s*([\s\S]*?)\s*<\/harx-plan-confirm>/i;
 
 const isJourneyBuilderApp = (parsed: any): boolean => String(parsed?.app || '').trim() === 'HARX Journey Builder';
 
@@ -193,7 +188,7 @@ const sanitizeAssistantPlanText = (raw: string): string =>
   String(raw || '')
     .replace(/<harx-style>[\s\S]*?<\/harx-style>/gi, '')
     .replace(HARX_TRAINING_STATUS_REGEX, '')
-    .replace(HARX_PLAN_CONFIRM_REGEX, '')
+    .replace(/<harx-plan-confirm>[\s\S]*?<\/harx-plan-confirm>/gi, '')
     .trim();
 
 const buildSavedPlanAnchor = (journey: any): string => {
@@ -1850,7 +1845,6 @@ export const chat = async (
       mergeFromSessionIfMissing('requestedOutput');
       mergeFromSessionIfMissing('requestedModuleReference');
       mergeFromSessionIfMissing('trainingJourneyId');
-      mergeFromSessionIfMissing('pendingPlanSaveToken');
     }
 
     const selectedDuration = parsedContext?.selectedDuration || 'non specifiee';
@@ -1913,8 +1907,6 @@ export const chat = async (
       requestedOutput === 'training_plan' &&
       isPlanEditRequest(trimmedMessage) &&
       looksLikeTrainingPlanText(lastAssistantPlanSanitized);
-    const pendingPlanMarkdown = String((sessionContext as any)?.pendingPlanMarkdown || '').trim();
-    const pendingPlanSaveToken = String((sessionContext as any)?.pendingPlanSaveToken || '').trim();
 
     if (
       isJourneyBuilderApp(parsedContext) &&
@@ -1971,153 +1963,6 @@ export const chat = async (
           sessionId: String(activeSession._id),
         });
       }
-      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-      res.setHeader('Cache-Control', 'no-cache, no-transform');
-      res.setHeader('Connection', 'keep-alive');
-      res.setHeader('X-Accel-Buffering', 'no');
-      res.setHeader('X-Chat-Session-Id', String(activeSession._id));
-      res.status(200);
-      if (typeof (res as any).flushHeaders === 'function') {
-        (res as any).flushHeaders();
-      }
-      res.write(ack);
-      return res.end();
-    }
-
-    const confirmPlanCmd = message.trim().match(CHAT_CONFIRM_PLAN_CMD_REGEX);
-    if (isJourneyBuilderApp(parsedContext) && confirmPlanCmd && pendingPlanMarkdown) {
-      const tokenFromCmd = String(confirmPlanCmd[1] || '').trim();
-      if (pendingPlanSaveToken && tokenFromCmd && pendingPlanSaveToken !== tokenFromCmd) {
-        return res.status(400).json({ success: false, error: 'Invalid confirmation token.' });
-      }
-      let planSavedJourneyId: string | undefined;
-      let ack = '';
-      try {
-        const result = await persistValidatedChatPlan({
-          planMarkdown: pendingPlanMarkdown,
-          trainingJourneyId: toObjectIdOrUndefined(parsedContext?.trainingJourneyId),
-          gigId: safeGigId,
-          companyId: safeCompanyId,
-          parsedContext,
-          userMessage: 'confirm_plan_button',
-        });
-        planSavedJourneyId = result.journeyId;
-        ack = result.ackFr;
-      } catch (e: any) {
-        ack = `Impossible d'enregistrer le plan : ${String(e?.message || 'erreur')}`;
-      }
-      const userMessageText = message.trim();
-      activeSession.messages.push(
-        { role: 'user', text: userMessageText, createdAt: new Date() } as any,
-        { role: 'assistant', text: ack, createdAt: new Date() } as any
-      );
-      if (planSavedJourneyId && parsedContext && typeof parsedContext === 'object') {
-        (parsedContext as any).trainingJourneyId = planSavedJourneyId;
-      }
-      activeSession.contextSnapshot =
-        parsedContext && typeof parsedContext === 'object'
-          ? {
-              analyzedUploadsCount: parsedContext.analyzedUploadsCount,
-              analyzedUploads: parsedContext.analyzedUploads,
-              knowledgeBaseDocumentsCount: parsedContext.knowledgeBaseDocumentsCount,
-              knowledgeBaseDocuments: parsedContext.knowledgeBaseDocuments,
-              selectedGigId: parsedContext.selectedGigId,
-              selectedGigTitle: parsedContext.selectedGigTitle,
-              gigSnapshot: parsedContext.gigSnapshot,
-              useKnowledgeBase: parsedContext.useKnowledgeBase,
-              useUploadedDocuments: parsedContext.useUploadedDocuments,
-              chatStyle: parsedContext.chatStyle,
-              requestedOutput: parsedContext.requestedOutput,
-              requestedModuleReference: parsedContext.requestedModuleReference,
-              trainingJourneyId: (parsedContext as any)?.trainingJourneyId,
-            }
-          : activeSession.contextSnapshot || null;
-      if (!activeSession.title || activeSession.title === 'Nouvelle conversation') {
-        activeSession.title = buildSessionTitle(userMessageText);
-      }
-      activeSession.lastActivityAt = new Date();
-      await activeSession.save();
-
-      const streamEnabledEarly = String(req.query.stream ?? 'true').toLowerCase() !== 'false';
-      if (!streamEnabledEarly) {
-        return res.status(200).json({
-          success: true,
-          response: ack,
-          sessionId: String(activeSession._id),
-          planSaved: Boolean(planSavedJourneyId),
-          journeyId: planSavedJourneyId,
-        });
-      }
-
-      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-      res.setHeader('Cache-Control', 'no-cache, no-transform');
-      res.setHeader('Connection', 'keep-alive');
-      res.setHeader('X-Accel-Buffering', 'no');
-      res.setHeader('X-Chat-Session-Id', String(activeSession._id));
-      if (planSavedJourneyId) {
-        res.setHeader('X-Plan-Saved', '1');
-        res.setHeader('X-Saved-Journey-Id', planSavedJourneyId);
-      }
-      res.status(200);
-      if (typeof (res as any).flushHeaders === 'function') {
-        (res as any).flushHeaders();
-      }
-      res.write(ack);
-      return res.end();
-    }
-
-    if (
-      isJourneyBuilderApp(parsedContext) &&
-      isPlanAffirmationMessage(message.trim()) &&
-      looksLikeTrainingPlanText(lastAssistantPlanCandidate)
-    ) {
-      const confirmToken = crypto.randomBytes(10).toString('hex');
-      const ack = [
-        'Plan détecté comme accepté.',
-        'Cliquez sur le bouton pour confirmer l’enregistrement.',
-        '',
-        `<harx-plan-confirm>{"token":"${confirmToken}","label":"Confirmer le plan"}</harx-plan-confirm>`,
-      ].join('\n');
-      const userMessageText = message.trim();
-      activeSession.messages.push(
-        { role: 'user', text: userMessageText, createdAt: new Date() } as any,
-        { role: 'assistant', text: ack, createdAt: new Date() } as any
-      );
-      activeSession.contextSnapshot =
-        parsedContext && typeof parsedContext === 'object'
-          ? {
-              analyzedUploadsCount: parsedContext.analyzedUploadsCount,
-              analyzedUploads: parsedContext.analyzedUploads,
-              knowledgeBaseDocumentsCount: parsedContext.knowledgeBaseDocumentsCount,
-              knowledgeBaseDocuments: parsedContext.knowledgeBaseDocuments,
-              selectedGigId: parsedContext.selectedGigId,
-              selectedGigTitle: parsedContext.selectedGigTitle,
-              gigSnapshot: parsedContext.gigSnapshot,
-              useKnowledgeBase: parsedContext.useKnowledgeBase,
-              useUploadedDocuments: parsedContext.useUploadedDocuments,
-              chatStyle: parsedContext.chatStyle,
-              requestedOutput: parsedContext.requestedOutput,
-              requestedModuleReference: parsedContext.requestedModuleReference,
-              trainingJourneyId: (parsedContext as any)?.trainingJourneyId,
-              pendingPlanMarkdown: lastAssistantPlanCandidate,
-              pendingPlanSaveToken: confirmToken,
-            }
-          : activeSession.contextSnapshot || null;
-      if (!activeSession.title || activeSession.title === 'Nouvelle conversation') {
-        activeSession.title = buildSessionTitle(userMessageText);
-      }
-      activeSession.lastActivityAt = new Date();
-      await activeSession.save();
-
-      const streamEnabledEarly = String(req.query.stream ?? 'true').toLowerCase() !== 'false';
-      if (!streamEnabledEarly) {
-        return res.status(200).json({
-          success: true,
-          response: ack,
-          sessionId: String(activeSession._id),
-        });
-      }
-
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache, no-transform');
       res.setHeader('Connection', 'keep-alive');
@@ -2482,23 +2327,6 @@ Regenerate now with strict compliance.
       if (readinessExtra) {
         finalResponse = `${finalResponse}${readinessExtra}`;
       }
-      let autoPlanConfirmToken = '';
-      const normalizedPlanCandidate = sanitizeAssistantPlanText(finalResponse);
-      const shouldAutoOfferPlanConfirm =
-        looksLikeTrainingPlanText(normalizedPlanCandidate) ||
-        /\b(plan de formation|training plan)\b/i.test(normalizedPlanCandidate) ||
-        /\bmodule\s*1\b[\s\S]{0,1200}\bmodule\s*2\b/i.test(normalizedPlanCandidate) ||
-        ((requestedOutput === 'training_plan' || /plan|formation/i.test(message.trim())) &&
-          normalizedPlanCandidate.length >= 120);
-      if (
-        isJourneyBuilderApp(parsedContext) &&
-        !isPlanFrozen &&
-        !HARX_PLAN_CONFIRM_REGEX.test(finalResponse) &&
-        shouldAutoOfferPlanConfirm
-      ) {
-        autoPlanConfirmToken = crypto.randomBytes(10).toString('hex');
-        finalResponse = `${finalResponse}\n\n<harx-plan-confirm>{"token":"${autoPlanConfirmToken}","label":"Confirmer le plan"}</harx-plan-confirm>`;
-      }
 
       const userMessageText = message.trim();
       const assistantMessageText = finalResponse;
@@ -2521,10 +2349,6 @@ Regenerate now with strict compliance.
             requestedOutput: parsedContext.requestedOutput,
             requestedModuleReference: parsedContext.requestedModuleReference,
             trainingJourneyId: (parsedContext as any)?.trainingJourneyId,
-            pendingPlanMarkdown: autoPlanConfirmToken
-              ? sanitizeAssistantPlanText(assistantMessageText)
-              : ((parsedContext as any)?.pendingPlanMarkdown || undefined),
-            pendingPlanSaveToken: autoPlanConfirmToken || ((parsedContext as any)?.pendingPlanSaveToken || undefined),
           }
         : activeSession.contextSnapshot || null;
       if (!activeSession.title || activeSession.title === 'Nouvelle conversation') {
@@ -2618,28 +2442,6 @@ Regenerate now with strict compliance.
         (res as any).flush();
       }
     }
-    let autoPlanConfirmToken = '';
-    const normalizedPlanCandidate = sanitizeAssistantPlanText(assistantMessageText);
-    const shouldAutoOfferPlanConfirm =
-      looksLikeTrainingPlanText(normalizedPlanCandidate) ||
-      /\b(plan de formation|training plan)\b/i.test(normalizedPlanCandidate) ||
-      /\bmodule\s*1\b[\s\S]{0,1200}\bmodule\s*2\b/i.test(normalizedPlanCandidate) ||
-      ((requestedOutput === 'training_plan' || /plan|formation/i.test(message.trim())) &&
-        normalizedPlanCandidate.length >= 120);
-    if (
-      isJourneyBuilderApp(parsedContext) &&
-      !isPlanFrozen &&
-      !HARX_PLAN_CONFIRM_REGEX.test(assistantMessageText) &&
-      shouldAutoOfferPlanConfirm
-    ) {
-      autoPlanConfirmToken = crypto.randomBytes(10).toString('hex');
-      const autoConfirmBlock = `\n\n<harx-plan-confirm>{"token":"${autoPlanConfirmToken}","label":"Confirmer le plan"}</harx-plan-confirm>`;
-      assistantMessageText = `${assistantMessageText}${autoConfirmBlock}`;
-      res.write(autoConfirmBlock);
-      if (typeof (res as any).flush === 'function') {
-        (res as any).flush();
-      }
-    }
 
     activeSession.messages.push(
       { role: 'user', text: userMessageText, createdAt: new Date() } as any,
@@ -2660,10 +2462,6 @@ Regenerate now with strict compliance.
           requestedOutput: parsedContext.requestedOutput,
           requestedModuleReference: parsedContext.requestedModuleReference,
           trainingJourneyId: (parsedContext as any)?.trainingJourneyId,
-          pendingPlanMarkdown: autoPlanConfirmToken
-            ? sanitizeAssistantPlanText(assistantMessageText)
-            : ((parsedContext as any)?.pendingPlanMarkdown || undefined),
-          pendingPlanSaveToken: autoPlanConfirmToken || ((parsedContext as any)?.pendingPlanSaveToken || undefined),
         }
       : activeSession.contextSnapshot || null;
     if (!activeSession.title || activeSession.title === 'Nouvelle conversation') {
