@@ -141,11 +141,14 @@ const appendTrainingReadinessBlock = async (params: {
     messageFr = `Il manque encore du contenu pour ${missingModules.length} module(s).`;
   }
 
-  if (readiness === 'not_applicable') return '';
-
   const requestedOutput = String(parsedContext?.requestedOutput || '').toLowerCase();
-  const isTrainingPlanResponse =
-    requestedOutput === 'training_plan' && looksLikeTrainingPlanText(compactAssistant);
+  const looksLikePlan = looksLikeTrainingPlanText(compactAssistant);
+  const isTrainingPlanResponse = looksLikePlan || requestedOutput === 'training_plan';
+  if (readiness === 'not_applicable') {
+    if (!isTrainingPlanResponse) return '';
+    // If classifier is unsure but response clearly looks like a plan, allow CTA rendering.
+    readiness = 'ready';
+  }
   const actions: { id: string; label: string }[] = [];
   if (!isPlanValidated && isTrainingPlanResponse) {
     actions.push({ id: 'validate_plan', label: 'Valider le plan' });
