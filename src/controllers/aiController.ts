@@ -15,7 +15,6 @@ import TrainingImageSet from '../models/TrainingImageSet';
 import StructuredTrainingSlides from '../models/StructuredTrainingSlides';
 import TrainingJourney from '../models/TrainingJourney';
 import {
-  buildModulesFromPlanMarkdown,
   looksLikeTrainingPlanText,
   persistValidatedChatPlan,
 } from '../utils/chatPlanValidation';
@@ -198,41 +197,6 @@ const sanitizeAssistantPlanText = (raw: string): string =>
     .replace(HARX_TRAINING_STATUS_REGEX, '')
     .replace(/<harx-plan-confirm>[\s\S]*?<\/harx-plan-confirm>/gi, '')
     .trim();
-
-const normalizeTrainingPlanStructure = (raw: string): string => {
-  const clean = sanitizeAssistantPlanText(raw);
-  const parsed = buildModulesFromPlanMarkdown(clean);
-  const modulePlan = Array.isArray(parsed?.modulePlan) ? parsed.modulePlan : [];
-  if (modulePlan.length < 2) return clean;
-
-  const lines: string[] = [];
-  modulePlan.forEach((mod: any, index: number) => {
-    const objectifs = Array.isArray(mod?.objectifs) ? mod.objectifs : [];
-    const keyTopics = Array.isArray(mod?.keyTopics) ? mod.keyTopics : [];
-    const livrables = Array.isArray(mod?.activites) ? mod.activites : [];
-    lines.push(`Module ${index + 1}:`);
-    lines.push('  Objectifs:');
-    if (objectifs.length > 0) {
-      objectifs.forEach((item: string) => lines.push(`    - ${String(item || '').trim()}`));
-    } else {
-      lines.push('    - A definir');
-    }
-    lines.push('  Key Topics:');
-    if (keyTopics.length > 0) {
-      keyTopics.forEach((item: string) => lines.push(`    - ${String(item || '').trim()}`));
-    } else {
-      lines.push('    - A definir');
-    }
-    lines.push('  Livrables:');
-    if (livrables.length > 0) {
-      livrables.forEach((item: string) => lines.push(`    - ${String(item || '').trim()}`));
-    } else {
-      lines.push('    - A definir');
-    }
-    lines.push('');
-  });
-  return lines.join('\n').trim();
-};
 
 const buildSavedPlanAnchor = (journey: any): string => {
   if (!journey) return '';
@@ -2192,15 +2156,21 @@ export const chat = async (
               : '',
             'Output only a plan (no full lessons), start directly at Module 1.',
             'Minimum 4 modules, progressive from basic to advanced.',
-            'Use this exact structure for every module (same headings, same order):',
-            'Module X:',
-            '  Objectifs:',
-            '    - ...',
-            '  Key Topics:',
-            '    - ...',
-            '  Livrables:',
-            '    - ...',
-            'No intro paragraph, no questions, no emojis, no numbering outside "Module X:".',
+            'STRICT OUTPUT TEMPLATE (mandatory, same structure for every module):',
+            'Module X: <short title>',
+            'Objectifs :',
+            '- <objectif 1>',
+            '- <objectif 2>',
+            'Key Topics :',
+            '- <topic 1>',
+            '- <topic 2>',
+            'Livrables :',
+            '- <livrable 1>',
+            '- <livrable 2>',
+            'Use dash bullets only ("- "), no numbered lists.',
+            'Do not use emojis.',
+            'Do not add intro, outro, or questions.',
+            'Keep phrases short (title-like), not long sentences.',
           ].join('\n')
         : '',
       requestedOutput === 'full_training_content'
@@ -2249,7 +2219,7 @@ export const chat = async (
       const questionMarks = (txt.match(/\?/g) || []).length;
       const hasObjectives = /(learning objectives|objectifs? d['’]apprentissage|objectifs?)/i.test(txt);
       const hasTopics = /(key topics|th[eè]mes cl[eé]s|sujets cl[eé]s|topics)/i.test(txt);
-      const hasDeliverables = /(livrables?|deliverables?|outputs?)/i.test(txt);
+      const hasDeliverables = /(livrables?|livrable|deliverables?)/i.test(txt);
       const bulletLines = txt
         .split('\n')
         .map((l) => l.trim())
@@ -2412,16 +2382,19 @@ HARD PLAN ENFORCEMENT:
 Regenerate now with strict compliance.
 - Start at Module 1
 - Minimum 4 modules, progressive
-- Per module use this exact structure:
-  Module X:
-    Objectifs:
-      - ...
-    Key Topics:
-      - ...
-    Livrables:
-      - ...
-- Dash bullets only for list items, short title-like phrases, no numbered lists
-- No intro, no questions, no long explanations`;
+- Use this exact structure per module:
+  Module X: <short title>
+  Objectifs :
+  - item
+  - item
+  Key Topics :
+  - item
+  - item
+  Livrables :
+  - item
+  - item
+- Dash bullets only, short title-like phrases, no numbered lists
+- No emojis, no intro, no questions, no long explanations`;
         response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
       }
       let finalResponse = await ensureVisualResponseContract(
@@ -2431,9 +2404,6 @@ Regenerate now with strict compliance.
         message.trim(),
         anthropicKey
       );
-      if (isPlanIntent) {
-        finalResponse = normalizeTrainingPlanStructure(finalResponse);
-      }
       finalResponse = enforceHarxStyleByIntent(finalResponse, requestedOutput);
 
       const readinessExtra = await appendTrainingReadinessBlock({
@@ -2507,16 +2477,19 @@ HARD PLAN ENFORCEMENT:
 Regenerate now with strict compliance.
 - Start at Module 1
 - Minimum 4 modules, progressive
-- Per module use this exact structure:
-  Module X:
-    Objectifs:
-      - ...
-    Key Topics:
-      - ...
-    Livrables:
-      - ...
-- Dash bullets only for list items, short title-like phrases, no numbered lists
-- No intro, no questions, no long explanations`;
+- Use this exact structure per module:
+  Module X: <short title>
+  Objectifs :
+  - item
+  - item
+  Key Topics :
+  - item
+  - item
+  Livrables :
+  - item
+  - item
+- Dash bullets only, short title-like phrases, no numbered lists
+- No emojis, no intro, no questions, no long explanations`;
         response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
       }
       fullResponse = String(response || '');
@@ -2542,9 +2515,6 @@ Regenerate now with strict compliance.
       message.trim(),
       anthropicKey
     );
-    if (isPlanIntent) {
-      assistantMessageText = normalizeTrainingPlanStructure(assistantMessageText);
-    }
     assistantMessageText = enforceHarxStyleByIntent(assistantMessageText, requestedOutput);
     if (assistantMessageText !== String(fullResponse || '').trim()) {
       const appended = assistantMessageText.slice(String(fullResponse || '').trim().length);

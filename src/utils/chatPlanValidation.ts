@@ -122,7 +122,7 @@ function parseStructuredSections(blockLines: string[]) {
       active = 'keyTopics';
       continue;
     }
-    if (/^(activit[eé]s?)\s*:?$/i.test(line)) {
+    if (/^(activit[eé]s?|livrables?|deliverables?)\s*:?$/i.test(line)) {
       active = 'activites';
       continue;
     }
