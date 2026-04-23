@@ -2446,6 +2446,17 @@ Regenerate now with strict compliance.
       if (readinessExtra) {
         finalResponse = `${finalResponse}${readinessExtra}`;
       }
+      let autoPlanConfirmToken = '';
+      if (
+        isJourneyBuilderApp(parsedContext) &&
+        isPlanIntent &&
+        !isPlanFrozen &&
+        !HARX_PLAN_CONFIRM_REGEX.test(finalResponse) &&
+        looksLikeTrainingPlanText(sanitizeAssistantPlanText(finalResponse))
+      ) {
+        autoPlanConfirmToken = crypto.randomBytes(10).toString('hex');
+        finalResponse = `${finalResponse}\n\n<harx-plan-confirm>{"token":"${autoPlanConfirmToken}","label":"Confirmer le plan"}</harx-plan-confirm>`;
+      }
 
       const userMessageText = message.trim();
       const assistantMessageText = finalResponse;
@@ -2468,6 +2479,10 @@ Regenerate now with strict compliance.
             requestedOutput: parsedContext.requestedOutput,
             requestedModuleReference: parsedContext.requestedModuleReference,
             trainingJourneyId: (parsedContext as any)?.trainingJourneyId,
+            pendingPlanMarkdown: autoPlanConfirmToken
+              ? sanitizeAssistantPlanText(assistantMessageText)
+              : ((parsedContext as any)?.pendingPlanMarkdown || undefined),
+            pendingPlanSaveToken: autoPlanConfirmToken || ((parsedContext as any)?.pendingPlanSaveToken || undefined),
           }
         : activeSession.contextSnapshot || null;
       if (!activeSession.title || activeSession.title === 'Nouvelle conversation') {
@@ -2561,6 +2576,22 @@ Regenerate now with strict compliance.
         (res as any).flush();
       }
     }
+    let autoPlanConfirmToken = '';
+    if (
+      isJourneyBuilderApp(parsedContext) &&
+      isPlanIntent &&
+      !isPlanFrozen &&
+      !HARX_PLAN_CONFIRM_REGEX.test(assistantMessageText) &&
+      looksLikeTrainingPlanText(sanitizeAssistantPlanText(assistantMessageText))
+    ) {
+      autoPlanConfirmToken = crypto.randomBytes(10).toString('hex');
+      const autoConfirmBlock = `\n\n<harx-plan-confirm>{"token":"${autoPlanConfirmToken}","label":"Confirmer le plan"}</harx-plan-confirm>`;
+      assistantMessageText = `${assistantMessageText}${autoConfirmBlock}`;
+      res.write(autoConfirmBlock);
+      if (typeof (res as any).flush === 'function') {
+        (res as any).flush();
+      }
+    }
 
     activeSession.messages.push(
       { role: 'user', text: userMessageText, createdAt: new Date() } as any,
@@ -2581,6 +2612,10 @@ Regenerate now with strict compliance.
           requestedOutput: parsedContext.requestedOutput,
           requestedModuleReference: parsedContext.requestedModuleReference,
           trainingJourneyId: (parsedContext as any)?.trainingJourneyId,
+          pendingPlanMarkdown: autoPlanConfirmToken
+            ? sanitizeAssistantPlanText(assistantMessageText)
+            : ((parsedContext as any)?.pendingPlanMarkdown || undefined),
+          pendingPlanSaveToken: autoPlanConfirmToken || ((parsedContext as any)?.pendingPlanSaveToken || undefined),
         }
       : activeSession.contextSnapshot || null;
     if (!activeSession.title || activeSession.title === 'Nouvelle conversation') {
