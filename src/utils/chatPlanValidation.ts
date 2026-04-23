@@ -264,6 +264,72 @@ export function buildModulesFromPlanMarkdown(
   return modulesFromMarkdownTable(raw.split('\n'));
 }
 
+function toSentenceChunks(text: string): string[] {
+  return String(text || '')
+    .replace(/\s+/g, ' ')
+    .split(/[.!?]\s+|\n+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 6)
+    .slice(0, 6);
+}
+
+function enrichStructuredPlan(
+  modules: ITrainingModule[],
+  modulePlan: ModulePlanItem[]
+): { modules: ITrainingModule[]; modulePlan: ModulePlanItem[] } {
+  const nextModules = [...modules];
+  const nextPlan = modulePlan.map((p, idx) => {
+    const mod = nextModules[idx] as any;
+    const desc = String(mod?.description || mod?.sections?.[0]?.content || '').trim();
+    const chunks = toSentenceChunks(desc);
+    const fallbackObj = chunks[0] ? [`Comprendre ${chunks[0].toLowerCase()}`] : ['Comprendre les fondamentaux du module'];
+    const fallbackTopics = chunks.length > 1 ? chunks.slice(0, 2) : ['Concepts clés du module'];
+    const fallbackLivrables = ['Résumé opérationnel du module', 'Checklist d’application'];
+
+    const objectifs = Array.isArray(p.objectifs) && p.objectifs.length > 0 ? p.objectifs : fallbackObj;
+    const keyTopics = Array.isArray(p.keyTopics) && p.keyTopics.length > 0 ? p.keyTopics : fallbackTopics;
+    const activites = Array.isArray(p.activites) && p.activites.length > 0 ? p.activites : fallbackLivrables;
+
+    if (mod) {
+      mod.learningObjectives = objectifs;
+      mod.topics = keyTopics;
+      if (!Array.isArray(mod.sections) || mod.sections.length === 0) {
+        mod.sections = [{
+          title: 'Plan validé',
+          content: desc || `${p.title}\n\nObjectifs:\n- ${objectifs.join('\n- ')}`,
+          type: 'text',
+          duration: Number(mod.duration || 30),
+        }];
+      }
+    }
+
+    return {
+      ...p,
+      objectifs,
+      keyTopics,
+      activites,
+    };
+  });
+
+  return { modules: nextModules, modulePlan: nextPlan };
+}
+
+function buildStrictPlanMarkdown(modulePlan: ModulePlanItem[]): string {
+  const out: string[] = [];
+  modulePlan.forEach((m, idx) => {
+    const title = String(m.title || '').replace(/^Module\s*\d+\s*-\s*/i, '').trim() || `Module ${idx + 1}`;
+    out.push(`Module ${idx + 1}: ${title}`);
+    out.push('Objectifs :');
+    (Array.isArray(m.objectifs) && m.objectifs.length > 0 ? m.objectifs : ['Objectif à définir']).forEach((x) => out.push(`- ${String(x).trim()}`));
+    out.push('Key Topics :');
+    (Array.isArray(m.keyTopics) && m.keyTopics.length > 0 ? m.keyTopics : ['Topic à définir']).forEach((x) => out.push(`- ${String(x).trim()}`));
+    out.push('Livrables :');
+    (Array.isArray(m.activites) && m.activites.length > 0 ? m.activites : ['Livrable à définir']).forEach((x) => out.push(`- ${String(x).trim()}`));
+    out.push('');
+  });
+  return out.join('\n').trim();
+}
+
 function sanitizePlanForStorage(planMarkdown: string): string {
   const stripped = stripHarxTags(planMarkdown);
   const cutAtQuestion = stripped.replace(
@@ -291,13 +357,17 @@ export async function persistValidatedChatPlan(params: {
   userMessage: string;
 }): Promise<{ journeyId: string; ackFr: string; ackEn: string }> {
   const planClean = sanitizePlanForStorage(String(params.planMarkdown || '').trim());
-  const { modules, modulePlan } = buildModulesFromPlanMarkdown(planClean);
+  const parsed = buildModulesFromPlanMarkdown(planClean);
+  const enriched = enrichStructuredPlan(parsed.modules, parsed.modulePlan);
+  const modules = enriched.modules;
+  const modulePlan = enriched.modulePlan;
   if (modules.length < 2) {
     throw new Error('Plan invalide: pas assez de modules pour enregistrer.');
   }
+  const strictPlanMarkdown = buildStrictPlanMarkdown(modulePlan);
   const title = resolveJourneyTitle(params.parsedContext);
   const md = {
-    validatedPlanMarkdown: planClean,
+    validatedPlanMarkdown: strictPlanMarkdown,
     planValidatedAt: new Date().toISOString(),
     planFrozenFromChat: true,
   };

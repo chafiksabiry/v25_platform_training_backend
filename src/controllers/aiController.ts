@@ -52,11 +52,21 @@ const appendTrainingReadinessBlock = async (params: {
   anthropicKey?: string;
 }): Promise<string> => {
   const { assistantMessage, userMessage, parsedContext, anthropicKey } = params;
-  if (!isJourneyBuilderApp(parsedContext)) return '';
+  if (!isJourneyBuilderApp(parsedContext)) {
+    console.log('[training-readiness] skip: not journey builder app', {
+      app: String(parsedContext?.app || ''),
+    });
+    return '';
+  }
   const isPlanValidated = Boolean(parsedContext?.planValidatedFromDb);
 
   const compactAssistant = stripStyleTagsForReadiness(assistantMessage).slice(-14000);
-  if (!compactAssistant || compactAssistant.length < 80) return '';
+  if (!compactAssistant || compactAssistant.length < 80) {
+    console.log('[training-readiness] skip: assistant content too short', {
+      length: compactAssistant.length,
+    });
+    return '';
+  }
 
   const outline = Array.isArray(parsedContext?.curriculumOutline) ? parsedContext.curriculumOutline : [];
 
@@ -145,7 +155,13 @@ const appendTrainingReadinessBlock = async (params: {
   const looksLikePlan = looksLikeTrainingPlanText(compactAssistant);
   const isTrainingPlanResponse = looksLikePlan || requestedOutput === 'training_plan';
   if (readiness === 'not_applicable') {
-    if (!isTrainingPlanResponse) return '';
+    if (!isTrainingPlanResponse) {
+      console.log('[training-readiness] skip: not_applicable and not training plan response', {
+        requestedOutput,
+        looksLikePlan,
+      });
+      return '';
+    }
     // If classifier is unsure but response clearly looks like a plan, allow CTA rendering.
     readiness = 'ready';
   }
@@ -178,6 +194,15 @@ const appendTrainingReadinessBlock = async (params: {
   }
 
   if (actions.length === 0) return '';
+  console.log('[training-readiness] actions resolved', {
+    requestedOutput,
+    looksLikePlan,
+    isTrainingPlanResponse,
+    isPlanValidated,
+    readiness,
+    missingModulesCount: missingModules.length,
+    actions: actions.map((a) => a.id),
+  });
 
   const payload = { readiness, missingModules, messageFr, actions };
   return `\n\n<harx-training-status>${JSON.stringify(payload)}</harx-training-status>`;
@@ -1894,6 +1919,7 @@ export const chat = async (
     const selectedDuration = parsedContext?.selectedDuration || 'non specifiee';
     const selectedMethodology = parsedContext?.selectedMethodology || 'Methodologie 360';
     const isFreeChatMode = String(parsedContext?.chatStyle || '').toLowerCase() === 'free_chat';
+    const forceFrenchResponse = isJourneyBuilderApp(parsedContext);
     let requestedOutput = String(parsedContext?.requestedOutput || '').toLowerCase();
     const requestedModuleReference = String(parsedContext?.requestedModuleReference || '').trim();
     const inferredDomain = inferKbDomainFromContext(parsedContext);
@@ -2168,7 +2194,9 @@ export const chat = async (
     ].join('\n');
 
     const systemPrompt = [
-      'You are Professor academic. Reply in the user language. Be simple, clear, pedagogical.',
+      forceFrenchResponse
+        ? 'You are Professor academic. Reply only in French (fr-FR), regardless of the user language. Be simple, clear, pedagogical.'
+        : 'You are Professor academic. Reply in the user language. Be simple, clear, pedagogical.',
       'Use markdown only. Never output HTML/CSS/JS or fake UI buttons.',
       'Keep business context from conversation unless user changes it.',
       'If critical info is missing, infer reasonably and ask max 2 focused questions at the end.',
