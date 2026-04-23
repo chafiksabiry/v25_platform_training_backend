@@ -1921,7 +1921,15 @@ export const chat = async (
       const lastAssistantEntry = [...priorMessages]
         .reverse()
         .find((m: any) => String(m?.role || '').toLowerCase() === 'assistant');
-      const planCandidate = sanitizeAssistantPlanText(String(lastAssistantEntry?.text || ''));
+      const lastAssistantSanitized = sanitizeAssistantPlanText(String(lastAssistantEntry?.text || ''));
+      const planFromHistory = [...priorMessages]
+        .filter((m: any) => String(m?.role || '').toLowerCase() === 'assistant')
+        .map((m: any) => sanitizeAssistantPlanText(String(m?.text || '')))
+        .filter(Boolean)
+        .reverse()
+        .find((t) => looksLikeTrainingPlanText(t));
+      const planCandidate =
+        looksLikeTrainingPlanText(lastAssistantSanitized) ? lastAssistantSanitized : planFromHistory || lastAssistantSanitized;
       if (!looksLikeTrainingPlanText(planCandidate)) {
         return res.status(400).json({
           success: false,

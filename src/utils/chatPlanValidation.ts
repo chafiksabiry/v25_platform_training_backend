@@ -107,29 +107,76 @@ function normalizeBullet(line: string): string {
     .trim();
 }
 
+/** Découpe les listes « Comprendre - a - b - c » en entrées séparées pour objectifs. */
+function expandDashListItems(s: string): string[] {
+  const t = String(s || '').trim();
+  if (!t || t.length < 24 || !/\s+-\s+/.test(t)) return [t];
+  const parts = t.split(/\s+-\s+/).map((x) => x.trim()).filter((x) => x.length > 2);
+  if (parts.length < 2) return [t];
+  if (/^comprendre$/i.test(parts[0])) return parts.slice(1);
+  return parts;
+}
+
 function parseStructuredSections(blockLines: string[]) {
   const out = { objectifs: [] as string[], keyTopics: [] as string[], activites: [] as string[] };
   let active: 'objectifs' | 'keyTopics' | 'activites' | null = null;
 
+  const isObjectifsHeader = (line: string) =>
+    /^(🎯\s*)?(objectifs?(\s*d['’]?apprentissage)?|learning\s+objectives?)(\b|[\s:–-]|$)/i.test(line);
+  const isKeyTopicsHeader = (line: string) =>
+    /^(📌\s*)?(key\s*topics|topics|th[eè]mes?\s*cl[eé]s?|points?\s*cl[eé]s?|sujets?\s*cl[eé]s?|contenu\s+p[eé]dagogique|contenu\s+cl[eé]|notions?)(\b|[\s:–-]|$)/i.test(line) ||
+    /^📖\s+/.test(line);
+  const isActivitiesHeader = (line: string) =>
+    /^(🧩\s*)?activit[eé]s?(\b|[\s:–-]|$)/i.test(line) ||
+    /^(✏️|📝)\s*(exercice|atelier|pratique)/i.test(line);
+  const isLivrablesHeader = (line: string) =>
+    /^(📦|📋)?\s*(livrables?|deliverables?)(\b|[\s:–-]|$)/i.test(line) ||
+    /^📌\s*(livrables?|deliverables?)(\b|[\s:–-]|$)/i.test(line);
+  const isEvalOrQuizHeader = (line: string) =>
+    /^(📊\s*)?(indicateur d['’]?[eé]valuation|evaluations?|évaluations?)(\b|[\s:–-]|$)/i.test(line) ||
+    /^(🎓\s*)?auto[-\s]?[eé]valuation/i.test(line) ||
+    /\bquiz\s+de\s+validation\b/i.test(line) ||
+    /^✅\s*validation\s+de\s+comp[eé]tence/i.test(line);
+
   for (const raw of blockLines) {
     const line = cleanLine(raw);
     if (!line) continue;
-    if (/^(objectifs? d['’]?apprentissage|objectifs?)\s*:?$/i.test(line)) {
+    if (isObjectifsHeader(line)) {
       active = 'objectifs';
       continue;
     }
-    if (/^(contenu\s+cl[eé]|contenu|key topics|topics|th[eè]mes?\s+cl[eé]s?)\s*:?$/i.test(line)) {
+    if (isKeyTopicsHeader(line)) {
       active = 'keyTopics';
       continue;
     }
-    if (/^(activit[eé]s?|livrables?|deliverables?)\s*:?$/i.test(line)) {
+    if (isLivrablesHeader(line) || isEvalOrQuizHeader(line)) {
       active = 'activites';
       continue;
     }
-    if (/^[-•*]\s+/.test(raw) || /^\d+[.)]\s+/.test(raw)) {
+    if (isActivitiesHeader(line)) {
+      active = 'activites';
+      continue;
+    }
+    if (/^📌\s*\d+(?:\.\d+)+\s+.+$/i.test(line)) {
+      active = 'keyTopics';
+      continue;
+    }
+    if (/^📌\s+.+/i.test(line) && !/key\s*topics/i.test(line) && !isLivrablesHeader(line)) {
+      active = 'keyTopics';
+      continue;
+    }
+
+    const isBullet = /^[-•*]\s+/.test(raw) || /^\d+[.)]\s+/.test(raw);
+    if (isBullet) {
       const item = normalizeBullet(raw);
       if (!item) continue;
-      if (active) out[active].push(item);
+      const bucket: 'objectifs' | 'keyTopics' | 'activites' = active ?? 'keyTopics';
+      const pieces = bucket === 'objectifs' ? expandDashListItems(item) : [item];
+      for (const piece of pieces) {
+        if (!piece.trim()) continue;
+        out[bucket].push(piece.trim());
+      }
+      continue;
     }
   }
 
@@ -234,7 +281,7 @@ function modulesFromLineBasedPlan(planMarkdown: string): { modules: ITrainingMod
     });
     modules.push({
       title: stripModuleTitleForStorage(title),
-      description: body.slice(0, 500) || title,
+      description: body.slice(0, 80000) || title,
       duration: dur,
       difficulty: 'beginner',
       learningObjectives: parsed.objectifs,
@@ -282,13 +329,23 @@ function enrichStructuredPlan(
     const mod = nextModules[idx] as any;
     const desc = String(mod?.description || mod?.sections?.[0]?.content || '').trim();
     const chunks = toSentenceChunks(desc);
+    const genericTopic = /^concepts?\s+cl[eé]s\s+du\s+module$/i;
+    const genericAct = /^r[ée]sum[ée]\s+op[eé]rationnel|^checklist/i;
+    const hasRealObjectifs = Array.isArray(p.objectifs) && p.objectifs.some((x) => String(x || '').trim().length > 12);
+    const hasRealTopics =
+      Array.isArray(p.keyTopics) &&
+      p.keyTopics.some((x) => String(x || '').trim().length > 8 && !genericTopic.test(String(x).trim()));
+    const hasRealActivities =
+      Array.isArray(p.activites) &&
+      p.activites.some((x) => String(x || '').trim().length > 8 && !genericAct.test(String(x).trim()));
+
     const fallbackObj = chunks[0] ? [`Comprendre ${chunks[0].toLowerCase()}`] : ['Comprendre les fondamentaux du module'];
     const fallbackTopics = chunks.length > 1 ? chunks.slice(0, 2) : ['Concepts clés du module'];
     const fallbackLivrables = ['Résumé opérationnel du module', 'Checklist d’application'];
 
-    const objectifs = Array.isArray(p.objectifs) && p.objectifs.length > 0 ? p.objectifs : fallbackObj;
-    const keyTopics = Array.isArray(p.keyTopics) && p.keyTopics.length > 0 ? p.keyTopics : fallbackTopics;
-    const activites = Array.isArray(p.activites) && p.activites.length > 0 ? p.activites : fallbackLivrables;
+    const objectifs = hasRealObjectifs ? p.objectifs : fallbackObj;
+    const keyTopics = hasRealTopics ? p.keyTopics : fallbackTopics;
+    const activites = hasRealActivities ? p.activites : fallbackLivrables;
 
     if (mod) {
       mod.learningObjectives = objectifs;
@@ -369,7 +426,8 @@ export async function persistValidatedChatPlan(params: {
   const strictPlanMarkdown = buildStrictPlanMarkdown(modulePlan);
   const title = resolveJourneyTitle(params.parsedContext);
   const md = {
-    validatedPlanMarkdown: strictPlanMarkdown,
+    // Conserver le markdown issu du chat (titres 🎯/📌, puces réelles) ; le gabarit strict sert surtout de secours.
+    validatedPlanMarkdown: planClean.length >= 120 ? planClean : strictPlanMarkdown,
     planValidatedAt: new Date().toISOString(),
     planFrozenFromChat: true,
   };
