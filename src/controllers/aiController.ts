@@ -168,6 +168,43 @@ const toObjectIdOrUndefined = (value: unknown): mongoose.Types.ObjectId | undefi
   return new mongoose.Types.ObjectId(raw);
 };
 
+const isPlanEditRequest = (message: string): boolean =>
+  /\b(modifi|modifier|change|changer|ajuste|ajouter|supprim|retir|update|edit|corrig|restructur|reorganis|adapt|nouveau\s+plan|nouveau|g[ée]n[ée]r\w*\s+.*plan|cr[ée]er?\s+.*plan)\b/i.test(
+    String(message || '')
+  );
+
+const buildSavedPlanAnchor = (journey: any): string => {
+  if (!journey) return '';
+  const modulePlan = Array.isArray(journey.modulePlan) ? journey.modulePlan : [];
+  if (modulePlan.length > 0) {
+    const compact = modulePlan
+      .map((m: any, idx: number) => ({
+        module: idx + 1,
+        title: String(m?.title || '').trim(),
+        objectifs: Array.isArray(m?.objectifs) ? m.objectifs.slice(0, 8) : [],
+        keyTopics: Array.isArray(m?.keyTopics) ? m.keyTopics.slice(0, 10) : [],
+        activites: Array.isArray(m?.activites) ? m.activites.slice(0, 10) : [],
+        durationMinutes: typeof m?.durationMinutes === 'number' ? m.durationMinutes : undefined,
+      }))
+      .filter((x: any) => x.title);
+    if (compact.length > 0) {
+      return `\n--- SAVED TRAINING PLAN (LOCKED SOURCE OF TRUTH) ---\n${JSON.stringify(compact).slice(0, 15000)}\n`;
+    }
+  }
+  const modules = Array.isArray(journey.modules) ? journey.modules : [];
+  const fallback = modules
+    .map((m: any, idx: number) => ({
+      module: idx + 1,
+      title: String(m?.title || '').trim(),
+      objectives: Array.isArray(m?.learningObjectives) ? m.learningObjectives.slice(0, 8) : [],
+      keyTopics: Array.isArray(m?.topics) ? m.topics.slice(0, 10) : [],
+    }))
+    .filter((x: any) => x.title);
+  return fallback.length > 0
+    ? `\n--- SAVED TRAINING PLAN (LOCKED SOURCE OF TRUTH) ---\n${JSON.stringify(fallback).slice(0, 12000)}\n`
+    : '';
+};
+
 /** Enrichit le chat avec la fiche gig (snapshot JSON + champs persistés formation) pour ancrer plans / contenus. */
 const buildGigGroundingBlocks = async (
   safeGigId: mongoose.Types.ObjectId | undefined,
@@ -1808,6 +1845,19 @@ export const chat = async (
         ? JSON.stringify(parsedContext)
         : safeContext;
 
+    const safeTrainingJourneyId =
+      toObjectIdOrUndefined(parsedContext?.trainingJourneyId) ||
+      toObjectIdOrUndefined(req.body?.trainingJourneyId);
+    const linkedJourney = safeTrainingJourneyId
+      ? await TrainingJourney.findById(safeTrainingJourneyId)
+          .select('_id modulePlan modules methodologyData')
+          .lean()
+      : null;
+    const isPlanFrozen =
+      Boolean((linkedJourney as any)?.methodologyData?.planFrozenFromChat) ||
+      Boolean((linkedJourney as any)?.modulePlan?.length);
+    const savedPlanAnchor = buildSavedPlanAnchor(linkedJourney);
+
     const priorMessages = Array.isArray(activeSession.messages) ? activeSession.messages : [];
     const lastAssistantEntry = [...priorMessages]
       .reverse()
@@ -1963,12 +2013,48 @@ export const chat = async (
       return res.end();
     }
 
+    if (
+      isJourneyBuilderApp(parsedContext) &&
+      isPlanFrozen &&
+      requestedOutput === 'training_plan' &&
+      isPlanEditRequest(message.trim())
+    ) {
+      const lockMsg =
+        "Le plan de formation est déjà enregistré et verrouillé. L'édition n'est plus autorisée ici. Vous pouvez demander le contenu d'un module existant du plan sauvegardé.";
+      activeSession.messages.push(
+        { role: 'user', text: message.trim(), createdAt: new Date() } as any,
+        { role: 'assistant', text: lockMsg, createdAt: new Date() } as any
+      );
+      activeSession.lastActivityAt = new Date();
+      await activeSession.save();
+      const streamEnabledEarly = String(req.query.stream ?? 'true').toLowerCase() !== 'false';
+      if (!streamEnabledEarly) {
+        return res.status(200).json({
+          success: true,
+          response: lockMsg,
+          sessionId: String(activeSession._id),
+        });
+      }
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.setHeader('X-Chat-Session-Id', String(activeSession._id));
+      res.status(200);
+      if (typeof (res as any).flushHeaders === 'function') {
+        (res as any).flushHeaders();
+      }
+      res.write(lockMsg);
+      return res.end();
+    }
+
     const gigGrounding = await buildGigGroundingBlocks(safeGigId, parsedContext);
 
     const prompt = [
       'HARX conversation context:',
       effectiveContextString,
       gigGrounding.promptAppend,
+      savedPlanAnchor,
       '',
       'User message:',
       message.trim()
@@ -2001,6 +2087,9 @@ export const chat = async (
       requestedOutput === 'full_training_content'
         ? [
             'INTENT LOCK: FULL TRAINING CONTENT',
+            isPlanFrozen
+              ? 'PLAN LOCK: use ONLY modules and scope from the saved training plan provided in context. Do not add, rename, or reorder modules.'
+              : '',
             'Generate complete learner-facing content for all modules.',
             'Per module include: Title, Objectives, Detailed Explanation, Examples, Hands-on Exercise, Mini Quiz (3-5), Summary, Reflection, Self-assessment (1-5).',
             'Keep each module under 800 words; if more depth is needed, ask which module to expand.',
@@ -2009,6 +2098,9 @@ export const chat = async (
       requestedOutput === 'module_content'
         ? [
             `INTENT LOCK: MODULE CONTENT${requestedModuleReference ? ` (${requestedModuleReference})` : ''}`,
+            isPlanFrozen
+              ? 'PLAN LOCK: the requested module must match an existing module from the saved plan. If not found, ask user to choose one saved module title.'
+              : '',
             'Generate only the requested module.',
             'Include: Module Title, Learning Objectives, Deep Explanation, Examples, Practical Exercise, Quick Quiz (3-5), Self-Assessment, Skill Validation, Success/Failure indicator.',
             'Include one self-check with model answer or reflection prompt.',
