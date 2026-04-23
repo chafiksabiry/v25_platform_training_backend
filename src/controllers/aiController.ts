@@ -15,6 +15,7 @@ import TrainingImageSet from '../models/TrainingImageSet';
 import StructuredTrainingSlides from '../models/StructuredTrainingSlides';
 import TrainingJourney from '../models/TrainingJourney';
 import {
+  buildModulesFromPlanMarkdown,
   looksLikeTrainingPlanText,
   persistValidatedChatPlan,
 } from '../utils/chatPlanValidation';
@@ -1587,6 +1588,39 @@ const isKbTopicMismatch = (text: string, kbKeywords: string[]): boolean => {
   return hits < 2;
 };
 
+const normalizePlanToStrictTemplate = (raw: string): string => {
+  const input = String(raw || '').trim();
+  if (!input) return input;
+  const parsed = buildModulesFromPlanMarkdown(input);
+  const modulePlan = Array.isArray(parsed?.modulePlan) ? parsed.modulePlan : [];
+  if (modulePlan.length < 2) return input;
+  const lines: string[] = [];
+  modulePlan.forEach((m: any, idx: number) => {
+    const titleRaw = String(m?.title || '').trim();
+    const title = titleRaw.replace(/^module\s*\d+\s*[-:]\s*/i, '').trim() || `Module ${idx + 1}`;
+    const objectifs = Array.isArray(m?.objectifs) ? m.objectifs.filter(Boolean) : [];
+    const keyTopics = Array.isArray(m?.keyTopics) ? m.keyTopics.filter(Boolean) : [];
+    const livrablesSource = Array.isArray(m?.activites) ? m.activites.filter(Boolean) : [];
+    const livrables = livrablesSource.length > 0 ? livrablesSource : ['Livrable à définir'];
+
+    lines.push(`Module ${idx + 1}: ${title}`);
+    lines.push('Objectifs :');
+    (objectifs.length > 0 ? objectifs : ['Objectif à définir']).forEach((item: string) => {
+      lines.push(`- ${String(item).trim()}`);
+    });
+    lines.push('Key Topics :');
+    (keyTopics.length > 0 ? keyTopics : ['Topic à définir']).forEach((item: string) => {
+      lines.push(`- ${String(item).trim()}`);
+    });
+    lines.push('Livrables :');
+    livrables.forEach((item: string) => {
+      lines.push(`- ${String(item).trim()}`);
+    });
+    lines.push('');
+  });
+  return lines.join('\n').trim();
+};
+
 export const generateQuiz = async (
   req: Request,
   res: Response,
@@ -2397,6 +2431,9 @@ Regenerate now with strict compliance.
 - No emojis, no intro, no questions, no long explanations`;
         response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
       }
+      if (isPlanIntent) {
+        response = normalizePlanToStrictTemplate(String(response || ''));
+      }
       let finalResponse = await ensureVisualResponseContract(
         String(response || ''),
         selectedDuration,
@@ -2491,6 +2528,9 @@ Regenerate now with strict compliance.
 - Dash bullets only, short title-like phrases, no numbered lists
 - No emojis, no intro, no questions, no long explanations`;
         response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
+      }
+      if (isPlanIntent) {
+        response = normalizePlanToStrictTemplate(String(response || ''));
       }
       fullResponse = String(response || '');
       res.write(fullResponse);
