@@ -319,12 +319,14 @@ function buildStrictPlanMarkdown(modulePlan: ModulePlanItem[]): string {
   modulePlan.forEach((m, idx) => {
     const title = String(m.title || '').replace(/^Module\s*\d+\s*-\s*/i, '').trim() || `Module ${idx + 1}`;
     out.push(`Module ${idx + 1}: ${title}`);
-    out.push('Objectifs :');
+    out.push('🎯 Objectifs');
     (Array.isArray(m.objectifs) && m.objectifs.length > 0 ? m.objectifs : ['Objectif à définir']).forEach((x) => out.push(`- ${String(x).trim()}`));
-    out.push('Key Topics :');
+    out.push('📌 Key Topics');
     (Array.isArray(m.keyTopics) && m.keyTopics.length > 0 ? m.keyTopics : ['Topic à définir']).forEach((x) => out.push(`- ${String(x).trim()}`));
-    out.push('Livrables :');
-    (Array.isArray(m.activites) && m.activites.length > 0 ? m.activites : ['Livrable à définir']).forEach((x) => out.push(`- ${String(x).trim()}`));
+    out.push('🧩 Activités');
+    (Array.isArray(m.activites) && m.activites.length > 0 ? m.activites : ['Activité à définir']).forEach((x) => out.push(`- ${String(x).trim()}`));
+    out.push('📊 Indicateur d’évaluation');
+    out.push('- Validation du module via quiz/simulation');
     out.push('');
   });
   return out.join('\n').trim();

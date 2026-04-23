@@ -1628,22 +1628,24 @@ const normalizePlanToStrictTemplate = (raw: string): string => {
     const title = titleRaw.replace(/^module\s*\d+\s*[-:]\s*/i, '').trim() || `Module ${idx + 1}`;
     const objectifs = Array.isArray(m?.objectifs) ? m.objectifs.filter(Boolean) : [];
     const keyTopics = Array.isArray(m?.keyTopics) ? m.keyTopics.filter(Boolean) : [];
-    const livrablesSource = Array.isArray(m?.activites) ? m.activites.filter(Boolean) : [];
-    const livrables = livrablesSource.length > 0 ? livrablesSource : ['Livrable à définir'];
+    const activitesSource = Array.isArray(m?.activites) ? m.activites.filter(Boolean) : [];
+    const activites = activitesSource.length > 0 ? activitesSource : ['Activité pratique à définir'];
 
     lines.push(`Module ${idx + 1}: ${title}`);
-    lines.push('Objectifs :');
+    lines.push('🎯 Objectifs');
     (objectifs.length > 0 ? objectifs : ['Objectif à définir']).forEach((item: string) => {
       lines.push(`- ${String(item).trim()}`);
     });
-    lines.push('Key Topics :');
+    lines.push('📌 Key Topics');
     (keyTopics.length > 0 ? keyTopics : ['Topic à définir']).forEach((item: string) => {
       lines.push(`- ${String(item).trim()}`);
     });
-    lines.push('Livrables :');
-    livrables.forEach((item: string) => {
+    lines.push('🧩 Activités');
+    activites.forEach((item: string) => {
       lines.push(`- ${String(item).trim()}`);
     });
+    lines.push('📊 Indicateur d’évaluation');
+    lines.push('- Validation du module via quiz/simulation');
     lines.push('');
   });
   return lines.join('\n').trim();
@@ -2223,17 +2225,18 @@ export const chat = async (
             'Minimum 4 modules, progressive from basic to advanced.',
             'STRICT OUTPUT TEMPLATE (mandatory, same structure for every module):',
             'Module X: <short title>',
-            'Objectifs :',
+            '🎯 Objectifs',
             '- <objectif 1>',
             '- <objectif 2>',
-            'Key Topics :',
+            '📌 Key Topics',
             '- <topic 1>',
             '- <topic 2>',
-            'Livrables :',
-            '- <livrable 1>',
-            '- <livrable 2>',
+            '🧩 Activités',
+            '- <activité 1>',
+            '- <activité 2>',
+            '📊 Indicateur d’évaluation',
+            '- <indicateur 1>',
             'Use dash bullets only ("- "), no numbered lists.',
-            'Do not use emojis.',
             'Do not add intro, outro, or questions.',
             'Keep phrases short (title-like), not long sentences.',
           ].join('\n')
@@ -2422,6 +2425,10 @@ export const chat = async (
         return String(raw || '');
       }
       const text = String(raw || '').trim();
+      if (intent === 'training_plan') {
+        // Keep training plans in plain markdown (no decorative card background).
+        return text.replace(/<harx-style>[\s\S]*?<\/harx-style>/gi, '').trim();
+      }
       const preset = buildStylePresetByIntent(intent);
       const styleBlock = `<harx-style>${JSON.stringify(preset)}</harx-style>`;
       if (!text) return styleBlock;
@@ -2449,17 +2456,19 @@ Regenerate now with strict compliance.
 - Minimum 4 modules, progressive
 - Use this exact structure per module:
   Module X: <short title>
-  Objectifs :
+  🎯 Objectifs
   - item
   - item
-  Key Topics :
+  📌 Key Topics
   - item
   - item
-  Livrables :
+  🧩 Activités
   - item
+  - item
+  📊 Indicateur d’évaluation
   - item
 - Dash bullets only, short title-like phrases, no numbered lists
-- No emojis, no intro, no questions, no long explanations`;
+- No intro, no questions, no long explanations`;
         response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
       }
       if (isPlanIntent) {
@@ -2547,17 +2556,19 @@ Regenerate now with strict compliance.
 - Minimum 4 modules, progressive
 - Use this exact structure per module:
   Module X: <short title>
-  Objectifs :
+  🎯 Objectifs
   - item
   - item
-  Key Topics :
+  📌 Key Topics
   - item
   - item
-  Livrables :
+  🧩 Activités
   - item
+  - item
+  📊 Indicateur d’évaluation
   - item
 - Dash bullets only, short title-like phrases, no numbered lists
-- No emojis, no intro, no questions, no long explanations`;
+- No intro, no questions, no long explanations`;
         response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
       }
       if (isPlanIntent) {
