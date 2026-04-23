@@ -55,6 +55,7 @@ const appendTrainingReadinessBlock = async (params: {
 }): Promise<string> => {
   const { assistantMessage, userMessage, parsedContext, anthropicKey } = params;
   if (!isJourneyBuilderApp(parsedContext)) return '';
+  const isPlanValidated = Boolean(parsedContext?.planValidatedFromDb);
 
   const compactAssistant = stripStyleTagsForReadiness(assistantMessage).slice(-14000);
   if (!compactAssistant || compactAssistant.length < 80) return '';
@@ -145,23 +146,28 @@ const appendTrainingReadinessBlock = async (params: {
 
   const requestedOutput = String(parsedContext?.requestedOutput || '').toLowerCase();
   const actions: { id: string; label: string }[] = [];
-  if (readiness === 'ready' && missingModules.length === 0) {
-    if (requestedOutput === 'module_content') {
-      actions.push({ id: 'validate_module_content', label: 'Valider ce contenu module' });
-    } else if (requestedOutput === 'full_training_content') {
-      actions.push({ id: 'validate_all_modules_content', label: 'Valider le contenu de tous les modules' });
-    } else {
-      actions.push({ id: 'validate_training', label: 'Valider la formation' });
+  if (isPlanValidated) {
+    if (readiness === 'ready' && missingModules.length === 0) {
+      if (requestedOutput === 'module_content') {
+        actions.push({ id: 'validate_module_content', label: 'Valider ce contenu module' });
+      } else if (requestedOutput === 'full_training_content') {
+        actions.push({ id: 'validate_all_modules_content', label: 'Valider le contenu de tous les modules' });
+      } else {
+        actions.push({ id: 'validate_training', label: 'Valider la formation' });
+      }
+    } else if (readiness === 'incomplete' && missingModules.length > 0) {
+      actions.push({
+        id: 'save_without_missing',
+        label: `Enregistrer sans ces ${missingModules.length} module(s)`,
+      });
+      actions.push({
+        id: 'generate_missing_modules',
+        label: 'Générer le contenu des modules manquants',
+      });
     }
-  } else if (readiness === 'incomplete' && missingModules.length > 0) {
-    actions.push({
-      id: 'save_without_missing',
-      label: `Enregistrer sans ces ${missingModules.length} module(s)`,
-    });
-    actions.push({
-      id: 'generate_missing_modules',
-      label: 'Générer le contenu des modules manquants',
-    });
+  } else {
+    messageFr =
+      "Le plan n'est pas encore validé. Validez d'abord le plan pour activer les boutons de validation du contenu.";
   }
 
   if (actions.length === 0) return '';
@@ -1865,6 +1871,9 @@ export const chat = async (
     const isPlanFrozen =
       Boolean((linkedJourney as any)?.methodologyData?.planFrozenFromChat) ||
       Boolean((linkedJourney as any)?.modulePlan?.length);
+    if (parsedContext && typeof parsedContext === 'object') {
+      (parsedContext as any).planValidatedFromDb = isPlanFrozen;
+    }
     const savedPlanAnchor = buildSavedPlanAnchor(linkedJourney);
 
     const priorMessages = Array.isArray(activeSession.messages) ? activeSession.messages : [];
@@ -1881,6 +1890,10 @@ export const chat = async (
       (trimmedMessage === CHAT_VALIDATE_MODULE_CONTENT_CMD ||
         trimmedMessage === CHAT_VALIDATE_ALL_MODULES_CONTENT_CMD)
     ) {
+      if (!isPlanFrozen) {
+        const denied = "Validation refusée : vous devez d'abord valider et enregistrer le plan.";
+        return res.status(400).json({ success: false, error: denied });
+      }
       const linkedJourneyId =
         toObjectIdOrUndefined(parsedContext?.trainingJourneyId) ||
         toObjectIdOrUndefined(req.body?.trainingJourneyId);
