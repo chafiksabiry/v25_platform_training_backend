@@ -1856,12 +1856,8 @@ export const chat = async (
     const selectedDuration = parsedContext?.selectedDuration || 'non specifiee';
     const selectedMethodology = parsedContext?.selectedMethodology || 'Methodologie 360';
     const isFreeChatMode = String(parsedContext?.chatStyle || '').toLowerCase() === 'free_chat';
-    const requestedOutput = String(parsedContext?.requestedOutput || '').toLowerCase();
+    let requestedOutput = String(parsedContext?.requestedOutput || '').toLowerCase();
     const requestedModuleReference = String(parsedContext?.requestedModuleReference || '').trim();
-    const isPlanIntent = requestedOutput === 'training_plan';
-    const isModuleIntent = requestedOutput === 'module_content';
-    const isFullTrainingIntent = requestedOutput === 'full_training_content';
-    const requiresTypedStyle = isPlanIntent || isModuleIntent || isFullTrainingIntent;
     const inferredDomain = inferKbDomainFromContext(parsedContext);
     const effectiveContextString =
       parsedContext && typeof parsedContext === 'object'
@@ -1882,6 +1878,27 @@ export const chat = async (
     if (parsedContext && typeof parsedContext === 'object') {
       (parsedContext as any).planValidatedFromDb = isPlanFrozen;
     }
+    const trimmedMessage = String(message || '').trim();
+    /**
+     * Safety fallback: once plan is frozen, natural user phrases like
+     * "je veux maintenant la formation" should switch to full training content,
+     * even if stale session context still carries "training_plan".
+     */
+    if (isPlanFrozen && requestedOutput !== 'module_content') {
+      const asksFullTraining =
+        /(je\s+veux|donne|g[eé]n[eé]r\w*|cr[eé]e\w*|produi\w*|pr[eé]par\w*|lance\w*)[\s\S]{0,40}(la\s+)?formation/i.test(trimmedMessage) ||
+        /(formation\s+(compl[eè]te|enti[eè]re)|contenu\s+complet|tout\s+le\s+contenu|tous\s+les\s+modules)/i.test(trimmedMessage);
+      if (asksFullTraining) {
+        requestedOutput = 'full_training_content';
+        if (parsedContext && typeof parsedContext === 'object') {
+          (parsedContext as any).requestedOutput = 'full_training_content';
+        }
+      }
+    }
+    const isPlanIntent = requestedOutput === 'training_plan';
+    const isModuleIntent = requestedOutput === 'module_content';
+    const isFullTrainingIntent = requestedOutput === 'full_training_content';
+    const requiresTypedStyle = isPlanIntent || isModuleIntent || isFullTrainingIntent;
     const savedPlanAnchor = buildSavedPlanAnchor(linkedJourney);
 
     const priorMessages = Array.isArray(activeSession.messages) ? activeSession.messages : [];
@@ -1889,7 +1906,6 @@ export const chat = async (
       .reverse()
       .find((m: any) => String(m?.role || '').toLowerCase() === 'assistant');
     const lastAssistantPlanCandidate = String(lastAssistantEntry?.text || '').trim();
-    const trimmedMessage = String(message || '').trim();
     const lastAssistantPlanSanitized = sanitizeAssistantPlanText(lastAssistantPlanCandidate);
     const isPlanPatchRequest =
       requestedOutput === 'training_plan' &&
