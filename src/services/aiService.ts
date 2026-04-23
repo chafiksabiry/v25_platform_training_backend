@@ -248,6 +248,17 @@ class AIService {
     }
   }
 
+  /** Concatène tous les blocs `text` d’une réponse Messages API (ignore tool_use, etc.). */
+  private extractClaudeMessageText(response: { content?: Array<{ type?: string; text?: string }> }): string {
+    const parts: string[] = [];
+    for (const block of response.content || []) {
+      if (block?.type === 'text' && typeof block.text === 'string') {
+        parts.push(block.text);
+      }
+    }
+    return parts.join('');
+  }
+
   async generateWithClaude(
     prompt: string,
     systemPrompt?: string,
@@ -292,14 +303,16 @@ class AIService {
         });
 
 
-        const firstContent = response.content[0];
-        if (firstContent.type === 'text') {
+        const combinedText = this.extractClaudeMessageText(response);
+        if (combinedText.trim().length > 0) {
           console.log(`✅ Analysis successful with Claude model: ${model}`);
           if (response.stop_reason === 'max_tokens') {
             console.log(`ℹ️ Claude response truncated by max_tokens (${model}); fallback handling may apply.`);
           }
-          return firstContent.text;
+          return combinedText;
         }
+        lastError = new Error(`Claude model ${model} returned empty text`);
+        console.warn(`⚠️ ${lastError.message}; trying next model or OpenAI...`);
       } catch (error: any) {
         lastError = error;
         console.warn(`⚠️ Claude model ${model} failed: ${error.message}`);
@@ -326,6 +339,10 @@ class AIService {
           ...basePayload,
           response_format: isJsonRequested ? { type: 'json_object' } : undefined
         });
+        const out = String(response.choices[0]?.message?.content || '').trim();
+        if (!out) {
+          throw new Error('OpenAI returned empty content');
+        }
         console.log('✅ Analysis successful with OpenAI fallback');
         return response.choices[0]?.message?.content || '';
       } catch (openAiErr: any) {
@@ -339,6 +356,10 @@ class AIService {
 
         console.warn('⚠️ OpenAI model does not support response_format=json_object. Retrying without response_format...');
         const retryResponse = await this.openai.chat.completions.create(basePayload);
+        const retryOut = String(retryResponse.choices[0]?.message?.content || '').trim();
+        if (!retryOut) {
+          throw new Error('OpenAI returned empty content (retry without response_format)');
+        }
         console.log('✅ Analysis successful with OpenAI fallback (without response_format)');
         return retryResponse.choices[0]?.message?.content || '';
       }
@@ -400,17 +421,20 @@ class AIService {
       }
     }
 
-    // Fallback to non-stream generation, chunked by words to keep UX progressive.
+    // Fallback: completion non streamée (inclut OpenAI si tous les Claude ont échoué ou texte vide),
+    // puis re-émission par petits morceaux pour garder une UX progressive.
     const fallback = await this.generateWithClaude(prompt, systemPrompt, apiKey, undefined, options);
-    if (!fallback) return;
+    const trimmed = String(fallback || '').trim();
+    if (!trimmed) {
+      throw new Error(
+        lastError?.message ||
+          'Claude stream produced no content and fallback (including OpenAI) returned nothing'
+      );
+    }
 
     const words = fallback.split(/(\s+)/);
     for (const word of words) {
       if (word) yield word;
-    }
-
-    if (!fallback && lastError) {
-      throw new Error(lastError?.message || 'Claude stream failed');
     }
   }
 
