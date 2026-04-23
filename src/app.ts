@@ -44,7 +44,7 @@ app.use(cors({
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'X-Anthropic-Key'],
-  exposedHeaders: ['X-Chat-Session-Id']
+  exposedHeaders: ['X-Chat-Session-Id', 'X-Plan-Saved', 'X-Saved-Journey-Id']
 }));
 
 app.use(helmet({

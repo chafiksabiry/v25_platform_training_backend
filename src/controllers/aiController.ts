@@ -14,6 +14,11 @@ import TrainingVideo from '../models/TrainingVideo';
 import TrainingImageSet from '../models/TrainingImageSet';
 import StructuredTrainingSlides from '../models/StructuredTrainingSlides';
 import TrainingJourney from '../models/TrainingJourney';
+import {
+  isPlanAffirmationMessage,
+  looksLikeTrainingPlanText,
+  persistValidatedChatPlan,
+} from '../utils/chatPlanValidation';
 import mongoose from 'mongoose';
 import fs from 'fs';
 import { promisify } from 'util';
@@ -1781,6 +1786,7 @@ export const chat = async (
       mergeFromSessionIfMissing('chatStyle');
       mergeFromSessionIfMissing('requestedOutput');
       mergeFromSessionIfMissing('requestedModuleReference');
+      mergeFromSessionIfMissing('trainingJourneyId');
     }
 
     const selectedDuration = parsedContext?.selectedDuration || 'non specifiee';
@@ -1797,6 +1803,99 @@ export const chat = async (
       parsedContext && typeof parsedContext === 'object'
         ? JSON.stringify(parsedContext)
         : safeContext;
+
+    const priorMessages = Array.isArray(activeSession.messages) ? activeSession.messages : [];
+    const lastAssistantEntry = [...priorMessages]
+      .reverse()
+      .find((m: any) => String(m?.role || '').toLowerCase() === 'assistant');
+    const lastAssistantPlanCandidate = String(lastAssistantEntry?.text || '').trim();
+
+    if (
+      isJourneyBuilderApp(parsedContext) &&
+      isPlanAffirmationMessage(message.trim()) &&
+      looksLikeTrainingPlanText(lastAssistantPlanCandidate)
+    ) {
+      let planSavedJourneyId: string | undefined;
+      let ack = '';
+      try {
+        const result = await persistValidatedChatPlan({
+          planMarkdown: lastAssistantPlanCandidate,
+          trainingJourneyId: toObjectIdOrUndefined(parsedContext?.trainingJourneyId),
+          gigId: safeGigId,
+          companyId: safeCompanyId,
+          parsedContext,
+          userMessage: message.trim(),
+        });
+        planSavedJourneyId = result.journeyId;
+        ack = /\b(oui|merci|valide|d['’]accord|super|parfait|enregistr|sauvegard|c['’]est\s+bon)\b/i.test(
+          message.trim()
+        )
+          ? result.ackFr
+          : result.ackEn;
+      } catch (e: any) {
+        ack = /\b(oui|merci|valide|d['’]accord|bonjour|salut)\b/i.test(message.trim())
+          ? `Impossible d'enregistrer le plan : ${String(e?.message || 'erreur')}`
+          : `Could not save the plan: ${String(e?.message || 'error')}`;
+      }
+      const userMessageText = message.trim();
+      activeSession.messages.push(
+        { role: 'user', text: userMessageText, createdAt: new Date() } as any,
+        { role: 'assistant', text: ack, createdAt: new Date() } as any
+      );
+      if (planSavedJourneyId && parsedContext && typeof parsedContext === 'object') {
+        (parsedContext as any).trainingJourneyId = planSavedJourneyId;
+      }
+      activeSession.contextSnapshot =
+        parsedContext && typeof parsedContext === 'object'
+          ? {
+              analyzedUploadsCount: parsedContext.analyzedUploadsCount,
+              analyzedUploads: parsedContext.analyzedUploads,
+              knowledgeBaseDocumentsCount: parsedContext.knowledgeBaseDocumentsCount,
+              knowledgeBaseDocuments: parsedContext.knowledgeBaseDocuments,
+              selectedGigId: parsedContext.selectedGigId,
+              selectedGigTitle: parsedContext.selectedGigTitle,
+              gigSnapshot: parsedContext.gigSnapshot,
+              useKnowledgeBase: parsedContext.useKnowledgeBase,
+              useUploadedDocuments: parsedContext.useUploadedDocuments,
+              chatStyle: parsedContext.chatStyle,
+              requestedOutput: parsedContext.requestedOutput,
+              requestedModuleReference: parsedContext.requestedModuleReference,
+              trainingJourneyId: (parsedContext as any)?.trainingJourneyId,
+            }
+          : activeSession.contextSnapshot || null;
+      if (!activeSession.title || activeSession.title === 'Nouvelle conversation') {
+        activeSession.title = buildSessionTitle(userMessageText);
+      }
+      activeSession.lastActivityAt = new Date();
+      await activeSession.save();
+
+      const streamEnabledEarly = String(req.query.stream ?? 'true').toLowerCase() !== 'false';
+      if (!streamEnabledEarly) {
+        return res.status(200).json({
+          success: true,
+          response: ack,
+          sessionId: String(activeSession._id),
+          planSaved: Boolean(planSavedJourneyId),
+          journeyId: planSavedJourneyId,
+        });
+      }
+
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.setHeader('X-Chat-Session-Id', String(activeSession._id));
+      if (planSavedJourneyId) {
+        res.setHeader('X-Plan-Saved', '1');
+        res.setHeader('X-Saved-Journey-Id', planSavedJourneyId);
+      }
+      res.status(200);
+      if (typeof (res as any).flushHeaders === 'function') {
+        (res as any).flushHeaders();
+      }
+      res.write(ack);
+      return res.end();
+    }
 
     const gigGrounding = await buildGigGroundingBlocks(safeGigId, parsedContext);
 
@@ -2079,6 +2178,9 @@ Regenerate now with strict compliance.
             useKnowledgeBase: parsedContext.useKnowledgeBase,
             useUploadedDocuments: parsedContext.useUploadedDocuments,
             chatStyle: parsedContext.chatStyle,
+            requestedOutput: parsedContext.requestedOutput,
+            requestedModuleReference: parsedContext.requestedModuleReference,
+            trainingJourneyId: (parsedContext as any)?.trainingJourneyId,
           }
         : activeSession.contextSnapshot || null;
       if (!activeSession.title || activeSession.title === 'Nouvelle conversation') {
@@ -2189,6 +2291,9 @@ Regenerate now with strict compliance.
           useKnowledgeBase: parsedContext.useKnowledgeBase,
           useUploadedDocuments: parsedContext.useUploadedDocuments,
           chatStyle: parsedContext.chatStyle,
+          requestedOutput: parsedContext.requestedOutput,
+          requestedModuleReference: parsedContext.requestedModuleReference,
+          trainingJourneyId: (parsedContext as any)?.trainingJourneyId,
         }
       : activeSession.contextSnapshot || null;
     if (!activeSession.title || activeSession.title === 'Nouvelle conversation') {
