@@ -16,6 +16,7 @@ import StructuredTrainingSlides from '../models/StructuredTrainingSlides';
 import TrainingJourney from '../models/TrainingJourney';
 import {
   looksLikeTrainingPlanText,
+  persistValidatedChatPlan,
 } from '../utils/chatPlanValidation';
 import mongoose from 'mongoose';
 import fs from 'fs';
@@ -27,6 +28,7 @@ import { ImageGenerationService } from '../services/imageGenerationService';
 const unlinkAsync = promisify(fs.unlink);
 const HARX_STYLE_TAG_REGEX = /<harx-style>\s*\{[\s\S]*?\}\s*<\/harx-style>/i;
 const HARX_TRAINING_STATUS_REGEX = /<harx-training-status>\s*([\s\S]*?)\s*<\/harx-training-status>/i;
+const CHAT_VALIDATE_PLAN_CMD = '__VALIDATE_PLAN__';
 const CHAT_VALIDATE_MODULE_CONTENT_CMD = '__VALIDATE_MODULE_CONTENT__';
 const CHAT_VALIDATE_ALL_MODULES_CONTENT_CMD = '__VALIDATE_ALL_MODULES_CONTENT__';
 
@@ -141,8 +143,13 @@ const appendTrainingReadinessBlock = async (params: {
   if (readiness === 'not_applicable') return '';
 
   const requestedOutput = String(parsedContext?.requestedOutput || '').toLowerCase();
+  const isTrainingPlanResponse =
+    requestedOutput === 'training_plan' && looksLikeTrainingPlanText(compactAssistant);
   const actions: { id: string; label: string }[] = [];
-  if (isPlanValidated) {
+  if (!isPlanValidated && isTrainingPlanResponse) {
+    actions.push({ id: 'validate_plan', label: 'Valider le plan' });
+    messageFr = 'Le plan est prêt. Cliquez sur "Valider le plan" pour l’enregistrer en base.';
+  } else if (isPlanValidated) {
     if (readiness === 'ready' && missingModules.length === 0) {
       if (requestedOutput === 'module_content') {
         actions.push({ id: 'validate_module_content', label: 'Valider ce contenu module' });
@@ -1875,6 +1882,69 @@ export const chat = async (
       (parsedContext as any).planValidatedFromDb = isPlanFrozen;
     }
     const trimmedMessage = String(message || '').trim();
+    if (isJourneyBuilderApp(parsedContext) && trimmedMessage === CHAT_VALIDATE_PLAN_CMD) {
+      const priorMessages = Array.isArray(activeSession.messages) ? activeSession.messages : [];
+      const lastAssistantEntry = [...priorMessages]
+        .reverse()
+        .find((m: any) => String(m?.role || '').toLowerCase() === 'assistant');
+      const planCandidate = sanitizeAssistantPlanText(String(lastAssistantEntry?.text || ''));
+      if (!looksLikeTrainingPlanText(planCandidate)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Aucun plan valide trouvé dans la dernière réponse assistant.',
+        });
+      }
+
+      const saveResult = await persistValidatedChatPlan({
+        planMarkdown: planCandidate,
+        trainingJourneyId:
+          toObjectIdOrUndefined(parsedContext?.trainingJourneyId) ||
+          toObjectIdOrUndefined(req.body?.trainingJourneyId) ||
+          null,
+        gigId: safeGigId || null,
+        companyId: toObjectIdOrUndefined(req.body?.companyId) || null,
+        parsedContext,
+        userMessage: trimmedMessage,
+      });
+
+      const ack = saveResult.ackFr;
+      activeSession.messages.push(
+        { role: 'user', text: trimmedMessage, createdAt: new Date() } as any,
+        { role: 'assistant', text: ack, createdAt: new Date() } as any
+      );
+      activeSession.contextSnapshot = {
+        ...(activeSession.contextSnapshot || {}),
+        ...(parsedContext && typeof parsedContext === 'object' ? parsedContext : {}),
+        trainingJourneyId: saveResult.journeyId,
+      };
+      activeSession.lastActivityAt = new Date();
+      await activeSession.save();
+
+      const streamEnabledEarly = String(req.query.stream ?? 'true').toLowerCase() !== 'false';
+      if (!streamEnabledEarly) {
+        return res.status(200).json({
+          success: true,
+          response: ack,
+          planSaved: true,
+          journeyId: saveResult.journeyId,
+          sessionId: String(activeSession._id),
+        });
+      }
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.setHeader('X-Chat-Session-Id', String(activeSession._id));
+      res.setHeader('X-Plan-Saved', '1');
+      res.setHeader('X-Saved-Journey-Id', saveResult.journeyId);
+      res.status(200);
+      if (typeof (res as any).flushHeaders === 'function') {
+        (res as any).flushHeaders();
+      }
+      res.write(ack);
+      return res.end();
+    }
+
     /**
      * Safety fallback: once plan is frozen, natural user phrases like
      * "je veux maintenant la formation" should switch to full training content,
