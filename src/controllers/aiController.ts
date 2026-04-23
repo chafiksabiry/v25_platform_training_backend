@@ -824,7 +824,7 @@ const buildDeterministicStoryboardFallback = (params: {
       title: t,
       prompt: templateMode
         ? extractSlideBulletsFromText(chunk || sourceBlock || chatPrimary, 4).join('\n')
-        : `[CONTENT] Content slide "${t}" for course "${titleBase}" only. Pedagogical PowerPoint look, title at top, 3–4 short bullets (max ~90 chars each in French); if text is long, shorten wording—never clip at canvas edge. No overlapping side callouts on bullet area.${sourceBlock}${styleSuffix}`,
+        : `[CONTENT] Content slide "${t}" for course "${titleBase}" only. Pedagogical PowerPoint look, title at top, 3–4 short bullets (max ~90 chars each); if text is long, shorten wording—never clip at canvas edge. No overlapping side callouts on bullet area.${sourceBlock}${styleSuffix}`,
     });
   }
 
@@ -2217,7 +2217,6 @@ export const chat = async (
 
     const systemPrompt = [
       'You are Professor academic. Reply in the user language. Be simple, clear, pedagogical.',
-      'If replying in French, use correct spelling/grammar and avoid typos.',
       'Use markdown only. Never output HTML/CSS/JS or fake UI buttons.',
       'Keep business context from conversation unless user changes it.',
       'If critical info is missing, infer reasonably and ask max 2 focused questions at the end.',
@@ -2721,7 +2720,6 @@ export const generateChatTitle = async (
     ].join('\n');
 
     const systemPrompt = [
-      'You create concise professional training titles in French.',
       'Return plain text only.',
       'Do not output explanations.',
     ].join(' ');
