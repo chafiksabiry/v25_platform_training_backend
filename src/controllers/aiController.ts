@@ -2483,14 +2483,18 @@ Regenerate now with strict compliance.
         finalResponse = `${finalResponse}${readinessExtra}`;
       }
       let autoPlanConfirmToken = '';
+      const normalizedPlanCandidate = sanitizeAssistantPlanText(finalResponse);
+      const shouldAutoOfferPlanConfirm =
+        looksLikeTrainingPlanText(normalizedPlanCandidate) ||
+        /\b(plan de formation|training plan)\b/i.test(normalizedPlanCandidate) ||
+        /\bmodule\s*1\b[\s\S]{0,1200}\bmodule\s*2\b/i.test(normalizedPlanCandidate) ||
+        ((requestedOutput === 'training_plan' || /plan|formation/i.test(message.trim())) &&
+          normalizedPlanCandidate.length >= 120);
       if (
         isJourneyBuilderApp(parsedContext) &&
         !isPlanFrozen &&
         !HARX_PLAN_CONFIRM_REGEX.test(finalResponse) &&
-        (
-          looksLikeTrainingPlanText(sanitizeAssistantPlanText(finalResponse)) ||
-          (requestedOutput === 'training_plan' && sanitizeAssistantPlanText(finalResponse).length >= 120)
-        )
+        shouldAutoOfferPlanConfirm
       ) {
         autoPlanConfirmToken = crypto.randomBytes(10).toString('hex');
         finalResponse = `${finalResponse}\n\n<harx-plan-confirm>{"token":"${autoPlanConfirmToken}","label":"Confirmer le plan"}</harx-plan-confirm>`;
@@ -2615,14 +2619,18 @@ Regenerate now with strict compliance.
       }
     }
     let autoPlanConfirmToken = '';
+    const normalizedPlanCandidate = sanitizeAssistantPlanText(assistantMessageText);
+    const shouldAutoOfferPlanConfirm =
+      looksLikeTrainingPlanText(normalizedPlanCandidate) ||
+      /\b(plan de formation|training plan)\b/i.test(normalizedPlanCandidate) ||
+      /\bmodule\s*1\b[\s\S]{0,1200}\bmodule\s*2\b/i.test(normalizedPlanCandidate) ||
+      ((requestedOutput === 'training_plan' || /plan|formation/i.test(message.trim())) &&
+        normalizedPlanCandidate.length >= 120);
     if (
       isJourneyBuilderApp(parsedContext) &&
       !isPlanFrozen &&
       !HARX_PLAN_CONFIRM_REGEX.test(assistantMessageText) &&
-      (
-        looksLikeTrainingPlanText(sanitizeAssistantPlanText(assistantMessageText)) ||
-        (requestedOutput === 'training_plan' && sanitizeAssistantPlanText(assistantMessageText).length >= 120)
-      )
+      shouldAutoOfferPlanConfirm
     ) {
       autoPlanConfirmToken = crypto.randomBytes(10).toString('hex');
       const autoConfirmBlock = `\n\n<harx-plan-confirm>{"token":"${autoPlanConfirmToken}","label":"Confirmer le plan"}</harx-plan-confirm>`;
