@@ -2483,10 +2483,12 @@ Regenerate now with strict compliance.
       let autoPlanConfirmToken = '';
       if (
         isJourneyBuilderApp(parsedContext) &&
-        isPlanIntent &&
         !isPlanFrozen &&
         !HARX_PLAN_CONFIRM_REGEX.test(finalResponse) &&
-        looksLikeTrainingPlanText(sanitizeAssistantPlanText(finalResponse))
+        (
+          looksLikeTrainingPlanText(sanitizeAssistantPlanText(finalResponse)) ||
+          (requestedOutput === 'training_plan' && sanitizeAssistantPlanText(finalResponse).length >= 120)
+        )
       ) {
         autoPlanConfirmToken = crypto.randomBytes(10).toString('hex');
         finalResponse = `${finalResponse}\n\n<harx-plan-confirm>{"token":"${autoPlanConfirmToken}","label":"Confirmer le plan"}</harx-plan-confirm>`;
@@ -2613,10 +2615,12 @@ Regenerate now with strict compliance.
     let autoPlanConfirmToken = '';
     if (
       isJourneyBuilderApp(parsedContext) &&
-      isPlanIntent &&
       !isPlanFrozen &&
       !HARX_PLAN_CONFIRM_REGEX.test(assistantMessageText) &&
-      looksLikeTrainingPlanText(sanitizeAssistantPlanText(assistantMessageText))
+      (
+        looksLikeTrainingPlanText(sanitizeAssistantPlanText(assistantMessageText)) ||
+        (requestedOutput === 'training_plan' && sanitizeAssistantPlanText(assistantMessageText).length >= 120)
+      )
     ) {
       autoPlanConfirmToken = crypto.randomBytes(10).toString('hex');
       const autoConfirmBlock = `\n\n<harx-plan-confirm>{"token":"${autoPlanConfirmToken}","label":"Confirmer le plan"}</harx-plan-confirm>`;
