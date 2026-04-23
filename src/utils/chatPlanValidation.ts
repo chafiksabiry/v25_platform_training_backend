@@ -3,6 +3,14 @@ import trainingJourneyService from '../services/trainingJourneyService';
 import TrainingJourney from '../models/TrainingJourney';
 import type { ITrainingModule } from '../models/TrainingJourney';
 
+export interface ModulePlanItem {
+  title: string;
+  objectifs: string[];
+  keyTopics: string[];
+  activites: string[];
+  durationMinutes?: number;
+}
+
 const cleanLine = (v: string) =>
   String(v || '')
     .replace(/\*\*(.*?)\*\*/g, '$1')
@@ -11,6 +19,12 @@ const cleanLine = (v: string) =>
     .replace(/^\*+|\*+$/g, '')
     .replace(/^#+\s*/, '')
     .replace(/^[-•*]\s*/, '')
+    .trim();
+
+const stripHarxTags = (raw: string) =>
+  String(raw || '')
+    .replace(/<harx-style>[\s\S]*?<\/harx-style>/gi, '')
+    .replace(/<harx-training-status>[\s\S]*?<\/harx-training-status>/gi, '')
     .trim();
 
 export const tryParseModuleHeadingLine = (n: string): { tail: string } | null => {
@@ -77,7 +91,7 @@ function stripModuleTitleForStorage(title: string): string {
   return t;
 }
 
-function splitMdRow(row: string) {
+function splitMdRow(row: string): string[] {
   return row
     .trim()
     .replace(/^\|/, '')
@@ -86,8 +100,45 @@ function splitMdRow(row: string) {
     .map((c) => c.replace(/\*\*/g, '').replace(/`/g, '').trim());
 }
 
-function modulesFromMarkdownTable(lines: string[]): ITrainingModule[] {
-  const out: ITrainingModule[] = [];
+function normalizeBullet(line: string): string {
+  return String(line || '')
+    .replace(/^[-•*]\s+/, '')
+    .replace(/^\d+[.)]\s+/, '')
+    .trim();
+}
+
+function parseStructuredSections(blockLines: string[]) {
+  const out = { objectifs: [] as string[], keyTopics: [] as string[], activites: [] as string[] };
+  let active: 'objectifs' | 'keyTopics' | 'activites' | null = null;
+
+  for (const raw of blockLines) {
+    const line = cleanLine(raw);
+    if (!line) continue;
+    if (/^(objectifs? d['’]?apprentissage|objectifs?)\s*:?$/i.test(line)) {
+      active = 'objectifs';
+      continue;
+    }
+    if (/^(contenu\s+cl[eé]|contenu|key topics|topics|th[eè]mes?\s+cl[eé]s?)\s*:?$/i.test(line)) {
+      active = 'keyTopics';
+      continue;
+    }
+    if (/^(activit[eé]s?)\s*:?$/i.test(line)) {
+      active = 'activites';
+      continue;
+    }
+    if (/^[-•*]\s+/.test(raw) || /^\d+[.)]\s+/.test(raw)) {
+      const item = normalizeBullet(raw);
+      if (!item) continue;
+      if (active) out[active].push(item);
+    }
+  }
+
+  return out;
+}
+
+function modulesFromMarkdownTable(lines: string[]): { modules: ITrainingModule[]; modulePlan: ModulePlanItem[] } {
+  const modules: ITrainingModule[] = [];
+  const modulePlan: ModulePlanItem[] = [];
   let header: string[] | null = null;
   for (const rawLine of lines) {
     const line = rawLine.trim();
@@ -115,59 +166,79 @@ function modulesFromMarkdownTable(lines: string[]): ITrainingModule[] {
     const modNum = modCell.replace(/[^0-9]/g, '');
     if (!modNum || !titleCell) continue;
     const title = `Module ${modNum} - ${titleCell}`;
-    const durMin = durCell ? parseDurationMinutesFromTitle(`(${durCell})`) : 30;
-    const body = [titleCell, durCell ? `Durée: ${durCell}` : '', objCell ? `Objectif: ${objCell}` : '']
-      .filter(Boolean)
-      .join('\n\n');
-    out.push({
+    const duration = durCell ? parseDurationMinutesFromTitle(`(${durCell})`) : 30;
+    const objectives = objCell ? [objCell] : [];
+    const keyTopics = titleCell ? [`Parcours: ${titleCell}`] : [];
+
+    modulePlan.push({
+      title,
+      objectifs: objectives,
+      keyTopics,
+      activites: [],
+      durationMinutes: duration,
+    });
+
+    modules.push({
       title,
       description: objCell || titleCell,
-      duration: durMin,
+      duration,
       difficulty: 'beginner',
-      learningObjectives: objCell ? [objCell] : [],
+      learningObjectives: objectives,
+      topics: keyTopics,
       sections: [
         {
           title: 'Plan validé (aperçu)',
-          content: body,
+          content: [titleCell, durCell ? `Durée: ${durCell}` : '', objCell ? `Objectif: ${objCell}` : '']
+            .filter(Boolean)
+            .join('\n\n'),
           type: 'text',
-          duration: durMin,
+          duration,
         },
       ],
       quizzes: [],
-      order: out.length,
+      order: modules.length,
     } as ITrainingModule);
   }
-  return out;
+  return { modules, modulePlan };
 }
 
-function modulesFromLineBasedPlan(planMarkdown: string): ITrainingModule[] {
+function modulesFromLineBasedPlan(planMarkdown: string): { modules: ITrainingModule[]; modulePlan: ModulePlanItem[] } {
   const lines = planMarkdown.split('\n');
-  const starts: { idx: number; title: string }[] = [];
+  const starts: { idx: number; title: string; rawTail: string }[] = [];
   for (let i = 0; i < lines.length; i++) {
     const normalized = cleanLine(lines[i]);
     const mh = tryParseModuleHeadingLine(normalized);
     if (mh?.tail) {
       const seq = starts.length + 1;
       const fullTitle = `Module ${seq} - ${stripModuleTitleForStorage(mh.tail)}`;
-      starts.push({ idx: i, title: fullTitle });
+      starts.push({ idx: i, title: fullTitle, rawTail: mh.tail });
     }
   }
-  if (starts.length < 2) return [];
+  if (starts.length < 2) return { modules: [], modulePlan: [] };
   const modules: ITrainingModule[] = [];
+  const modulePlan: ModulePlanItem[] = [];
   for (let s = 0; s < starts.length; s++) {
     const from = starts[s].idx + 1;
     const to = s + 1 < starts.length ? starts[s + 1].idx : lines.length;
-    const body = lines.slice(from, to).join('\n').trim();
+    const rawBlockLines = lines.slice(from, to);
+    const body = rawBlockLines.join('\n').trim();
     const title = starts[s].title;
-    const lineTail = cleanLine(lines[starts[s].idx]);
-    const tailOnly = tryParseModuleHeadingLine(lineTail)?.tail || title;
-    const dur = parseDurationMinutesFromTitle(tailOnly);
+    const parsed = parseStructuredSections(rawBlockLines);
+    const dur = parseDurationMinutesFromTitle(starts[s].rawTail || title);
+    modulePlan.push({
+      title,
+      objectifs: parsed.objectifs,
+      keyTopics: parsed.keyTopics,
+      activites: parsed.activites,
+      durationMinutes: dur,
+    });
     modules.push({
       title: stripModuleTitleForStorage(title),
       description: body.slice(0, 500) || title,
       duration: dur,
       difficulty: 'beginner',
-      learningObjectives: [],
+      learningObjectives: parsed.objectifs,
+      topics: parsed.keyTopics,
       sections: [
         {
           title: 'Plan validé',
@@ -180,18 +251,26 @@ function modulesFromLineBasedPlan(planMarkdown: string): ITrainingModule[] {
       order: s,
     } as ITrainingModule);
   }
-  return modules;
+  return { modules, modulePlan };
 }
 
-export function buildModulesFromPlanMarkdown(planMarkdown: string): ITrainingModule[] {
+export function buildModulesFromPlanMarkdown(
+  planMarkdown: string
+): { modules: ITrainingModule[]; modulePlan: ModulePlanItem[] } {
   const raw = String(planMarkdown || '').trim();
-  if (!raw) return [];
-  const lines = raw.split('\n');
-  let modules = modulesFromLineBasedPlan(raw);
-  if (modules.length < 2) {
-    modules = modulesFromMarkdownTable(lines);
-  }
-  return modules;
+  if (!raw) return { modules: [], modulePlan: [] };
+  const lineBased = modulesFromLineBasedPlan(raw);
+  if (lineBased.modules.length >= 2) return lineBased;
+  return modulesFromMarkdownTable(raw.split('\n'));
+}
+
+function sanitizePlanForStorage(planMarkdown: string): string {
+  const stripped = stripHarxTags(planMarkdown);
+  const cutAtQuestion = stripped.replace(
+    /\n+\*\*Souhaitez-vous[\s\S]*$/i,
+    ''
+  );
+  return cutAtQuestion.trim();
 }
 
 function resolveJourneyTitle(parsedContext: any): string {
@@ -211,14 +290,14 @@ export async function persistValidatedChatPlan(params: {
   parsedContext: any;
   userMessage: string;
 }): Promise<{ journeyId: string; ackFr: string; ackEn: string }> {
-  const planClean = String(params.planMarkdown || '').trim();
-  const modules = buildModulesFromPlanMarkdown(planClean);
+  const planClean = sanitizePlanForStorage(String(params.planMarkdown || '').trim());
+  const { modules, modulePlan } = buildModulesFromPlanMarkdown(planClean);
   if (modules.length < 2) {
     throw new Error('Plan invalide: pas assez de modules pour enregistrer.');
   }
   const title = resolveJourneyTitle(params.parsedContext);
   const md = {
-    validatedPlanMarkdown: planClean.replace(/<harx-style>[\s\S]*?<\/harx-style>/gi, '').trim(),
+    validatedPlanMarkdown: planClean,
     planValidatedAt: new Date().toISOString(),
     planFrozenFromChat: true,
   };
@@ -234,6 +313,7 @@ export async function persistValidatedChatPlan(params: {
     const saved = await trainingJourneyService.saveJourney({
       _id: existing._id,
       modules,
+      modulePlan,
       methodologyData: mergedMd,
       ...(est ? { estimatedDuration: est } : {}),
     } as any);
@@ -247,16 +327,15 @@ export async function persistValidatedChatPlan(params: {
       companyId: params.companyId || undefined,
       status: 'draft',
       modules,
+      modulePlan,
       methodologyData: md,
       ...(est ? { estimatedDuration: est } : {}),
     } as any);
     journeyId = String(saved._id);
   }
 
-  const fr = /^(oui|d['’]accord|valide|merci|super|parfait)\b/i.test(params.userMessage.trim())
-    ? `**Plan enregistré** (parcours \`${journeyId}\`). Les modules du chat ne sont plus modifiables par clic ici ; poursuivez la conversation pour générer le contenu si vous le souhaitez.`
-    : `**Plan enregistré** (parcours \`${journeyId}\`). Les cartes du plan ne sont plus cliquables dans ce fil ; vous pouvez continuer pour détailler un module.`;
-  const en = `**Plan saved** (journey \`${journeyId}\`). Plan cards are no longer clickable here; continue the chat to generate module content if needed.`;
+  const fr = `**Plan enregistré** (parcours \`${journeyId}\`). Le plan est sauvegardé en champs structurés : title, objectifs, keyTopics, activités.`;
+  const en = `**Plan saved** (journey \`${journeyId}\`). The plan is stored in structured fields: title, objectives, keyTopics, activities.`;
 
   return { journeyId, ackFr: fr, ackEn: en };
 }

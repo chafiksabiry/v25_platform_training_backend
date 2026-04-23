@@ -57,6 +57,14 @@ export interface IFinalExam {
   duration?: number;
 }
 
+export interface IModulePlanItem {
+  title: string;
+  objectifs?: string[];
+  keyTopics?: string[];
+  activites?: string[];
+  durationMinutes?: number;
+}
+
 /** Géométries décoratives générées par l’IA (coordonnées en % de la slide 0–100). */
 export interface ISlideVisualElement {
   type: 'rectangle' | 'rounded-rectangle' | 'circle' | 'ellipse' | 'triangle' | 'line' | 'arrow';
@@ -140,6 +148,7 @@ export interface ITrainingJourney extends Document {
   estimatedDuration?: string;
   targetRoles?: string[];
   methodologyData?: Record<string, any>;
+  modulePlan?: IModulePlanItem[];
   modules: ITrainingModule[];
   finalExam?: IFinalExam;
   enrolledRepIds?: string[];
@@ -235,6 +244,17 @@ const finalExamSchema = new Schema<IFinalExam>(
   { _id: false }
 );
 
+const modulePlanItemSchema = new Schema<IModulePlanItem>(
+  {
+    title: { type: String, required: true, trim: true },
+    objectifs: [{ type: String }],
+    keyTopics: [{ type: String }],
+    activites: [{ type: String }],
+    durationMinutes: { type: Number },
+  },
+  { _id: false }
+);
+
 const trainingJourneySchema = new Schema<ITrainingJourney>(
   {
     companyId: {
@@ -295,6 +315,7 @@ const trainingJourneySchema = new Schema<ITrainingJourney>(
       type: Schema.Types.Mixed,
       default: {}
     },
+    modulePlan: [modulePlanItemSchema],
     modules: [trainingModuleSchema],
     finalExam: finalExamSchema,
     enrolledRepIds: [{
