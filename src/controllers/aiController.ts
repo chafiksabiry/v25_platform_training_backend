@@ -2249,6 +2249,23 @@ export const chat = async (
       }
     }
     const trimmedMessage = String(message || '').trim();
+    const asksExplicitModuleCountForPlan =
+      /\b(je\s+veux|g[ée]n[ée]r\w*|cr[ée]e\w*|fais|produi\w*|donne)\b[\s\S]{0,50}\b(\d+|un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix)\s+modules?\b/i.test(
+        trimmedMessage
+      ) || /\bplan\b[\s\S]{0,40}\b(\d+|un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix)\s+modules?\b/i.test(trimmedMessage);
+    // If the plan is not yet frozen, "I want N modules" must be treated as a training-plan request
+    // (regenerate/re-shape the plan), not as full training content generation.
+    if (
+      isJourneyBuilderApp(parsedContext) &&
+      !isPlanFrozen &&
+      asksExplicitModuleCountForPlan &&
+      requestedOutput !== 'training_plan'
+    ) {
+      requestedOutput = 'training_plan';
+      if (parsedContext && typeof parsedContext === 'object') {
+        (parsedContext as any).requestedOutput = 'training_plan';
+      }
+    }
     if (isJourneyBuilderApp(parsedContext) && trimmedMessage === CHAT_VALIDATE_PLAN_CMD) {
       const priorMessages = Array.isArray(activeSession.messages) ? activeSession.messages : [];
       const lastAssistantEntry = [...priorMessages]
