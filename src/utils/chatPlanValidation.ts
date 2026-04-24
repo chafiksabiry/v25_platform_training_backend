@@ -154,14 +154,15 @@ function cleanModulePlanFields(p: ModulePlanItem): ModulePlanItem {
     title,
     objectifs: filter(p.objectifs),
     keyTopics: filter(p.keyTopics),
-    activites: filter(p.activites),
+    // Product choice: keep only objectifs + keyTopics for modulePlan.
+    activites: [],
     durationMinutes: p.durationMinutes,
   };
 }
 
 function parseStructuredSections(blockLines: string[]) {
   const out = { objectifs: [] as string[], keyTopics: [] as string[], activites: [] as string[] };
-  let active: 'objectifs' | 'keyTopics' | 'activites' | null = null;
+  let active: 'objectifs' | 'keyTopics' | null = null;
 
   const isObjectifsHeader = (line: string) =>
     /^(🎯\s*)?(objectifs?(\s*d['’]?apprentissage)?|learning\s+objectives?)(\b|[\s:–-]|$)/i.test(line);
@@ -195,12 +196,9 @@ function parseStructuredSections(blockLines: string[]) {
       active = 'keyTopics';
       continue;
     }
-    if (isLivrablesHeader(line) || isEvalOrQuizHeader(line)) {
-      active = 'activites';
-      continue;
-    }
-    if (isActivitiesHeader(line)) {
-      active = 'activites';
+    if (isLivrablesHeader(line) || isEvalOrQuizHeader(line) || isActivitiesHeader(line)) {
+      // Ignore activities/livrables/evaluation blocks in modulePlan extraction.
+      active = null;
       continue;
     }
     if (/^📌\s*\d+(?:\.\d+)+\s+.+$/i.test(line)) {
@@ -217,7 +215,7 @@ function parseStructuredSections(blockLines: string[]) {
       const item = normalizeBullet(raw);
       if (!item) continue;
       if (isPlanBulletNoise(item)) continue;
-      const bucket: 'objectifs' | 'keyTopics' | 'activites' = active ?? 'keyTopics';
+      const bucket: 'objectifs' | 'keyTopics' = active ?? 'keyTopics';
       const pieces = bucket === 'objectifs' ? expandDashListItems(item) : [item];
       for (const piece of pieces) {
         if (!piece.trim()) continue;
@@ -423,9 +421,7 @@ function enrichStructuredPlan(
     const hasRealTopics =
       Array.isArray(p.keyTopics) &&
       p.keyTopics.some((x) => String(x || '').trim().length > 8 && !genericTopic.test(String(x).trim()));
-    const hasRealActivities =
-      Array.isArray(p.activites) &&
-      p.activites.some((x) => String(x || '').trim().length > 8 && !genericAct.test(String(x).trim()));
+    const hasRealActivities = false;
 
     const tail = titleTailForFallback(p.title);
     const chunk0 = chunks[0] || '';
@@ -444,7 +440,7 @@ function enrichStructuredPlan(
         : tail.length >= 10
           ? [tail.slice(0, 200), 'Liens avec le contexte métier et les ressources disponibles']
           : ['Concepts clés du module'];
-    const fallbackLivrables = ['Résumé opérationnel du module', 'Checklist d’application'];
+    const fallbackLivrables: string[] = [];
 
     const objectifs = hasRealObjectifs ? p.objectifs : fallbackObj;
     const keyTopics = hasRealTopics ? p.keyTopics : fallbackTopics;
@@ -584,8 +580,8 @@ export async function persistValidatedChatPlan(params: {
     journeyId = String(saved._id);
   }
 
-  const fr = `**Plan enregistré** (parcours \`${journeyId}\`). Le plan est sauvegardé en champs structurés : title, objectifs, keyTopics, activités.\n\n**Prochaine étape :** demandez le contenu d'un module (ex: \`Donne le contenu du Module 1\`) ou demandez \`Génère tout le contenu de la formation selon le plan enregistré\`.`;
-  const en = `**Plan saved** (journey \`${journeyId}\`). The plan is stored in structured fields: title, objectives, keyTopics, activities.\n\n**Next step:** ask for one module content (e.g. \`Give me Module 1 content\`) or ask \`Generate full training content based on the saved plan\`.`;
+  const fr = `**Plan enregistré** (parcours \`${journeyId}\`). Le plan est sauvegardé en champs structurés : title, objectifs, keyTopics.\n\n**Prochaine étape :** demandez le contenu d'un module (ex: \`Donne le contenu du Module 1\`) ou demandez \`Génère tout le contenu de la formation selon le plan enregistré\`.`;
+  const en = `**Plan saved** (journey \`${journeyId}\`). The plan is stored in structured fields: title, objectives, keyTopics.\n\n**Next step:** ask for one module content (e.g. \`Give me Module 1 content\`) or ask \`Generate full training content based on the saved plan\`.`;
 
   return { journeyId, ackFr: fr, ackEn: en, modulePlan };
 }

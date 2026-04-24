@@ -2296,19 +2296,14 @@ export const chat = async (
             'Output a structured LMS-style training plan (markdown only). No long intro before Module 1.',
             'Start immediately with "## Module 1: <titre court>". Minimum 3 modules (prefer 4+ if duration allows), progressive du débutant vers l’avancé.',
             '',
-            'ALIGNEMENT modulePlan (JSON côté serveur): chaque module est découpé en title, objectifs[], keyTopics[], activites[]. Pour remplir ces champs, CHAQUE module doit répéter le MÊME squelette avec des titres ### et des puces "- " (obligatoire, dans cet ordre):',
+            'ALIGNEMENT modulePlan (JSON côté serveur): chaque module est découpé en title, objectifs[], keyTopics[]. Pour remplir ces champs, CHAQUE module doit répéter le MÊME squelette avec des titres ### et des puces "- " (obligatoire, dans cet ordre):',
             '',
             '## Module N: <titre> *(durée optionnelle ex: 40 min)*',
             '### 🎯 Objectifs',
             '- au moins 3 puces, verbes d’action, sans questions.',
             '### 📌 Contenu clé',
             '- au moins 3 puces (notions, outils, points de vigilance). Synonymes acceptés pour la ligne de titre: "### 📌 Key Topics" ou ligne "**Contenu clé :**" immédiatement suivie de puces "- ".',
-            '### 🧩 Activités',
-            '- au moins 2 puces (atelier, cas pratique, jeu de rôle, checklist).',
-            '### 📊 Indicateur d’évaluation',
-            '- au moins 1 puce mesurable (quiz, grille, KPI, critère de réussite).',
-            '',
-            'Optionnel après le dernier bloc du module: ### 🔁 Amélioration (Méthodologie 360) avec puces.',
+            'Ne pas inclure de section Activités/Livrables/Indicateur d’évaluation dans le plan.',
             '',
             'INTERDIT dans le corps d’un module: section "## ✅ Prochaines étapes", questions finales type "Quelle option", listes numérotées de choix utilisateur — les placer uniquement APRÈS le dernier module si nécessaire (max 2 questions).',
             'Pas de paragraphes longs: préférer des puces courtes sous chaque ###.',
@@ -2359,8 +2354,6 @@ export const chat = async (
       const hasObjectives = /(###\s*🎯\s*objectifs|learning objectives|objectifs? d['’]apprentissage|objectifs?)/i.test(txt);
       const hasTopics =
         /(###\s*📌|key\s*topics|contenu\s+cl[eé]|th[eè]mes\s+cl[eé]s|sujets\s+cl[eé]s|topics)/i.test(txt);
-      const hasActivities = /(###\s*🧩\s*activit|practice activity|activit[eé] pratique|mise en pratique|atelier)/i.test(txt);
-      const hasEvaluation = /(###\s*📊|evaluation indicator|indicateur d['’]?[eé]valuation|crit[eè]re d['’]?[eé]valuation)/i.test(txt);
       const bulletLines = txt
         .split('\n')
         .map((l) => l.trim())
@@ -2392,8 +2385,6 @@ export const chat = async (
         questionMarks >= 4 ||
         !hasObjectives ||
         !hasTopics ||
-        !hasActivities ||
-        !hasEvaluation ||
         longSentenceBullets >= 4 ||
         numberedListLines >= 6 ||
         repetitivePrefixDetected
@@ -2543,9 +2534,7 @@ Regenerate now with strict compliance.
 - Each module MUST use this exact skeleton (### headings + "- " bullets only under each):
   ### 🎯 Objectifs (min 3 bullets)
   ### 📌 Contenu clé (min 3 bullets; alias "### 📌 Key Topics" or "**Contenu clé :**" + bullets allowed)
-  ### 🧩 Activités (min 2 bullets)
-  ### 📊 Indicateur d’évaluation (min 1 bullet)
-- Optional: ### 🔁 Amélioration (Méthodologie 360)
+- Do NOT include Activités/Livrables/Indicateur d’évaluation sections in training plan output
 - No intro before Module 1; no "Prochaines étapes" / CTA inside a module body; max 2 short questions only after the last module if needed`;
         response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
       }
@@ -2618,9 +2607,7 @@ Regenerate now with strict compliance.
 - Each module MUST use this exact skeleton (### headings + "- " bullets only under each):
   ### 🎯 Objectifs (min 3 bullets)
   ### 📌 Contenu clé (min 3 bullets; alias "### 📌 Key Topics" or "**Contenu clé :**" + bullets allowed)
-  ### 🧩 Activités (min 2 bullets)
-  ### 📊 Indicateur d’évaluation (min 1 bullet)
-- Optional: ### 🔁 Amélioration (Méthodologie 360)
+- Do NOT include Activités/Livrables/Indicateur d’évaluation sections in training plan output
 - No intro before Module 1; no "Prochaines étapes" / CTA inside a module body; max 2 short questions only after the last module if needed`;
         response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
       }

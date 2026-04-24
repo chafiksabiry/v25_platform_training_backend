@@ -40,17 +40,14 @@ Return the full plan after patching, but do not regenerate untouched modules.
 {/if_plan_patch_request}
 Markdown only. Start at "## Module 1: <short title>". Minimum 3 modules (prefer 4+ if duration allows), progressive.
 
-ALIGNEMENT modulePlan (JSON): each module maps to title, objectifs[], keyTopics[], activites[]. Use the SAME skeleton per module (### headings + "- " bullets):
+ALIGNEMENT modulePlan (JSON): each module maps to title, objectifs[], keyTopics[]. Use the SAME skeleton per module (### headings + "- " bullets):
 
 ## Module N: <title> *(optional duration e.g. 40 min)*
 ### 🎯 Objectifs
 - at least 3 bullets, action verbs, no questions
 ### 📌 Contenu clé
 - at least 3 bullets (concepts, tools, pitfalls). Title line may instead be "### 📌 Key Topics" or "**Contenu clé :**" followed by "- " bullets
-### 🧩 Activités
-- at least 2 bullets (workshop, case study, role-play, checklist)
-### 📊 Indicateur d'évaluation
-- at least 1 measurable bullet (quiz, rubric, KPI)
+Do NOT include Activités/Livrables/Indicateur d'évaluation sections in the training plan output.
 
 Optional: ### 🔁 Amélioration (Méthodologie 360) with bullets.
 
@@ -100,8 +97,8 @@ HARD PLAN ENFORCEMENT:
 Regenerate now with strict compliance.
 - Start at "## Module 1: <title>"
 - Minimum 3 modules (4+ if duration allows), progressive
-- Each module MUST use: ### 🎯 Objectifs (min 3 bullets), ### 📌 Contenu clé (min 3 bullets; alias Key Topics / "**Contenu clé :**"), ### 🧩 Activités (min 2), ### 📊 Indicateur d'évaluation (min 1)
-- Optional: ### 🔁 Amélioration (Méthodologie 360)
+- Each module MUST use: ### 🎯 Objectifs (min 3 bullets), ### 📌 Contenu clé (min 3 bullets; alias Key Topics / "**Contenu clé :**")
+- Do NOT include Activités/Livrables/Indicateur d'évaluation sections in training plan output
 - Dash bullets under each ### only; no CTA / "Prochaines étapes" inside module bodies
 
 
