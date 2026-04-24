@@ -2524,9 +2524,9 @@ export const chat = async (
         validated.push(item);
         md.validatedModuleContents = validated.slice(-100);
 
-        const sessionPlanRaw = Array.isArray((activeSession as any).modulePlan)
+        const sessionPlanRaw = Array.isArray((activeSession as any).modulePlan) && (activeSession as any).modulePlan.length > 0
           ? ([...(activeSession as any).modulePlan] as any[])
-          : [];
+          : (Array.isArray((journey as any).modulePlan) ? ([...(journey as any).modulePlan] as any[]) : []);
         if (sessionPlanRaw.length > 0) {
           const currentIdx = Math.max(
             0,
@@ -2547,10 +2547,14 @@ export const chat = async (
               sessionPlanRaw,
               (activeSession as any).modulePlan
             );
-            (activeSession as any).modulePlan = sanitizedSessionPlan;
+            if (Array.isArray(sanitizedSessionPlan) && sanitizedSessionPlan.length >= 2) {
+              (activeSession as any).modulePlan = sanitizedSessionPlan;
+            } else if (Array.isArray((journey as any).modulePlan) && (journey as any).modulePlan.length >= 2) {
+              (activeSession as any).modulePlan = withModuleValidity((journey as any).modulePlan, (activeSession as any).modulePlan);
+            }
             const snap = (activeSession as any).contextSnapshot;
             if (snap && typeof snap === 'object' && Array.isArray((snap as any).modulePlan)) {
-              (snap as any).modulePlan = sanitizedSessionPlan;
+              (snap as any).modulePlan = (activeSession as any).modulePlan;
               (snap as any).modulePlanUpdatedAt = new Date().toISOString();
             }
           }
