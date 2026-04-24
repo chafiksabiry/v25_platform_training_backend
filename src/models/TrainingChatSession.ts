@@ -15,6 +15,20 @@ export interface ITrainingChatModulePlanItem {
   isValid?: boolean;
 }
 
+export type ChatBuildStatus = 'pending' | 'in_progress' | 'completed';
+
+export interface ITrainingChatWorkflowModuleStatus {
+  index: number;
+  title: string;
+  status: ChatBuildStatus;
+}
+
+export interface ITrainingChatWorkflowStatus {
+  plan: ChatBuildStatus;
+  modules: ITrainingChatWorkflowModuleStatus[];
+  updatedAt?: Date;
+}
+
 export interface ITrainingChatSession extends Document {
   gigId?: mongoose.Types.ObjectId | string;
   companyId?: mongoose.Types.ObjectId | string;
@@ -25,6 +39,7 @@ export interface ITrainingChatSession extends Document {
   modulePlan?: ITrainingChatModulePlanItem[];
   modulePlanUpdatedAt?: Date;
   planIsValid?: boolean;
+  workflowStatus?: ITrainingChatWorkflowStatus;
   lastActivityAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -58,6 +73,38 @@ const trainingChatModulePlanItemSchema = new Schema<ITrainingChatModulePlanItem>
     keyTopics: { type: [String], default: [] },
     durationMinutes: { type: Number, min: 1, max: 10080 },
     isValid: { type: Boolean, default: false },
+  },
+  { _id: false }
+);
+
+const trainingChatWorkflowModuleStatusSchema = new Schema<ITrainingChatWorkflowModuleStatus>(
+  {
+    index: { type: Number, required: true, min: 0 },
+    title: { type: String, required: true, trim: true, maxlength: 600 },
+    status: {
+      type: String,
+      enum: ['pending', 'in_progress', 'completed'],
+      default: 'pending',
+    },
+  },
+  { _id: false }
+);
+
+const trainingChatWorkflowStatusSchema = new Schema<ITrainingChatWorkflowStatus>(
+  {
+    plan: {
+      type: String,
+      enum: ['pending', 'in_progress', 'completed'],
+      default: 'pending',
+    },
+    modules: {
+      type: [trainingChatWorkflowModuleStatusSchema],
+      default: [],
+    },
+    updatedAt: {
+      type: Date,
+      default: Date.now,
+    },
   },
   { _id: false }
 );
@@ -100,6 +147,10 @@ const trainingChatSessionSchema = new Schema<ITrainingChatSession>(
     planIsValid: {
       type: Boolean,
       default: false,
+    },
+    workflowStatus: {
+      type: trainingChatWorkflowStatusSchema,
+      default: () => ({ plan: 'pending', modules: [], updatedAt: new Date() }),
     },
     lastActivityAt: {
       type: Date,

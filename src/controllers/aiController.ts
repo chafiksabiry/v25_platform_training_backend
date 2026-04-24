@@ -154,6 +154,10 @@ const appendTrainingReadinessBlock = async (params: {
 
   const requestedOutput = String(parsedContext?.requestedOutput || '').toLowerCase();
   const looksLikePlan = looksLikeTrainingPlanText(compactAssistant);
+  const looksLikeModuleContent =
+    /###\s*(📚|🧪|✅|📝)\s*|explication\s+d[ée]taill[ée]e|mini\s+quiz|auto[-\s]?[eé]valuation|hands-on\s+exercise/i.test(
+      compactAssistant
+    );
   const isTrainingPlanResponse = looksLikePlan || requestedOutput === 'training_plan';
   if (readiness === 'not_applicable') {
     if (!isTrainingPlanResponse) {
@@ -179,7 +183,7 @@ const appendTrainingReadinessBlock = async (params: {
       messageFr = 'Tous les modules sont validés. Vous pouvez valider la formation.';
     } else if (wf && wf.totalModules > 0 && wf.currentModuleIndex >= 0) {
       const current = wf.modules[wf.currentModuleIndex];
-      if (requestedOutput === 'module_content') {
+      if (requestedOutput === 'module_content' || looksLikeModuleContent) {
         actions.push({
           id: 'validate_module_content',
           label: `Valider le contenu du module ${wf.currentModuleIndex + 1}`,
@@ -202,6 +206,7 @@ const appendTrainingReadinessBlock = async (params: {
   console.log('[training-readiness] actions resolved', {
     requestedOutput,
     looksLikePlan,
+    looksLikeModuleContent,
     isTrainingPlanResponse,
     isPlanValidated,
     readiness,
@@ -315,6 +320,12 @@ type JourneyWorkflowState = {
   updatedAt?: string;
 };
 
+type ChatWorkflowStatus = {
+  plan: 'pending' | 'in_progress' | 'completed';
+  modules: Array<{ index: number; title: string; status: 'pending' | 'in_progress' | 'completed' }>;
+  updatedAt: string;
+};
+
 const buildWorkflowFromPlan = (modulePlan: CompactPlanModule[]): JourneyWorkflowState => {
   const modules = modulePlan.map((m, idx) => ({
     index: idx,
@@ -356,6 +367,42 @@ const normalizeWorkflowState = (raw: any, modulePlan: CompactPlanModule[]): Jour
     totalModules: normalizedModules.length,
     modules: normalizedModules,
     updatedAt: raw?.updatedAt ? String(raw.updatedAt) : new Date().toISOString(),
+  };
+};
+
+const buildChatWorkflowStatus = (params: {
+  modulePlanRaw: any;
+  planIsValid: boolean;
+  workflowState?: JourneyWorkflowState | null;
+}): ChatWorkflowStatus => {
+  const modulePlan = Array.isArray(params.modulePlanRaw) ? params.modulePlanRaw : [];
+  const workflow = params.workflowState || undefined;
+  const planStatus: ChatWorkflowStatus['plan'] = params.planIsValid
+    ? 'completed'
+    : modulePlan.length >= 2
+      ? 'in_progress'
+      : 'pending';
+
+  const firstUnvalidatedFromPlan = modulePlan.findIndex((m: any) => Boolean(m?.isValid) !== true);
+  const fallbackCurrentIndex =
+    firstUnvalidatedFromPlan >= 0 ? firstUnvalidatedFromPlan : modulePlan.length > 0 ? modulePlan.length - 1 : -1;
+  const currentIndex = workflow && workflow.currentModuleIndex >= 0 ? workflow.currentModuleIndex : fallbackCurrentIndex;
+
+  const modules = modulePlan.map((m: any, idx: number) => {
+    const title = String(m?.title || '').trim() || `Module ${idx + 1}`;
+    if (Boolean(m?.isValid)) {
+      return { index: idx, title, status: 'completed' as const };
+    }
+    if (params.planIsValid && idx === currentIndex) {
+      return { index: idx, title, status: 'in_progress' as const };
+    }
+    return { index: idx, title, status: 'pending' as const };
+  });
+
+  return {
+    plan: planStatus,
+    modules,
+    updatedAt: new Date().toISOString(),
   };
 };
 
@@ -2064,6 +2111,23 @@ export const chat = async (
         : new Date();
     };
 
+    const persistWorkflowStatusOnSessionDoc = (workflowOverride?: JourneyWorkflowState | null) => {
+      const status = buildChatWorkflowStatus({
+        modulePlanRaw: (activeSession as any).modulePlan,
+        planIsValid: Boolean((activeSession as any).planIsValid),
+        workflowState: workflowOverride || undefined,
+      });
+      (activeSession as any).workflowStatus = status;
+      const snap =
+        (activeSession as any).contextSnapshot && typeof (activeSession as any).contextSnapshot === 'object'
+          ? ((activeSession as any).contextSnapshot as Record<string, any>)
+          : {};
+      (activeSession as any).contextSnapshot = {
+        ...snap,
+        workflowStatus: status,
+      };
+    };
+
     const selectedDuration = parsedContext?.selectedDuration || 'non specifiee';
     const selectedMethodology = parsedContext?.selectedMethodology || 'Methodologie 360';
     const isFreeChatMode = String(parsedContext?.chatStyle || '').toLowerCase() === 'free_chat';
@@ -2192,6 +2256,7 @@ export const chat = async (
       (activeSession as any).modulePlan = withModuleValidity(saveResult.modulePlan).map((m: any) => ({ ...m, isValid: false }));
       (activeSession as any).modulePlanUpdatedAt = new Date();
       (activeSession as any).planIsValid = true;
+      persistWorkflowStatusOnSessionDoc((parsedContext as any)?.workflowState || null);
       activeSession.lastActivityAt = new Date();
       await activeSession.save();
 
@@ -2276,6 +2341,30 @@ export const chat = async (
         ? { ...(journey as any).methodologyData }
         : {};
       if (trimmedMessage === CHAT_VALIDATE_MODULE_CONTENT_CMD) {
+        const compactPlan = toCompactPlanModules((journey as any).modulePlan);
+        const workflow = normalizeWorkflowState(md.workflow, compactPlan);
+        const currentIdx = Math.max(0, Math.min(workflow.currentModuleIndex, Math.max(workflow.totalModules - 1, 0)));
+        if (workflow.modules[currentIdx]) {
+          workflow.modules[currentIdx] = {
+            ...workflow.modules[currentIdx],
+            status: 'validated',
+            validatedAt: new Date().toISOString(),
+          };
+        }
+        const nextPending = workflow.modules.findIndex((m) => m.status !== 'validated');
+        const allValidated = workflow.modules.length > 0 && nextPending === -1;
+        workflow.currentModuleIndex = allValidated ? -1 : Math.max(0, nextPending);
+        workflow.phase = allValidated
+          ? 'all_modules_validated'
+          : workflow.modules.some((m) => m.status === 'validated')
+            ? 'module_in_progress'
+            : 'plan_validated';
+        workflow.updatedAt = new Date().toISOString();
+        md.workflow = workflow;
+        if (parsedContext && typeof parsedContext === 'object') {
+          (parsedContext as any).workflowState = workflow;
+        }
+
         const moduleRef = String(parsedContext?.requestedModuleReference || '').trim();
         const validated = Array.isArray(md.validatedModuleContents) ? [...md.validatedModuleContents] : [];
         const item = {
@@ -2326,6 +2415,7 @@ export const chat = async (
         { role: 'user', text: trimmedMessage, createdAt: new Date() } as any,
         { role: 'assistant', text: ack, createdAt: new Date() } as any
       );
+      persistWorkflowStatusOnSessionDoc((md.workflow as JourneyWorkflowState) || null);
       activeSession.lastActivityAt = new Date();
       await activeSession.save();
       const streamEnabledEarly = String(req.query.stream ?? 'true').toLowerCase() !== 'false';
@@ -2361,6 +2451,7 @@ export const chat = async (
         { role: 'user', text: message.trim(), createdAt: new Date() } as any,
         { role: 'assistant', text: lockMsg, createdAt: new Date() } as any
       );
+      persistWorkflowStatusOnSessionDoc((parsedContext as any)?.workflowState || null);
       activeSession.lastActivityAt = new Date();
       await activeSession.save();
       const streamEnabledEarly = String(req.query.stream ?? 'true').toLowerCase() !== 'false';
@@ -2395,6 +2486,7 @@ export const chat = async (
         { role: 'user', text: message.trim(), createdAt: new Date() } as any,
         { role: 'assistant', text: lockMsg, createdAt: new Date() } as any
       );
+      persistWorkflowStatusOnSessionDoc((parsedContext as any)?.workflowState || null);
       activeSession.lastActivityAt = new Date();
       await activeSession.save();
       const streamEnabledEarly = String(req.query.stream ?? 'true').toLowerCase() !== 'false';
@@ -2825,6 +2917,7 @@ Regenerate now with strict compliance.
       );
       activeSession.contextSnapshot = buildContextSnapshotForSave(assistantMessageText);
       persistModulePlanOnSessionDoc(activeSession.contextSnapshot as Record<string, any> | null);
+      persistWorkflowStatusOnSessionDoc((parsedContext as any)?.workflowState || null);
       if (!activeSession.title || activeSession.title === 'Nouvelle conversation') {
         activeSession.title = buildSessionTitle(userMessageText);
       }
@@ -2929,6 +3022,7 @@ Regenerate now with strict compliance.
     );
     activeSession.contextSnapshot = buildContextSnapshotForSave(assistantMessageText);
     persistModulePlanOnSessionDoc(activeSession.contextSnapshot as Record<string, any> | null);
+    persistWorkflowStatusOnSessionDoc((parsedContext as any)?.workflowState || null);
     if (!activeSession.title || activeSession.title === 'Nouvelle conversation') {
       activeSession.title = buildSessionTitle(userMessageText);
     }
@@ -3091,6 +3185,26 @@ export const getChatSession = async (
       typeof (session as any).planIsValid === 'boolean'
         ? Boolean((session as any).planIsValid)
         : Boolean(snap?.planIsValid);
+    const workflowStatusRaw =
+      (session as any).workflowStatus && typeof (session as any).workflowStatus === 'object'
+        ? (session as any).workflowStatus
+        : snap?.workflowStatus;
+    const workflowStatus =
+      workflowStatusRaw && typeof workflowStatusRaw === 'object'
+        ? {
+            plan: String((workflowStatusRaw as any).plan || 'pending'),
+            modules: Array.isArray((workflowStatusRaw as any).modules)
+              ? (workflowStatusRaw as any).modules.map((m: any, idx: number) => ({
+                  index: Number.isFinite(Number(m?.index)) ? Number(m.index) : idx,
+                  title: String(m?.title || `Module ${idx + 1}`),
+                  status: String(m?.status || 'pending'),
+                }))
+              : [],
+            updatedAt: (workflowStatusRaw as any).updatedAt
+              ? String((workflowStatusRaw as any).updatedAt)
+              : undefined,
+          }
+        : undefined;
 
     return res.status(200).json({
       success: true,
@@ -3104,6 +3218,7 @@ export const getChatSession = async (
         modulePlan,
         modulePlanUpdatedAt,
         planIsValid,
+        workflowStatus,
         lastActivityAt: (session as any).lastActivityAt || (session as any).updatedAt || (session as any).createdAt,
         messages: ((session as any).messages || []).map((m: any) => ({
           role: m.role === 'assistant' ? 'assistant' : 'user',
