@@ -2278,7 +2278,7 @@ export const chat = async (
       ...(gigGrounding.systemRules.length
         ? gigGrounding.systemRules
         : ['Do not invent company/gig context not provided by user.']),
-      isFreeChatMode
+      isFreeChatMode && requestedOutput !== 'training_plan'
         ? 'FREE CHAT MODE: natural concise assistant style. Do not force module structures unless user explicitly asks plan/training/module.'
         : '',
       requestedOutput === 'training_plan'
@@ -2293,35 +2293,25 @@ export const chat = async (
             isPlanPatchRequest
               ? 'Return the full plan after patching, but do not regenerate untouched modules.'
               : '',
-            'Output a structured LMS-style training plan (markdown only). No intro paragraph, no questions.',
-            'Start immediately with "## Module 1: <titre court>". Minimum 4 modules, progressive du débutant vers l’avancé.',
-            'STRUCTURE (obligatoire, même logique pour chaque module):',
-            '- Use nested headings: ## for module title, ### for sections.',
-            '- Under each "### 📌 X.Y <sous-partie>" section, use dash bullets ("- ").',
-            '- You MAY use nested numbering in headings (X.1, X.2) inside the ### title text.',
+            'Output a structured LMS-style training plan (markdown only). No long intro before Module 1.',
+            'Start immediately with "## Module 1: <titre court>". Minimum 3 modules (prefer 4+ if duration allows), progressive du débutant vers l’avancé.',
             '',
-            'TEMPLATE:',
-            '## Module X: <titre>',
+            'ALIGNEMENT modulePlan (JSON côté serveur): chaque module est découpé en title, objectifs[], keyTopics[], activites[]. Pour remplir ces champs, CHAQUE module doit répéter le MÊME squelette avec des titres ### et des puces "- " (obligatoire, dans cet ordre):',
+            '',
+            '## Module N: <titre> *(durée optionnelle ex: 40 min)*',
             '### 🎯 Objectifs',
-            '- <objectif>',
-            '- <objectif>',
-            '### 📌 X.1 <sous-partie>',
-            '- <élément>',
-            '- <élément>',
-            '### 📌 X.2 <sous-partie>',
-            '- <élément>',
-            '- <élément>',
+            '- au moins 3 puces, verbes d’action, sans questions.',
+            '### 📌 Contenu clé',
+            '- au moins 3 puces (notions, outils, points de vigilance). Synonymes acceptés pour la ligne de titre: "### 📌 Key Topics" ou ligne "**Contenu clé :**" immédiatement suivie de puces "- ".',
             '### 🧩 Activités',
-            '- <activité pratique>',
-            '- <activité réflexion>',
+            '- au moins 2 puces (atelier, cas pratique, jeu de rôle, checklist).',
             '### 📊 Indicateur d’évaluation',
-            '- <indicateur mesurable>',
-            '### 🔁 Amélioration (Méthodologie 360)',
-            '- Feedback',
-            '- Auto-évaluation',
-            '- Itération',
+            '- au moins 1 puce mesurable (quiz, grille, KPI, critère de réussite).',
             '',
-            'Avoid long narrative paragraphs; prefer short bullets.',
+            'Optionnel après le dernier bloc du module: ### 🔁 Amélioration (Méthodologie 360) avec puces.',
+            '',
+            'INTERDIT dans le corps d’un module: section "## ✅ Prochaines étapes", questions finales type "Quelle option", listes numérotées de choix utilisateur — les placer uniquement APRÈS le dernier module si nécessaire (max 2 questions).',
+            'Pas de paragraphes longs: préférer des puces courtes sous chaque ###.',
           ].join('\n')
         : '',
       requestedOutput === 'full_training_content'
@@ -2367,7 +2357,8 @@ export const chat = async (
       const startsWithQuestion = /^\s*(avant|pour commencer|j['’]ai besoin|peux-tu|quel|quelle|quels|quelles)\b/i.test(txt);
       const questionMarks = (txt.match(/\?/g) || []).length;
       const hasObjectives = /(###\s*🎯\s*objectifs|learning objectives|objectifs? d['’]apprentissage|objectifs?)/i.test(txt);
-      const hasTopics = /(###\s*📌|key topics|th[eè]mes cl[eé]s|sujets cl[eé]s|topics)/i.test(txt);
+      const hasTopics =
+        /(###\s*📌|key\s*topics|contenu\s+cl[eé]|th[eè]mes\s+cl[eé]s|sujets\s+cl[eé]s|topics)/i.test(txt);
       const hasActivities = /(###\s*🧩\s*activit|practice activity|activit[eé] pratique|mise en pratique|atelier)/i.test(txt);
       const hasEvaluation = /(###\s*📊|evaluation indicator|indicateur d['’]?[eé]valuation|crit[eè]re d['’]?[eé]valuation)/i.test(txt);
       const bulletLines = txt
@@ -2548,11 +2539,14 @@ export const chat = async (
 HARD PLAN ENFORCEMENT:
 Regenerate now with strict compliance.
 - Start at "## Module 1: <titre>"
-- Minimum 4 modules, progressive
-- Use nested markdown headings (## / ###) exactly like the LMS template in INTENT LOCK: TRAINING PLAN
-- Each module must include: ### 🎯 Objectifs, at least two "### 📌 X.Y ..." sections, ### 🧩 Activités, ### 📊 Indicateur d’évaluation, ### 🔁 Amélioration (Méthodologie 360)
-- Use dash bullets under each ### section
-- No intro, no questions, no long narrative paragraphs`;
+- Minimum 3 modules (4+ if duration allows), progressive
+- Each module MUST use this exact skeleton (### headings + "- " bullets only under each):
+  ### 🎯 Objectifs (min 3 bullets)
+  ### 📌 Contenu clé (min 3 bullets; alias "### 📌 Key Topics" or "**Contenu clé :**" + bullets allowed)
+  ### 🧩 Activités (min 2 bullets)
+  ### 📊 Indicateur d’évaluation (min 1 bullet)
+- Optional: ### 🔁 Amélioration (Méthodologie 360)
+- No intro before Module 1; no "Prochaines étapes" / CTA inside a module body; max 2 short questions only after the last module if needed`;
         response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
       }
       let finalResponse = await ensureVisualResponseContract(
@@ -2620,11 +2614,14 @@ Regenerate now with strict compliance.
 HARD PLAN ENFORCEMENT:
 Regenerate now with strict compliance.
 - Start at "## Module 1: <titre>"
-- Minimum 4 modules, progressive
-- Use nested markdown headings (## / ###) exactly like the LMS template in INTENT LOCK: TRAINING PLAN
-- Each module must include: ### 🎯 Objectifs, at least two "### 📌 X.Y ..." sections, ### 🧩 Activités, ### 📊 Indicateur d’évaluation, ### 🔁 Amélioration (Méthodologie 360)
-- Use dash bullets under each ### section
-- No intro, no questions, no long narrative paragraphs`;
+- Minimum 3 modules (4+ if duration allows), progressive
+- Each module MUST use this exact skeleton (### headings + "- " bullets only under each):
+  ### 🎯 Objectifs (min 3 bullets)
+  ### 📌 Contenu clé (min 3 bullets; alias "### 📌 Key Topics" or "**Contenu clé :**" + bullets allowed)
+  ### 🧩 Activités (min 2 bullets)
+  ### 📊 Indicateur d’évaluation (min 1 bullet)
+- Optional: ### 🔁 Amélioration (Méthodologie 360)
+- No intro before Module 1; no "Prochaines étapes" / CTA inside a module body; max 2 short questions only after the last module if needed`;
         response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
       }
       fullResponse = String(response || '');

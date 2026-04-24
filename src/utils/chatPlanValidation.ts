@@ -86,7 +86,10 @@ function parseDurationMinutesFromTitle(title: string): number {
 }
 
 function stripModuleTitleForStorage(title: string): string {
-  let t = title.replace(/\s*\(\s*\d+\s*(?:min|minutes?|h(?:eures?)?)\s*\)\s*$/i, '').trim();
+  let t = String(title || '').trim();
+  t = t.replace(/\s*\(\s*\d+\s*(?:min|minutes?|h(?:eures?)?)\s*\)\s*\*+/i, '').trim();
+  t = t.replace(/\s*\(\s*\d+\s*(?:min|minutes?|h(?:eures?)?)\s*\)\s*$/i, '').trim();
+  t = t.replace(/\s*\*+\s*$/g, '').trim();
   t = t.replace(/\s*⏱️\s*[^\n]+$/i, '').trim();
   return t;
 }
@@ -117,6 +120,45 @@ function expandDashListItems(s: string): string[] {
   return parts;
 }
 
+/** Hors périmètre du module (CTA, suite du chat) : on arrête de classer les puces. */
+function isEndOfModulePlanSection(line: string): boolean {
+  return (
+    /\bprochaines\s+[ée]tapes\b/i.test(line) ||
+    (/^✅\s*/.test(line) && /prochaines/i.test(line)) ||
+    /\bvoulez-vous\s+que\s+je\b/i.test(line) ||
+    /\bquelle\s+option\s+choisissez\b/i.test(line) ||
+    /\bet\s+pour\s+plus\s+tard\b/i.test(line)
+  );
+}
+
+function isPlanBulletNoise(text: string): boolean {
+  const x = String(text || '').trim();
+  if (!x) return true;
+  if (/\?\s*$/.test(x)) return true;
+  if (
+    /d[ée]veloppe\s+le\s+contenu\s+complet|g[ée]n[èe]re\s+l['’]?ensemble|slides,\s*exercices|modules\s+d[ée]taill[ée]s/i.test(
+      x
+    )
+  ) {
+    return true;
+  }
+  if (/voulez-vous|choisissez-vous|prochaines\s+[ée]tapes|pour\s+plus\s+tard/i.test(x)) return true;
+  return false;
+}
+
+function cleanModulePlanFields(p: ModulePlanItem): ModulePlanItem {
+  const title = stripModuleTitleForStorage(String(p.title || ''));
+  const filter = (arr: string[] | undefined) =>
+    (Array.isArray(arr) ? arr : []).map((s) => String(s).trim()).filter(Boolean).filter((s) => !isPlanBulletNoise(s));
+  return {
+    title,
+    objectifs: filter(p.objectifs),
+    keyTopics: filter(p.keyTopics),
+    activites: filter(p.activites),
+    durationMinutes: p.durationMinutes,
+  };
+}
+
 function parseStructuredSections(blockLines: string[]) {
   const out = { objectifs: [] as string[], keyTopics: [] as string[], activites: [] as string[] };
   let active: 'objectifs' | 'keyTopics' | 'activites' | null = null;
@@ -141,6 +183,10 @@ function parseStructuredSections(blockLines: string[]) {
   for (const raw of blockLines) {
     const line = cleanLine(raw);
     if (!line) continue;
+    if (isEndOfModulePlanSection(line)) {
+      active = null;
+      break;
+    }
     if (isObjectifsHeader(line)) {
       active = 'objectifs';
       continue;
@@ -170,6 +216,7 @@ function parseStructuredSections(blockLines: string[]) {
     if (isBullet) {
       const item = normalizeBullet(raw);
       if (!item) continue;
+      if (isPlanBulletNoise(item)) continue;
       const bucket: 'objectifs' | 'keyTopics' | 'activites' = active ?? 'keyTopics';
       const pieces = bucket === 'objectifs' ? expandDashListItems(item) : [item];
       for (const piece of pieces) {
@@ -249,6 +296,30 @@ function modulesFromMarkdownTable(lines: string[]): { modules: ITrainingModule[]
   return { modules, modulePlan };
 }
 
+/** Coupe le bloc d'un module avant footer CTA / séparateur (ex. --- puis « Quelle option »). */
+function trimModuleBlockFooter(rawBlockLines: string[]): string[] {
+  const out: string[] = [];
+  for (const raw of rawBlockLines) {
+    const t = String(raw || '').trim();
+    if (/^---+$/u.test(t)) break;
+    if (/^#{1,3}\s*✅\s*Prochaines/i.test(t)) break;
+    if (/^#{1,3}\s*[^\n]*\bProchaines\s+[ée]tapes\b/i.test(t)) break;
+    if (/^\*\*Voulez-vous que je\b/i.test(t)) break;
+    const cl = cleanLine(raw);
+    if (
+      /quelle\s+option|préférez-vous|preferez-vous|souhaitez-vous|une\s+autre\s+piste|cliquez\s+sur|valider\s+le\s+plan|choisissez-vous|voulez-vous\s+que\s+je/i.test(
+        cl
+      )
+    ) {
+      break;
+    }
+    if (/^#{1,3}\s*(option\s+[AB]\b|\*\*option)/i.test(cl)) break;
+    if (isEndOfModulePlanSection(cl)) break;
+    out.push(raw);
+  }
+  return out;
+}
+
 function modulesFromLineBasedPlan(planMarkdown: string): { modules: ITrainingModule[]; modulePlan: ModulePlanItem[] } {
   const lines = planMarkdown.split('\n');
   const starts: { idx: number; title: string; rawTail: string }[] = [];
@@ -267,25 +338,26 @@ function modulesFromLineBasedPlan(planMarkdown: string): { modules: ITrainingMod
   for (let s = 0; s < starts.length; s++) {
     const from = starts[s].idx + 1;
     const to = s + 1 < starts.length ? starts[s + 1].idx : lines.length;
-    const rawBlockLines = lines.slice(from, to);
+    const rawBlockLines = trimModuleBlockFooter(lines.slice(from, to));
     const body = rawBlockLines.join('\n').trim();
     const title = starts[s].title;
     const parsed = parseStructuredSections(rawBlockLines);
     const dur = parseDurationMinutesFromTitle(starts[s].rawTail || title);
-    modulePlan.push({
+    const cleaned = cleanModulePlanFields({
       title,
       objectifs: parsed.objectifs,
       keyTopics: parsed.keyTopics,
       activites: parsed.activites,
       durationMinutes: dur,
     });
+    modulePlan.push(cleaned);
     modules.push({
-      title: stripModuleTitleForStorage(title),
-      description: body.slice(0, 80000) || title,
+      title: stripModuleTitleForStorage(cleaned.title),
+      description: body.slice(0, 80000) || cleaned.title,
       duration: dur,
       difficulty: 'beginner',
-      learningObjectives: parsed.objectifs,
-      topics: parsed.keyTopics,
+      learningObjectives: cleaned.objectifs,
+      topics: cleaned.keyTopics,
       sections: [
         {
           title: 'Plan validé',
@@ -320,6 +392,22 @@ function toSentenceChunks(text: string): string[] {
     .slice(0, 6);
 }
 
+function titleTailForFallback(planTitle: string): string {
+  return String(planTitle || '')
+    .replace(/^\s*module\s*\d+\s*[-:–]\s*/i, '')
+    .trim();
+}
+
+function chunkLooksLikePlanNoise(s: string): boolean {
+  const t = String(s || '').trim();
+  if (!t || t.length > 480) return true;
+  if (/\?\s*$/.test(t)) return true;
+  if (/\*\*|__|\[[^\]]+\]\([^)]+\)/.test(t)) return true;
+  if (/quelle\s+option|souhaitez-vous|préférez-vous|preferez-vous|autre\s+piste|^\s*---/i.test(t)) return true;
+  if (/^comprendre\s+---/i.test(t)) return true;
+  return false;
+}
+
 function enrichStructuredPlan(
   modules: ITrainingModule[],
   modulePlan: ModulePlanItem[]
@@ -339,8 +427,23 @@ function enrichStructuredPlan(
       Array.isArray(p.activites) &&
       p.activites.some((x) => String(x || '').trim().length > 8 && !genericAct.test(String(x).trim()));
 
-    const fallbackObj = chunks[0] ? [`Comprendre ${chunks[0].toLowerCase()}`] : ['Comprendre les fondamentaux du module'];
-    const fallbackTopics = chunks.length > 1 ? chunks.slice(0, 2) : ['Concepts clés du module'];
+    const tail = titleTailForFallback(p.title);
+    const chunk0 = chunks[0] || '';
+    const useChunk = chunk0 && !chunkLooksLikePlanNoise(chunk0);
+    const fallbackObj = useChunk
+      ? [`Comprendre ${chunk0.toLowerCase()}`]
+      : tail.length >= 10
+        ? [
+            `Identifier les enjeux et objectifs liés à : ${tail}`,
+            `Mettre en œuvre les notions utiles pour : ${tail.slice(0, 160)}`,
+          ]
+        : ['Comprendre les fondamentaux du module'];
+    const fallbackTopics =
+      useChunk && chunks.length > 1
+        ? chunks.slice(0, 2)
+        : tail.length >= 10
+          ? [tail.slice(0, 200), 'Liens avec le contexte métier et les ressources disponibles']
+          : ['Concepts clés du module'];
     const fallbackLivrables = ['Résumé opérationnel du module', 'Checklist d’application'];
 
     const objectifs = hasRealObjectifs ? p.objectifs : fallbackObj;
@@ -360,12 +463,12 @@ function enrichStructuredPlan(
       }
     }
 
-    return {
+    return cleanModulePlanFields({
       ...p,
       objectifs,
       keyTopics,
       activites,
-    };
+    });
   });
 
   return { modules: nextModules, modulePlan: nextPlan };
@@ -390,12 +493,18 @@ function buildStrictPlanMarkdown(modulePlan: ModulePlanItem[]): string {
 }
 
 export function sanitizePlanForStorage(planMarkdown: string): string {
-  const stripped = stripHarxTags(planMarkdown);
-  const cutAtQuestion = stripped.replace(
-    /\n+\*\*Souhaitez-vous[\s\S]*$/i,
-    ''
-  );
-  return cutAtQuestion.trim();
+  let stripped = stripHarxTags(planMarkdown);
+  stripped = stripped.replace(/\n+\*\*Souhaitez-vous[\s\S]*$/i, '').trim();
+  stripped = stripped.replace(/\n---\s*\n+\s*\*?\*?Quelle option[\s\S]*$/i, '').trim();
+  stripped = stripped.replace(/\n\*?\*?Quelle option préférez-vous[\s\S]*$/i, '').trim();
+  stripped = stripped.replace(/\n+\*\*Ou souhaitez-vous[\s\S]*$/i, '').trim();
+  stripped = stripped.replace(/\n+\*\*Quelle option[\s\S]*$/i, '').trim();
+  stripped = stripped.replace(/\n+Dites-moi\b[\s\S]*$/i, '').trim();
+  stripped = stripped.replace(/\n---\s*\n+\s*##\s*✅\s*Prochaines[\s\S]*$/i, '').trim();
+  stripped = stripped.replace(/\n##\s*✅\s*Prochaines\s+[ée]tapes[\s\S]*$/i, '').trim();
+  stripped = stripped.replace(/\n\*\*Voulez-vous que je[\s\S]*$/i, '').trim();
+  stripped = stripped.replace(/\nQuelle option choisissez[\s\S]*$/i, '').trim();
+  return stripped;
 }
 
 /**
