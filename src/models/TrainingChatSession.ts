@@ -12,6 +12,7 @@ export interface ITrainingChatModulePlanItem {
   objectifs: string[];
   keyTopics: string[];
   durationMinutes?: number;
+  isValid?: boolean;
 }
 
 export interface ITrainingChatSession extends Document {
@@ -56,6 +57,7 @@ const trainingChatModulePlanItemSchema = new Schema<ITrainingChatModulePlanItem>
     objectifs: { type: [String], default: [] },
     keyTopics: { type: [String], default: [] },
     durationMinutes: { type: Number, min: 1, max: 10080 },
+    isValid: { type: Boolean, default: false },
   },
   { _id: false }
 );

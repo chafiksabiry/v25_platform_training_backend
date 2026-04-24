@@ -371,6 +371,21 @@ const toCompactPlanModules = (raw: any): CompactPlanModule[] => {
     .filter((m: CompactPlanModule) => m.title);
 };
 
+const withModuleValidity = (rawPlan: any, previousPlan?: any): any[] => {
+  const incoming = Array.isArray(rawPlan) ? rawPlan : [];
+  const previous = Array.isArray(previousPlan) ? previousPlan : [];
+  return incoming
+    .map((m: any, idx: number) => {
+      const prevValid = previous[idx] && typeof previous[idx].isValid === 'boolean' ? Boolean(previous[idx].isValid) : false;
+      const curValid = typeof m?.isValid === 'boolean' ? Boolean(m.isValid) : prevValid;
+      return {
+        ...m,
+        isValid: curValid,
+      };
+    })
+    .filter((m: any) => String(m?.title || '').trim());
+};
+
 const normalizeGeneratedTitle = (rawTitle: string, fallback: string): string => {
   const cleaned = String(rawTitle || '')
     .replace(/<[^>]+>/g, ' ')
@@ -2038,7 +2053,12 @@ export const chat = async (
       if (!snap?.modulePlan || !Array.isArray(snap.modulePlan) || snap.modulePlan.length < 2) {
         return;
       }
-      (activeSession as any).modulePlan = snap.modulePlan;
+      const normalizedModulePlan = withModuleValidity(
+        snap.modulePlan,
+        (activeSession as any).modulePlan
+      );
+      snap.modulePlan = normalizedModulePlan;
+      (activeSession as any).modulePlan = normalizedModulePlan;
       (activeSession as any).modulePlanUpdatedAt = snap.modulePlanUpdatedAt
         ? new Date(snap.modulePlanUpdatedAt)
         : new Date();
@@ -2165,11 +2185,11 @@ export const chat = async (
         ...(activeSession.contextSnapshot || {}),
         ...(parsedContext && typeof parsedContext === 'object' ? parsedContext : {}),
         trainingJourneyId: saveResult.journeyId,
-        modulePlan: saveResult.modulePlan,
+        modulePlan: withModuleValidity(saveResult.modulePlan).map((m: any) => ({ ...m, isValid: false })),
         modulePlanUpdatedAt: new Date().toISOString(),
         planIsValid: true,
       };
-      (activeSession as any).modulePlan = saveResult.modulePlan;
+      (activeSession as any).modulePlan = withModuleValidity(saveResult.modulePlan).map((m: any) => ({ ...m, isValid: false }));
       (activeSession as any).modulePlanUpdatedAt = new Date();
       (activeSession as any).planIsValid = true;
       activeSession.lastActivityAt = new Date();
@@ -2264,6 +2284,34 @@ export const chat = async (
         };
         validated.push(item);
         md.validatedModuleContents = validated.slice(-100);
+
+        const sessionPlanRaw = Array.isArray((activeSession as any).modulePlan)
+          ? (activeSession as any).modulePlan
+          : [];
+        if (sessionPlanRaw.length > 0) {
+          const currentIdx = Math.max(
+            0,
+            Number(
+              (md.workflow &&
+                typeof md.workflow === 'object' &&
+                typeof (md.workflow as any).currentModuleIndex === 'number')
+                ? (md.workflow as any).currentModuleIndex
+                : 0
+            )
+          );
+          if (sessionPlanRaw[currentIdx]) {
+            sessionPlanRaw[currentIdx] = {
+              ...sessionPlanRaw[currentIdx],
+              isValid: true,
+            };
+            (activeSession as any).modulePlan = sessionPlanRaw;
+            const snap = (activeSession as any).contextSnapshot;
+            if (snap && typeof snap === 'object' && Array.isArray((snap as any).modulePlan)) {
+              (snap as any).modulePlan = sessionPlanRaw;
+              (snap as any).modulePlanUpdatedAt = new Date().toISOString();
+            }
+          }
+        }
       } else {
         md.validatedAllModulesContentAt = new Date().toISOString();
       }
