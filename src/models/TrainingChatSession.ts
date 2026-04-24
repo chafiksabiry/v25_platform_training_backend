@@ -6,12 +6,24 @@ export interface ITrainingChatMessage {
   createdAt: Date;
 }
 
+/** Même forme que `TrainingJourney.modulePlan` (champ racine de la session chat). */
+export interface ITrainingChatModulePlanItem {
+  title: string;
+  objectifs: string[];
+  keyTopics: string[];
+  activites: string[];
+  durationMinutes?: number;
+}
+
 export interface ITrainingChatSession extends Document {
   gigId?: mongoose.Types.ObjectId | string;
   companyId?: mongoose.Types.ObjectId | string;
   title: string;
   messages: ITrainingChatMessage[];
   contextSnapshot?: Record<string, unknown> | null;
+  /** Plan structuré persisté sur le document (collection `training_chat_sessions`). */
+  modulePlan?: ITrainingChatModulePlanItem[];
+  modulePlanUpdatedAt?: Date;
   lastActivityAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -34,6 +46,17 @@ const trainingChatMessageSchema = new Schema<ITrainingChatMessage>(
       type: Date,
       default: Date.now,
     },
+  },
+  { _id: false }
+);
+
+const trainingChatModulePlanItemSchema = new Schema<ITrainingChatModulePlanItem>(
+  {
+    title: { type: String, required: true, trim: true, maxlength: 600 },
+    objectifs: { type: [String], default: [] },
+    keyTopics: { type: [String], default: [] },
+    activites: { type: [String], default: [] },
+    durationMinutes: { type: Number, min: 1, max: 10080 },
   },
   { _id: false }
 );
@@ -64,6 +87,14 @@ const trainingChatSessionSchema = new Schema<ITrainingChatSession>(
     contextSnapshot: {
       type: Schema.Types.Mixed,
       default: null,
+    },
+    modulePlan: {
+      type: [trainingChatModulePlanItemSchema],
+      default: undefined,
+    },
+    modulePlanUpdatedAt: {
+      type: Date,
+      default: undefined,
     },
     lastActivityAt: {
       type: Date,

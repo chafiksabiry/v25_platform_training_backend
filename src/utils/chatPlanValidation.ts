@@ -389,13 +389,24 @@ function buildStrictPlanMarkdown(modulePlan: ModulePlanItem[]): string {
   return out.join('\n').trim();
 }
 
-function sanitizePlanForStorage(planMarkdown: string): string {
+export function sanitizePlanForStorage(planMarkdown: string): string {
   const stripped = stripHarxTags(planMarkdown);
   const cutAtQuestion = stripped.replace(
     /\n+\*\*Souhaitez-vous[\s\S]*$/i,
     ''
   );
   return cutAtQuestion.trim();
+}
+
+/**
+ * Parse assistant markdown into the same `modulePlan` shape stored on TrainingJourney
+ * (title, objectifs, keyTopics, activites, durationMinutes).
+ */
+export function extractModulePlanFromAssistantMarkdown(rawAssistantText: string): ModulePlanItem[] {
+  const planClean = sanitizePlanForStorage(String(rawAssistantText || ''));
+  const parsed = buildModulesFromPlanMarkdown(planClean);
+  const enriched = enrichStructuredPlan(parsed.modules, parsed.modulePlan);
+  return Array.isArray(enriched.modulePlan) ? enriched.modulePlan : [];
 }
 
 function resolveJourneyTitle(parsedContext: any): string {
@@ -414,7 +425,7 @@ export async function persistValidatedChatPlan(params: {
   companyId?: mongoose.Types.ObjectId | null;
   parsedContext: any;
   userMessage: string;
-}): Promise<{ journeyId: string; ackFr: string; ackEn: string }> {
+}): Promise<{ journeyId: string; ackFr: string; ackEn: string; modulePlan: ModulePlanItem[] }> {
   const planClean = sanitizePlanForStorage(String(params.planMarkdown || '').trim());
   const parsed = buildModulesFromPlanMarkdown(planClean);
   const enriched = enrichStructuredPlan(parsed.modules, parsed.modulePlan);
@@ -467,5 +478,5 @@ export async function persistValidatedChatPlan(params: {
   const fr = `**Plan enregistré** (parcours \`${journeyId}\`). Le plan est sauvegardé en champs structurés : title, objectifs, keyTopics, activités.\n\n**Prochaine étape :** demandez le contenu d'un module (ex: \`Donne le contenu du Module 1\`) ou demandez \`Génère tout le contenu de la formation selon le plan enregistré\`.`;
   const en = `**Plan saved** (journey \`${journeyId}\`). The plan is stored in structured fields: title, objectives, keyTopics, activities.\n\n**Next step:** ask for one module content (e.g. \`Give me Module 1 content\`) or ask \`Generate full training content based on the saved plan\`.`;
 
-  return { journeyId, ackFr: fr, ackEn: en };
+  return { journeyId, ackFr: fr, ackEn: en, modulePlan };
 }

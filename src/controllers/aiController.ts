@@ -17,6 +17,7 @@ import TrainingJourney from '../models/TrainingJourney';
 import {
   looksLikeTrainingPlanText,
   persistValidatedChatPlan,
+  extractModulePlanFromAssistantMarkdown,
 } from '../utils/chatPlanValidation';
 import mongoose from 'mongoose';
 import fs from 'fs';
@@ -1885,7 +1886,85 @@ export const chat = async (
       mergeFromSessionIfMissing('requestedOutput');
       mergeFromSessionIfMissing('requestedModuleReference');
       mergeFromSessionIfMissing('trainingJourneyId');
+      mergeFromSessionIfMissing('modulePlan');
     }
+
+    const sessionModulePlanFromDoc =
+      Array.isArray((activeSession as any).modulePlan) && (activeSession as any).modulePlan.length >= 2
+        ? (activeSession as any).modulePlan
+        : null;
+    if (parsedContext && sessionModulePlanFromDoc) {
+      const cur = (parsedContext as any).modulePlan;
+      const curMissing = !Array.isArray(cur) || cur.length < 2;
+      if (curMissing) {
+        parsedContext = { ...parsedContext, modulePlan: sessionModulePlanFromDoc };
+      }
+    }
+
+    const buildContextSnapshotForSave = (assistantText: string | null): Record<string, any> | null => {
+      if (!parsedContext || typeof parsedContext !== 'object') {
+        return sessionContext;
+      }
+      const prev = sessionContext && typeof sessionContext === 'object' ? sessionContext : {};
+      const snap: Record<string, any> = {
+        analyzedUploadsCount: parsedContext.analyzedUploadsCount,
+        analyzedUploads: parsedContext.analyzedUploads,
+        knowledgeBaseDocumentsCount: parsedContext.knowledgeBaseDocumentsCount,
+        knowledgeBaseDocuments: parsedContext.knowledgeBaseDocuments,
+        selectedGigId: parsedContext.selectedGigId,
+        selectedGigTitle: parsedContext.selectedGigTitle,
+        gigSnapshot: parsedContext.gigSnapshot,
+        useKnowledgeBase: parsedContext.useKnowledgeBase,
+        useUploadedDocuments: parsedContext.useUploadedDocuments,
+        chatStyle: parsedContext.chatStyle,
+        requestedOutput: parsedContext.requestedOutput,
+        requestedModuleReference: parsedContext.requestedModuleReference,
+        trainingJourneyId: (parsedContext as any)?.trainingJourneyId,
+      };
+      const prevPlanFromDoc =
+        Array.isArray((activeSession as any).modulePlan) && (activeSession as any).modulePlan.length >= 2
+          ? (activeSession as any).modulePlan
+          : null;
+      const prevPlan =
+        prevPlanFromDoc ||
+        (Array.isArray((prev as any).modulePlan) && (prev as any).modulePlan.length >= 2
+          ? (prev as any).modulePlan
+          : null);
+      let resolvedPlan: any[] | null = prevPlan;
+      if (
+        isJourneyBuilderApp(parsedContext) &&
+        assistantText &&
+        looksLikeTrainingPlanText(assistantText)
+      ) {
+        try {
+          const extracted = extractModulePlanFromAssistantMarkdown(assistantText);
+          if (Array.isArray(extracted) && extracted.length >= 2) {
+            resolvedPlan = extracted;
+          }
+        } catch (e) {
+          console.warn('[chat] extractModulePlanFromAssistantMarkdown failed', e);
+        }
+      }
+      const clientPlan = (parsedContext as any).modulePlan;
+      if (Array.isArray(clientPlan) && clientPlan.length >= 2) {
+        resolvedPlan = clientPlan;
+      }
+      if (resolvedPlan && resolvedPlan.length >= 2) {
+        snap.modulePlan = resolvedPlan;
+        snap.modulePlanUpdatedAt = new Date().toISOString();
+      }
+      return snap;
+    };
+
+    const persistModulePlanOnSessionDoc = (snap: Record<string, any> | null) => {
+      if (!snap?.modulePlan || !Array.isArray(snap.modulePlan) || snap.modulePlan.length < 2) {
+        return;
+      }
+      (activeSession as any).modulePlan = snap.modulePlan;
+      (activeSession as any).modulePlanUpdatedAt = snap.modulePlanUpdatedAt
+        ? new Date(snap.modulePlanUpdatedAt)
+        : new Date();
+    };
 
     const selectedDuration = parsedContext?.selectedDuration || 'non specifiee';
     const selectedMethodology = parsedContext?.selectedMethodology || 'Methodologie 360';
@@ -1894,6 +1973,18 @@ export const chat = async (
     let requestedOutput = String(parsedContext?.requestedOutput || '').toLowerCase();
     const requestedModuleReference = String(parsedContext?.requestedModuleReference || '').trim();
     const inferredDomain = inferKbDomainFromContext(parsedContext);
+    if (parsedContext && typeof parsedContext === 'object') {
+      const hasOutline =
+        Array.isArray(parsedContext.curriculumOutline) && parsedContext.curriculumOutline.length > 0;
+      const modPlan = (parsedContext as any).modulePlan;
+      if (!hasOutline && Array.isArray(modPlan) && modPlan.length >= 2) {
+        (parsedContext as any).curriculumOutline = modPlan.map((m: any) => ({
+          title: String(m?.title || '').trim(),
+          hasSections: false,
+          sectionCount: 0,
+        }));
+      }
+    }
     const effectiveContextString =
       parsedContext && typeof parsedContext === 'object'
         ? JSON.stringify(parsedContext)
@@ -1958,7 +2049,11 @@ export const chat = async (
         ...(activeSession.contextSnapshot || {}),
         ...(parsedContext && typeof parsedContext === 'object' ? parsedContext : {}),
         trainingJourneyId: saveResult.journeyId,
+        modulePlan: saveResult.modulePlan,
+        modulePlanUpdatedAt: new Date().toISOString(),
       };
+      (activeSession as any).modulePlan = saveResult.modulePlan;
+      (activeSession as any).modulePlanUpdatedAt = new Date();
       activeSession.lastActivityAt = new Date();
       await activeSession.save();
 
@@ -2486,23 +2581,8 @@ Regenerate now with strict compliance.
         { role: 'user', text: userMessageText, createdAt: new Date() } as any,
         { role: 'assistant', text: assistantMessageText, createdAt: new Date() } as any
       );
-      activeSession.contextSnapshot = parsedContext && typeof parsedContext === 'object'
-        ? {
-            analyzedUploadsCount: parsedContext.analyzedUploadsCount,
-            analyzedUploads: parsedContext.analyzedUploads,
-            knowledgeBaseDocumentsCount: parsedContext.knowledgeBaseDocumentsCount,
-            knowledgeBaseDocuments: parsedContext.knowledgeBaseDocuments,
-            selectedGigId: parsedContext.selectedGigId,
-            selectedGigTitle: parsedContext.selectedGigTitle,
-            gigSnapshot: parsedContext.gigSnapshot,
-            useKnowledgeBase: parsedContext.useKnowledgeBase,
-            useUploadedDocuments: parsedContext.useUploadedDocuments,
-            chatStyle: parsedContext.chatStyle,
-            requestedOutput: parsedContext.requestedOutput,
-            requestedModuleReference: parsedContext.requestedModuleReference,
-            trainingJourneyId: (parsedContext as any)?.trainingJourneyId,
-          }
-        : activeSession.contextSnapshot || null;
+      activeSession.contextSnapshot = buildContextSnapshotForSave(assistantMessageText);
+      persistModulePlanOnSessionDoc(activeSession.contextSnapshot as Record<string, any> | null);
       if (!activeSession.title || activeSession.title === 'Nouvelle conversation') {
         activeSession.title = buildSessionTitle(userMessageText);
       }
@@ -2600,23 +2680,8 @@ Regenerate now with strict compliance.
       { role: 'user', text: userMessageText, createdAt: new Date() } as any,
       { role: 'assistant', text: assistantMessageText, createdAt: new Date() } as any
     );
-    activeSession.contextSnapshot = parsedContext && typeof parsedContext === 'object'
-      ? {
-          analyzedUploadsCount: parsedContext.analyzedUploadsCount,
-          analyzedUploads: parsedContext.analyzedUploads,
-          knowledgeBaseDocumentsCount: parsedContext.knowledgeBaseDocumentsCount,
-          knowledgeBaseDocuments: parsedContext.knowledgeBaseDocuments,
-          selectedGigId: parsedContext.selectedGigId,
-          selectedGigTitle: parsedContext.selectedGigTitle,
-          gigSnapshot: parsedContext.gigSnapshot,
-          useKnowledgeBase: parsedContext.useKnowledgeBase,
-          useUploadedDocuments: parsedContext.useUploadedDocuments,
-          chatStyle: parsedContext.chatStyle,
-          requestedOutput: parsedContext.requestedOutput,
-          requestedModuleReference: parsedContext.requestedModuleReference,
-          trainingJourneyId: (parsedContext as any)?.trainingJourneyId,
-        }
-      : activeSession.contextSnapshot || null;
+    activeSession.contextSnapshot = buildContextSnapshotForSave(assistantMessageText);
+    persistModulePlanOnSessionDoc(activeSession.contextSnapshot as Record<string, any> | null);
     if (!activeSession.title || activeSession.title === 'Nouvelle conversation') {
       activeSession.title = buildSessionTitle(userMessageText);
     }
@@ -2763,6 +2828,19 @@ export const getChatSession = async (
       return res.status(404).json({ success: false, error: 'Chat session not found' });
     }
 
+    const snap = (session as any)?.contextSnapshot && typeof (session as any).contextSnapshot === 'object'
+      ? ((session as any).contextSnapshot as Record<string, any>)
+      : null;
+    const modulePlanFromDoc =
+      Array.isArray((session as any).modulePlan) && (session as any).modulePlan.length > 0
+        ? (session as any).modulePlan
+        : undefined;
+    const modulePlan =
+      modulePlanFromDoc ||
+      (snap && Array.isArray(snap.modulePlan) && snap.modulePlan.length > 0 ? snap.modulePlan : undefined);
+    const modulePlanUpdatedAtRaw = (session as any).modulePlanUpdatedAt || snap?.modulePlanUpdatedAt;
+    const modulePlanUpdatedAt = modulePlanUpdatedAtRaw ? String(modulePlanUpdatedAtRaw) : undefined;
+
     return res.status(200).json({
       success: true,
       session: {
@@ -2772,6 +2850,8 @@ export const getChatSession = async (
         trainingJourneyId: (session as any)?.contextSnapshot?.trainingJourneyId
           ? String((session as any).contextSnapshot.trainingJourneyId)
           : undefined,
+        modulePlan,
+        modulePlanUpdatedAt,
         lastActivityAt: (session as any).lastActivityAt || (session as any).updatedAt || (session as any).createdAt,
         messages: ((session as any).messages || []).map((m: any) => ({
           role: m.role === 'assistant' ? 'assistant' : 'user',
