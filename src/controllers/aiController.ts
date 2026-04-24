@@ -2125,7 +2125,7 @@ export const chat = async (
         userMessage: trimmedMessage,
       });
 
-      const ack = saveResult.ackFr;
+      let ack = saveResult.ackFr;
       const savedJourney = await TrainingJourney.findById(saveResult.journeyId);
       if (savedJourney) {
         const md = ((savedJourney as any).methodologyData && typeof (savedJourney as any).methodologyData === 'object')
@@ -2136,6 +2136,21 @@ export const chat = async (
         await savedJourney.save();
         if (parsedContext && typeof parsedContext === 'object') {
           (parsedContext as any).workflowState = md.workflow;
+        }
+        const wf = md.workflow as JourneyWorkflowState;
+        if (wf && wf.totalModules > 0 && wf.currentModuleIndex >= 0) {
+          const readinessPayload = {
+            readiness: 'ready',
+            missingModules: [],
+            messageFr: `Plan validé. Cliquez sur "Générer le contenu du module ${wf.currentModuleIndex + 1}".`,
+            actions: [
+              {
+                id: 'generate_current_module',
+                label: `Générer le contenu du module ${wf.currentModuleIndex + 1}`,
+              },
+            ],
+          };
+          ack = `${ack}\n\n<harx-training-status>${JSON.stringify(readinessPayload)}</harx-training-status>`;
         }
       }
       activeSession.messages.push(
