@@ -230,6 +230,58 @@ const isPlanEditRequest = (message: string): boolean =>
     String(message || '')
   );
 
+const FRENCH_NUMBER_WORDS: Record<string, number> = {
+  un: 1,
+  une: 1,
+  deux: 2,
+  trois: 3,
+  quatre: 4,
+  cinq: 5,
+  six: 6,
+  sept: 7,
+  huit: 8,
+  neuf: 9,
+  dix: 10,
+};
+
+/**
+ * Detect "add N modules" patterns in FR/EN so we can enforce a strict module count
+ * when the user explicitly asks to extend an existing plan.
+ * Returns the requested count (1-10) or null.
+ */
+const extractAddModuleCount = (message: string): number | null => {
+  const raw = String(message || '').toLowerCase();
+  if (!raw) return null;
+  const verbRe = '(?:ajout(?:e|er|es|ez|ons)?|add(?:ing)?|ins[ée]r(?:er|e|es|ez|ons)?|rajout(?:e|er|es|ez)?)';
+  const modRe = 'modules?';
+  const digitMatch = new RegExp(`\\b${verbRe}\\b[^\\n]*?\\b(\\d{1,2})\\s+${modRe}\\b`, 'i').exec(raw);
+  if (digitMatch?.[1]) {
+    const n = Number(digitMatch[1]);
+    if (Number.isFinite(n) && n >= 1 && n <= 20) return n;
+  }
+  const wordPattern = Object.keys(FRENCH_NUMBER_WORDS).join('|');
+  const wordMatch = new RegExp(`\\b${verbRe}\\b[^\\n]*?\\b(${wordPattern})\\s+${modRe}\\b`, 'i').exec(raw);
+  if (wordMatch?.[1]) {
+    const n = FRENCH_NUMBER_WORDS[wordMatch[1].toLowerCase()];
+    if (typeof n === 'number') return n;
+  }
+  const reversed = new RegExp(`\\b(\\d{1,2})\\s+${modRe}\\b[^\\n]*?\\b${verbRe}\\b`, 'i').exec(raw);
+  if (reversed?.[1]) {
+    const n = Number(reversed[1]);
+    if (Number.isFinite(n) && n >= 1 && n <= 20) return n;
+  }
+  return null;
+};
+
+const countModulesInAssistantPlan = (text: string): number => {
+  const t = String(text || '');
+  if (!t) return 0;
+  const headings = t.match(/^\s*#{1,4}\s*module\s*\d+/gim) || [];
+  if (headings.length > 0) return headings.length;
+  const loose = t.match(/\bmodule\s*\d+/gi) || [];
+  return loose.length;
+};
+
 const sanitizeAssistantPlanText = (raw: string): string =>
   String(raw || '')
     .replace(/<harx-style>[\s\S]*?<\/harx-style>/gi, '')
@@ -2344,6 +2396,19 @@ export const chat = async (
       isPlanEditRequest(trimmedMessage) &&
       (hasPatchableAssistantPlan || patchBaseModules.length >= 2);
 
+    const addModulesCount = isPlanPatchRequest ? extractAddModuleCount(trimmedMessage) : null;
+    const basePlanModuleCount = hasPatchableAssistantPlan
+      ? countModulesInAssistantPlan(lastAssistantPlanSanitized)
+      : patchBaseModules.length;
+    const hasStrictAddCount =
+      isPlanPatchRequest &&
+      typeof addModulesCount === 'number' &&
+      addModulesCount > 0 &&
+      basePlanModuleCount > 0;
+    const strictTotalModuleCount = hasStrictAddCount
+      ? basePlanModuleCount + (addModulesCount as number)
+      : 0;
+
     if (
       isJourneyBuilderApp(parsedContext) &&
       (trimmedMessage === CHAT_VALIDATE_MODULE_CONTENT_CMD ||
@@ -2580,8 +2645,13 @@ export const chat = async (
             isPlanPatchRequest
               ? 'Return the full plan after patching, but do not regenerate untouched modules.'
               : '',
+            hasStrictAddCount
+              ? `STRICT MODULE COUNT: the current plan has ${basePlanModuleCount} modules. The user asked to ADD exactly ${addModulesCount} new module(s). Output EXACTLY ${strictTotalModuleCount} modules total — no more, no less. Preserve the first ${basePlanModuleCount} modules UNCHANGED (same numbering 1..${basePlanModuleCount}, same titles, same objectives, same key topics). Append exactly ${addModulesCount} NEW module(s) numbered ${basePlanModuleCount + 1} to ${strictTotalModuleCount}. Do NOT invent additional modules beyond ${strictTotalModuleCount}. Do NOT rename, reorder, or merge existing modules.`
+              : '',
             'Output a structured LMS-style training plan (markdown only). No long intro before Module 1.',
-            'Start immediately with "## Module 1: <titre court>". Minimum 3 modules (prefer 4+ if duration allows), progressive du débutant vers l’avancé.',
+            isPlanPatchRequest
+              ? 'Start immediately with "## Module 1: <titre court>". Preserve the existing plan size; only add/remove modules that the user explicitly requested.'
+              : 'Start immediately with "## Module 1: <titre court>". Minimum 3 modules (prefer 4+ if duration allows), progressive du débutant vers l’avancé.',
             '',
             'ALIGNEMENT modulePlan (JSON côté serveur): chaque module est découpé en title, objectifs[], keyTopics[]. Pour remplir ces champs, CHAQUE module doit répéter le MÊME squelette avec des titres ### et des puces "- " (obligatoire, dans cet ordre):',
             '',
