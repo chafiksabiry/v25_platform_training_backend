@@ -2110,11 +2110,24 @@ export const chat = async (
         requestedModuleReference: parsedContext.requestedModuleReference,
         trainingJourneyId: (parsedContext as any)?.trainingJourneyId,
       };
+      // If the plan is already validated/frozen on the journey or session, the saved
+      // plan is the single source of truth. Never re-extract a "plan" from assistant
+      // text (e.g. module content with a "next step" line mentioning Module N+1).
+      const planIsLocked = Boolean(
+        (linkedJourney as any)?.planIsValid ||
+        (activeSession as any)?.planIsValid ||
+        (linkedJourney as any)?.methodologyData?.planFrozenFromChat
+      );
+      const journeyPlan =
+        Array.isArray((linkedJourney as any)?.modulePlan) && (linkedJourney as any).modulePlan.length >= 2
+          ? (linkedJourney as any).modulePlan
+          : null;
       const prevPlanFromDoc =
         Array.isArray((activeSession as any).modulePlan) && (activeSession as any).modulePlan.length >= 2
           ? (activeSession as any).modulePlan
           : null;
       const prevPlan =
+        (planIsLocked && journeyPlan) ||
         prevPlanFromDoc ||
         (Array.isArray((prev as any).modulePlan) && (prev as any).modulePlan.length >= 2
           ? (prev as any).modulePlan
@@ -2122,6 +2135,7 @@ export const chat = async (
       let resolvedPlan: any[] | null = prevPlan;
       let extractedPlan: any[] | null = null;
       if (
+        !planIsLocked &&
         isJourneyBuilderApp(parsedContext) &&
         assistantText &&
         looksLikeTrainingPlanText(assistantText)
@@ -2138,7 +2152,10 @@ export const chat = async (
       }
       const clientPlan = (parsedContext as any).modulePlan;
       // Important: do not overwrite freshly extracted assistant plan with stale client/session plan.
-      if (!extractedPlan && Array.isArray(clientPlan) && clientPlan.length >= 2) {
+      // When the plan is locked, always prefer the authoritative journey plan.
+      if (planIsLocked && journeyPlan) {
+        resolvedPlan = journeyPlan;
+      } else if (!extractedPlan && Array.isArray(clientPlan) && clientPlan.length >= 2) {
         resolvedPlan = clientPlan;
       }
       if (resolvedPlan && resolvedPlan.length >= 2) {
