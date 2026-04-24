@@ -36,6 +36,21 @@ const CHAT_GENERATE_CURRENT_MODULE_CMD = '__GENERATE_CURRENT_MODULE__';
 
 const isJourneyBuilderApp = (parsed: any): boolean => String(parsed?.app || '').trim() === 'HARX Journey Builder';
 
+/** Piliers par défaut — méthodologie 360° (couverture attendue du plan Journey Builder). */
+const METHODOLOGY_360_DEFAULT_PILLARS: string[] = [
+  'Insurance Fundamentals & Industry Overview',
+  'Regulatory Compliance & Legal Framework',
+  'Health Insurance Product Mastery',
+  'Sales Process Excellence & Customer Acquisition',
+  'Customer Service Excellence & Retention',
+  'Technology Systems & Digital Tools',
+  'Company Culture, Values & Procedures',
+  'Professional Development & Soft Skills',
+  'EU Regional Compliance & Data Protection',
+  'Contact Centre Excellence & Customer Operations',
+  'US Federal & State Compliance Framework',
+];
+
 /** Infer fr vs en from the latest user text for canned chat replies (no LLM). */
 const inferJourneyChatLocale = (userMessage: string): 'fr' | 'en' => {
   const t = String(userMessage || '').trim();
@@ -2912,6 +2927,43 @@ export const chat = async (
       bootstrapPlanFromGigOnly && isPlanIntent
         ? 'DÉMARRAGE FORCÉ (questionnaire Journey terminé) : ne pose aucune question avant ni après le plan. Déduis tout ce qui manque exclusivement à partir du bloc ANCRAGE GIG et des lignes Q/R du message utilisateur (niveau, objectif, format). N’invite pas à joindre des documents, fichiers ou base de connaissances.'
         : 'If critical info is missing, infer reasonably and ask max 2 focused questions at the end.';
+
+    const methodologyComponentsFromContext = Array.isArray((parsedContext as any)?.methodologyComponents)
+      ? ((parsedContext as any).methodologyComponents as any[])
+          .map((t) => String(t || '').trim())
+          .filter(Boolean)
+      : [];
+    const methodologyDescriptionFromContext = String((parsedContext as any)?.methodologyDescription || '').trim();
+    const methodology360NameMatch =
+      /360\s*degr|360\s*°|méthodologie\s*360|methodologie\s*360|360[-\s]?deg/i.test(String(selectedMethodology || '')) ||
+      /\b360\b/i.test(String((parsedContext as any)?.methodologyName || ''));
+    const methodologyPlanPillars =
+      methodologyComponentsFromContext.length > 0
+        ? methodologyComponentsFromContext
+        : methodology360NameMatch && isJourneyBuilderApp(parsedContext)
+          ? [...METHODOLOGY_360_DEFAULT_PILLARS]
+          : [];
+    const methodology360PlanLock =
+      isJourneyBuilderApp(parsedContext) && isPlanIntent && methodologyPlanPillars.length > 0
+        ? [
+            'MÉTHODOLOGIE 360° — CADRAGE OBLIGATOIRE DU PLAN :',
+            methodologyDescriptionFromContext
+              ? `Référence méthodologique (contexte JSON — methodologyDescription) : ${methodologyDescriptionFromContext.slice(0, 1400)}`
+              : '',
+            'Le plan doit respecter la progression « vision 360° ». Intitulés des piliers (adapter en français dans les titres de modules si besoin, sans vider le sens) :',
+            ...methodologyPlanPillars.map((p, idx) => `${idx + 1}. ${p}`),
+            '',
+            `Durée / contexte durée indiqué dans le JSON : ${String(selectedDuration || 'non spécifiée')}.`,
+            'Règles strictes :',
+            `- Proposer au minimum 8 modules ; viser idéalement autant de modules que de piliers (${methodologyPlanPillars.length}) lorsque la durée le permet (un module = un pilier). Si la durée impose moins de modules, fusionner seulement des piliers adjacents et le signaler dans les puces « Contenu clé ».`,
+            '- Dans CHAQUE module, sous « ### 📌 Contenu clé », inclure au moins une puce du type « Axes méthodologie 360° : … » qui cite explicitement le ou les piliers couverts.',
+            '- Sur l’ensemble du plan, chaque pilier listé ci-dessus doit apparaître au moins une fois (dans les objectifs et/ou le contenu clé). Aucun pilier majeur ne doit être omis.',
+            '- La méthodologie pilote la PROGRESSION et les COMPÉTENCES ; le GIG (fiche mission) pilote le VOCABULAIRE et les EXEMPLES terrain (voir ANCRAGE GIG).',
+          ]
+            .filter(Boolean)
+            .join('\n')
+        : '';
+
     const systemPrompt = [
       isJourneyBuilderApp(parsedContext)
         ? 'You are Professor academic (HARX Journey Builder). Always write your entire reply in French: headings, bullets, explanations, quizzes, and any questions at the end. If the user writes in English or another language, still answer in French. Be simple, clear, pedagogical.'
@@ -2934,6 +2986,7 @@ export const chat = async (
       requestedOutput === 'training_plan'
         ? [
             'INTENT LOCK: TRAINING PLAN',
+            methodology360PlanLock,
             bootstrapPlanFromGigOnly
               ? [
                   'BOOTSTRAP (fin du questionnaire Journey) : le message utilisateur résume source, niveau, objectif et format.',
