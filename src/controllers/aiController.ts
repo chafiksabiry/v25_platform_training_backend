@@ -32,6 +32,7 @@ const HARX_TRAINING_STATUS_REGEX = /<harx-training-status>\s*([\s\S]*?)\s*<\/har
 const CHAT_VALIDATE_PLAN_CMD = '__VALIDATE_PLAN__';
 const CHAT_VALIDATE_MODULE_CONTENT_CMD = '__VALIDATE_MODULE_CONTENT__';
 const CHAT_VALIDATE_ALL_MODULES_CONTENT_CMD = '__VALIDATE_ALL_MODULES_CONTENT__';
+const CHAT_GENERATE_CURRENT_MODULE_CMD = '__GENERATE_CURRENT_MODULE__';
 
 const isJourneyBuilderApp = (parsed: any): boolean => String(parsed?.app || '').trim() === 'HARX Journey Builder';
 
@@ -166,18 +167,31 @@ const appendTrainingReadinessBlock = async (params: {
     readiness = 'ready';
   }
   const actions: { id: string; label: string }[] = [];
+  const wf = parsedContext?.workflowState as JourneyWorkflowState | undefined;
   if (!isPlanValidated && isTrainingPlanResponse) {
     actions.push({ id: 'validate_plan', label: 'Valider le plan' });
     messageFr = 'Le plan est prêt. Cliquez sur "Valider le plan" pour l’enregistrer en base.';
   } else if (isPlanValidated) {
-    if (readiness === 'ready' && missingModules.length === 0) {
+    if (wf?.phase === 'all_modules_validated') {
       if (requestedOutput !== 'module_content' && requestedOutput !== 'full_training_content') {
         actions.push({ id: 'validate_training', label: 'Valider la formation' });
       }
-    } else if (readiness === 'incomplete' && missingModules.length > 0) {
-      // Product choice: no content-validation action cards in chat UI.
-      // Keep informational message only in assistant body, without action buttons.
-      actions.length = 0;
+      messageFr = 'Tous les modules sont validés. Vous pouvez valider la formation.';
+    } else if (wf && wf.totalModules > 0 && wf.currentModuleIndex >= 0) {
+      const current = wf.modules[wf.currentModuleIndex];
+      if (requestedOutput === 'module_content') {
+        actions.push({
+          id: 'validate_module_content',
+          label: `Valider le contenu du module ${wf.currentModuleIndex + 1}`,
+        });
+        messageFr = `Module en cours : ${current?.title || `Module ${wf.currentModuleIndex + 1}`}. Validez ce contenu pour passer au module suivant.`;
+      } else {
+        actions.push({
+          id: 'generate_current_module',
+          label: `Générer le contenu du module ${wf.currentModuleIndex + 1}`,
+        });
+        messageFr = `Plan validé. Prochaine étape : générer le contenu du module ${wf.currentModuleIndex + 1}.`;
+      }
     }
   } else {
     messageFr =
@@ -291,6 +305,58 @@ type CompactPlanModule = {
   objectifs: string[];
   keyTopics: string[];
   durationMinutes?: number;
+};
+
+type JourneyWorkflowState = {
+  phase: 'plan_validated' | 'module_in_progress' | 'all_modules_validated';
+  currentModuleIndex: number;
+  totalModules: number;
+  modules: Array<{ index: number; title: string; status: 'pending' | 'validated'; validatedAt?: string }>;
+  updatedAt?: string;
+};
+
+const buildWorkflowFromPlan = (modulePlan: CompactPlanModule[]): JourneyWorkflowState => {
+  const modules = modulePlan.map((m, idx) => ({
+    index: idx,
+    title: m.title,
+    status: 'pending' as const,
+  }));
+  return {
+    phase: modules.length > 0 ? 'plan_validated' : 'all_modules_validated',
+    currentModuleIndex: modules.length > 0 ? 0 : -1,
+    totalModules: modules.length,
+    modules,
+    updatedAt: new Date().toISOString(),
+  };
+};
+
+const normalizeWorkflowState = (raw: any, modulePlan: CompactPlanModule[]): JourneyWorkflowState => {
+  const planLen = modulePlan.length;
+  if (!raw || typeof raw !== 'object') {
+    return buildWorkflowFromPlan(modulePlan);
+  }
+  const mods = Array.isArray(raw.modules) ? raw.modules : [];
+  const normalizedModules: JourneyWorkflowState['modules'] =
+    mods.length === planLen
+      ? mods
+          .map((m: any, idx: number) => ({
+            index: idx,
+            title: String(modulePlan[idx]?.title || m?.title || '').trim(),
+            status: String(m?.status || '').toLowerCase() === 'validated' ? 'validated' as const : 'pending' as const,
+            validatedAt: m?.validatedAt ? String(m.validatedAt) : undefined,
+          }))
+          .filter((m: any) => m.title)
+      : buildWorkflowFromPlan(modulePlan).modules;
+
+  const firstPending = normalizedModules.findIndex((m) => m.status !== 'validated');
+  const allValidated = normalizedModules.length > 0 && firstPending === -1;
+  return {
+    phase: allValidated ? 'all_modules_validated' : normalizedModules.some((m) => m.status === 'validated') ? 'module_in_progress' : 'plan_validated',
+    currentModuleIndex: allValidated ? -1 : Math.max(0, firstPending),
+    totalModules: normalizedModules.length,
+    modules: normalizedModules,
+    updatedAt: raw?.updatedAt ? String(raw.updatedAt) : new Date().toISOString(),
+  };
 };
 
 const toCompactPlanModules = (raw: any): CompactPlanModule[] => {
@@ -2015,8 +2081,15 @@ export const chat = async (
      * not merely the presence of a draft modulePlan.
      */
     const isPlanFrozen = Boolean((linkedJourney as any)?.methodologyData?.planFrozenFromChat);
+    const linkedPlanModules = toCompactPlanModules((linkedJourney as any)?.modulePlan);
+    const workflowState = isPlanFrozen
+      ? normalizeWorkflowState((linkedJourney as any)?.methodologyData?.workflow, linkedPlanModules)
+      : undefined;
     if (parsedContext && typeof parsedContext === 'object') {
       (parsedContext as any).planValidatedFromDb = isPlanFrozen;
+      if (workflowState) {
+        (parsedContext as any).workflowState = workflowState;
+      }
     }
     const trimmedMessage = String(message || '').trim();
     if (isJourneyBuilderApp(parsedContext) && trimmedMessage === CHAT_VALIDATE_PLAN_CMD) {
@@ -2053,6 +2126,18 @@ export const chat = async (
       });
 
       const ack = saveResult.ackFr;
+      const savedJourney = await TrainingJourney.findById(saveResult.journeyId);
+      if (savedJourney) {
+        const md = ((savedJourney as any).methodologyData && typeof (savedJourney as any).methodologyData === 'object')
+          ? { ...(savedJourney as any).methodologyData }
+          : {};
+        md.workflow = buildWorkflowFromPlan(toCompactPlanModules((savedJourney as any).modulePlan));
+        (savedJourney as any).methodologyData = md;
+        await savedJourney.save();
+        if (parsedContext && typeof parsedContext === 'object') {
+          (parsedContext as any).workflowState = md.workflow;
+        }
+      }
       activeSession.messages.push(
         { role: 'user', text: trimmedMessage, createdAt: new Date() } as any,
         { role: 'assistant', text: ack, createdAt: new Date() } as any

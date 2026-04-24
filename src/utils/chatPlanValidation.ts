@@ -196,6 +196,10 @@ function parseStructuredSections(blockLines: string[]) {
       active = 'keyTopics';
       continue;
     }
+    if (/^(contenu|content)\s*:?\s*$/i.test(line)) {
+      active = 'keyTopics';
+      continue;
+    }
     if (isLivrablesHeader(line) || isEvalOrQuizHeader(line) || isActivitiesHeader(line)) {
       // Ignore activities/livrables/evaluation blocks in modulePlan extraction.
       active = null;
@@ -215,7 +219,10 @@ function parseStructuredSections(blockLines: string[]) {
       const item = normalizeBullet(raw);
       if (!item) continue;
       if (isPlanBulletNoise(item)) continue;
-      const bucket: 'objectifs' | 'keyTopics' = active ?? 'keyTopics';
+      const looksLikeTimedSubsection =
+        /^([*]{0,2})?[^:]{3,}\(\s*\d+\s*(min|minutes?|h(?:eures?)?)\s*\)\s*$/i.test(item);
+      const bucket: 'objectifs' | 'keyTopics' =
+        looksLikeTimedSubsection && active === 'objectifs' ? 'keyTopics' : active ?? 'keyTopics';
       const pieces = bucket === 'objectifs' ? expandDashListItems(item) : [item];
       for (const piece of pieces) {
         if (!piece.trim()) continue;
