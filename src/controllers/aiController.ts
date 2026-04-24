@@ -2313,10 +2313,36 @@ export const chat = async (
       .find((m: any) => String(m?.role || '').toLowerCase() === 'assistant');
     const lastAssistantPlanCandidate = String(lastAssistantEntry?.text || '').trim();
     const lastAssistantPlanSanitized = sanitizeAssistantPlanText(lastAssistantPlanCandidate);
+    const patchBaseModulesFromJourney = toCompactPlanModules((linkedJourney as any)?.modulePlan);
+    const patchBaseModulesFromContext = toCompactPlanModules((parsedContext as any)?.modulePlan);
+    const patchBaseModules =
+      patchBaseModulesFromJourney.length >= 2 ? patchBaseModulesFromJourney : patchBaseModulesFromContext;
+    const hasPatchableAssistantPlan = looksLikeTrainingPlanText(lastAssistantPlanSanitized);
+    const buildPatchPlanMarkdownFromModules = (modules: CompactPlanModule[]): string =>
+      modules
+        .map((m, idx) => {
+          const objectifs = (Array.isArray(m.objectifs) ? m.objectifs : []).slice(0, 12);
+          const keyTopics = (Array.isArray(m.keyTopics) ? m.keyTopics : []).slice(0, 16);
+          const duration = typeof m.durationMinutes === 'number' ? ` *(${m.durationMinutes} min)*` : '';
+          return [
+            `## Module ${idx + 1}: ${m.title}${duration}`,
+            '### 🎯 Objectifs',
+            ...(objectifs.length ? objectifs : ['Objectif à préciser'])
+              .map((o) => `- ${String(o).trim()}`),
+            '### 📌 Contenu clé',
+            ...(keyTopics.length ? keyTopics : ['Contenu clé à préciser'])
+              .map((k) => `- ${String(k).trim()}`),
+          ].join('\n');
+        })
+        .join('\n\n')
+        .trim();
+    const planPatchBaseText = hasPatchableAssistantPlan
+      ? lastAssistantPlanSanitized
+      : buildPatchPlanMarkdownFromModules(patchBaseModules);
     const isPlanPatchRequest =
       requestedOutput === 'training_plan' &&
       isPlanEditRequest(trimmedMessage) &&
-      looksLikeTrainingPlanText(lastAssistantPlanSanitized);
+      (hasPatchableAssistantPlan || patchBaseModules.length >= 2);
 
     if (
       isJourneyBuilderApp(parsedContext) &&
@@ -2521,7 +2547,7 @@ export const chat = async (
       gigGrounding.promptAppend,
       savedPlanAnchor,
       isPlanPatchRequest
-        ? `\n--- CURRENT PLAN TO PATCH (KEEP OTHER MODULES UNCHANGED) ---\n${lastAssistantPlanSanitized.slice(0, 15000)}\n`
+        ? `\n--- CURRENT PLAN TO PATCH (KEEP OTHER MODULES UNCHANGED) ---\n${planPatchBaseText.slice(0, 15000)}\n`
         : '',
       '',
       'User message:',
