@@ -2408,6 +2408,20 @@ export const chat = async (
     const planPatchBaseText = hasPatchableAssistantPlan
       ? lastAssistantPlanSanitized
       : buildPatchPlanMarkdownFromModules(patchBaseModules);
+    // A plan-edit intent targeted at an existing draft/validated plan must always
+    // go through the PLAN PATCH flow, even if the client sent requestedOutput
+    // 'general_chat' (free-chat). Otherwise the model produces a partial answer
+    // (e.g. "add 2 modules" → keeps only the 2 new modules, dropping the rest).
+    const couldPatchExistingPlan =
+      isJourneyBuilderApp(parsedContext) &&
+      isPlanEditRequest(trimmedMessage) &&
+      (hasPatchableAssistantPlan || patchBaseModules.length >= 2);
+    if (couldPatchExistingPlan && requestedOutput !== 'training_plan') {
+      requestedOutput = 'training_plan';
+      if (parsedContext && typeof parsedContext === 'object') {
+        (parsedContext as any).requestedOutput = 'training_plan';
+      }
+    }
     const isPlanPatchRequest =
       requestedOutput === 'training_plan' &&
       isPlanEditRequest(trimmedMessage) &&
@@ -2664,6 +2678,9 @@ export const chat = async (
               : '',
             hasStrictAddCount
               ? `STRICT MODULE COUNT: the current plan has ${basePlanModuleCount} modules. The user asked to ADD exactly ${addModulesCount} new module(s). Output EXACTLY ${strictTotalModuleCount} modules total — no more, no less. Preserve the first ${basePlanModuleCount} modules UNCHANGED (same numbering 1..${basePlanModuleCount}, same titles, same objectives, same key topics). Append exactly ${addModulesCount} NEW module(s) numbered ${basePlanModuleCount + 1} to ${strictTotalModuleCount}. Do NOT invent additional modules beyond ${strictTotalModuleCount}. Do NOT rename, reorder, or merge existing modules.`
+              : '',
+            isPlanPatchRequest
+              ? `MANDATORY FULL RE-EMISSION: output the COMPLETE plan with EVERY module (including preserved ones) as a full block using the EXACT skeleton below (heading "## Module N: ..." + "### 🎯 Objectifs" + bullets + "### 📌 Contenu clé" + bullets). Do NOT summarize preserved modules as a numbered list or a table or a one-liner. Each module MUST start with a dedicated "## Module N:" heading. Do NOT introduce a "Modules existants" / "Existing modules" summary section. Do NOT emit a recap table of all modules at the end.`
               : '',
             'Output a structured LMS-style training plan (markdown only). No long intro before Module 1.',
             isPlanPatchRequest
