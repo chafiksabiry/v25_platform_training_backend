@@ -1940,6 +1940,7 @@ export const chat = async (
           ? (prev as any).modulePlan
           : null);
       let resolvedPlan: any[] | null = prevPlan;
+      let extractedPlan: any[] | null = null;
       if (
         isJourneyBuilderApp(parsedContext) &&
         assistantText &&
@@ -1948,6 +1949,7 @@ export const chat = async (
         try {
           const extracted = extractModulePlanFromAssistantMarkdown(assistantText);
           if (Array.isArray(extracted) && extracted.length >= 2) {
+            extractedPlan = extracted;
             resolvedPlan = extracted;
           }
         } catch (e) {
@@ -1955,7 +1957,8 @@ export const chat = async (
         }
       }
       const clientPlan = (parsedContext as any).modulePlan;
-      if (Array.isArray(clientPlan) && clientPlan.length >= 2) {
+      // Important: do not overwrite freshly extracted assistant plan with stale client/session plan.
+      if (!extractedPlan && Array.isArray(clientPlan) && clientPlan.length >= 2) {
         resolvedPlan = clientPlan;
       }
       if (resolvedPlan && resolvedPlan.length >= 2) {
