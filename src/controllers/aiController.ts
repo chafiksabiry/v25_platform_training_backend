@@ -2462,6 +2462,8 @@ export const chat = async (
       const md = ((journey as any).methodologyData && typeof (journey as any).methodologyData === 'object')
         ? { ...(journey as any).methodologyData }
         : {};
+      let nextModuleLabel: string | null = null;
+      let allModulesValidated = false;
       if (trimmedMessage === CHAT_VALIDATE_MODULE_CONTENT_CMD) {
         const compactPlan = toCompactPlanModules((journey as any).modulePlan);
         const workflow = normalizeWorkflowState(md.workflow, compactPlan);
@@ -2475,6 +2477,7 @@ export const chat = async (
         }
         const nextPending = workflow.modules.findIndex((m) => m.status !== 'validated');
         const allValidated = workflow.modules.length > 0 && nextPending === -1;
+        allModulesValidated = allValidated;
         workflow.currentModuleIndex = allValidated ? -1 : Math.max(0, nextPending);
         workflow.phase = allValidated
           ? 'all_modules_validated'
@@ -2483,6 +2486,14 @@ export const chat = async (
             : 'plan_validated';
         workflow.updatedAt = new Date().toISOString();
         md.workflow = workflow;
+        if (!allValidated) {
+          const nextMod = workflow.modules[workflow.currentModuleIndex];
+          const nextTitle = String(nextMod?.title || '').trim();
+          const nextNumber = workflow.currentModuleIndex + 1;
+          nextModuleLabel = nextTitle
+            ? `Module ${nextNumber} — ${nextTitle}`
+            : `Module ${nextNumber}`;
+        }
         if (parsedContext && typeof parsedContext === 'object') {
           (parsedContext as any).workflowState = workflow;
         }
@@ -2529,10 +2540,43 @@ export const chat = async (
       (journey as any).methodologyData = md;
       await journey.save();
 
-      const ack =
+      const baseAck =
         trimmedMessage === CHAT_VALIDATE_MODULE_CONTENT_CMD
-          ? 'Contenu du module validé et enregistré.'
+          ? (allModulesValidated
+              ? 'Contenu du module validé. Tous les modules sont désormais validés.'
+              : nextModuleLabel
+                ? `Contenu du module validé. Vous pouvez maintenant générer le contenu du ${nextModuleLabel}.`
+                : 'Contenu du module validé et enregistré.')
           : 'Contenu de tous les modules validé et enregistré.';
+
+      let readinessBlock = '';
+      if (trimmedMessage === CHAT_VALIDATE_MODULE_CONTENT_CMD) {
+        const actions: Array<{ id: string; label: string }> = [];
+        if (!allModulesValidated && nextModuleLabel) {
+          actions.push({
+            id: 'generate_current_module',
+            label: `Générer le contenu du ${nextModuleLabel}`,
+          });
+        } else if (allModulesValidated) {
+          actions.push({
+            id: 'validate_all_modules_content',
+            label: 'Valider la formation complète',
+          });
+        }
+        if (actions.length > 0) {
+          const readinessPayload = {
+            readiness: allModulesValidated ? 'ready' : 'not_applicable',
+            messageFr: allModulesValidated
+              ? 'Tous les modules sont validés. Vous pouvez valider la formation complète.'
+              : `Module validé. Passez au ${nextModuleLabel}.`,
+            actions,
+          };
+          readinessBlock = `\n\n<harx-training-status>${JSON.stringify(readinessPayload)}</harx-training-status>`;
+        }
+      }
+
+      const ack = `${baseAck}${readinessBlock}`;
+
       activeSession.messages.push(
         { role: 'user', text: trimmedMessage, createdAt: new Date() } as any,
         { role: 'assistant', text: ack, createdAt: new Date() } as any
