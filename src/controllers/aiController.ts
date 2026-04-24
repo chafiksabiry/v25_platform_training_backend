@@ -470,6 +470,25 @@ const toCompactPlanModules = (raw: any): CompactPlanModule[] => {
     .filter((m: CompactPlanModule) => m.title);
 };
 
+/** Deep-clone to plain JSON so Mongoose subdocs / getters always materialize (avoids empty titles after spread). */
+const deepClonePlain = <T>(value: T): T => {
+  try {
+    return JSON.parse(JSON.stringify(value)) as T;
+  } catch {
+    return value;
+  }
+};
+
+/** Normalize module plan rows to plain objects with a real `title` string for persistence and filters. */
+const materializeModulePlanEntries = (raw: any): any[] => {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((m: any) => {
+    const plain = m && typeof m === 'object' ? deepClonePlain(m) : {};
+    const title = String((plain as any)?.title || '').trim();
+    return { ...(plain as any), title };
+  });
+};
+
 const withModuleValidity = (rawPlan: any, previousPlan?: any): any[] => {
   const incoming = Array.isArray(rawPlan) ? rawPlan : [];
   const previous = Array.isArray(previousPlan) ? previousPlan : [];
@@ -2154,12 +2173,25 @@ export const chat = async (
       // Important: do not overwrite freshly extracted assistant plan with stale client/session plan.
       // When the plan is locked, always prefer the authoritative journey plan.
       if (planIsLocked && journeyPlan) {
-        resolvedPlan = journeyPlan;
+        resolvedPlan = materializeModulePlanEntries(journeyPlan);
       } else if (!extractedPlan && Array.isArray(clientPlan) && clientPlan.length >= 2) {
         resolvedPlan = clientPlan;
       }
       if (resolvedPlan && resolvedPlan.length >= 2) {
-        snap.modulePlan = resolvedPlan;
+        const materialized = materializeModulePlanEntries(resolvedPlan);
+        const normalized = withModuleValidity(materialized, prevPlanFromDoc);
+        snap.modulePlan = normalized.length >= 2 ? normalized : materialized;
+        snap.modulePlanUpdatedAt = new Date().toISOString();
+      }
+      if (
+        (!snap.modulePlan || !Array.isArray(snap.modulePlan) || snap.modulePlan.length < 2) &&
+        planIsLocked &&
+        journeyPlan
+      ) {
+        snap.modulePlan = withModuleValidity(
+          materializeModulePlanEntries(journeyPlan),
+          prevPlanFromDoc
+        );
         snap.modulePlanUpdatedAt = new Date().toISOString();
       }
       return snap;
@@ -2170,7 +2202,7 @@ export const chat = async (
         return;
       }
       const normalizedModulePlan = withModuleValidity(
-        snap.modulePlan,
+        materializeModulePlanEntries(snap.modulePlan),
         (activeSession as any).modulePlan
       );
       snap.modulePlan = normalizedModulePlan;
@@ -2525,10 +2557,24 @@ export const chat = async (
         validated.push(item);
         md.validatedModuleContents = validated.slice(-100);
 
-        const sessionPlanRaw = Array.isArray((activeSession as any).modulePlan) && (activeSession as any).modulePlan.length > 0
-          ? ([...(activeSession as any).modulePlan] as any[])
-          : (Array.isArray((journey as any).modulePlan) ? ([...(journey as any).modulePlan] as any[]) : []);
+        const prevSessionPlan = materializeModulePlanEntries(
+          Array.isArray((activeSession as any).modulePlan) ? (activeSession as any).modulePlan : []
+        );
+        const planFromJourney =
+          Array.isArray((journey as any).modulePlan) && (journey as any).modulePlan.length > 0
+            ? materializeModulePlanEntries((journey as any).modulePlan)
+            : [];
+        const sessionPlanRaw =
+          planFromJourney.length > 0 ? planFromJourney : prevSessionPlan.slice();
+        let validatedContentPlanIndex = validatedWorkflowIdx;
+
         if (sessionPlanRaw.length > 0) {
+          sessionPlanRaw.forEach((m: any, i: number) => {
+            if (prevSessionPlan[i]?.isValid === true) {
+              m.isValid = true;
+            }
+          });
+
           const normalizeTitleKey = (t: string) =>
             String(t || '')
               .toLowerCase()
@@ -2561,27 +2607,69 @@ export const chat = async (
           }
 
           updateIdx = Math.max(0, Math.min(updateIdx, Math.max(sessionPlanRaw.length - 1, 0)));
+          validatedContentPlanIndex = updateIdx;
           if (sessionPlanRaw[updateIdx]) {
             sessionPlanRaw[updateIdx] = {
               ...sessionPlanRaw[updateIdx],
               isValid: true,
             };
-            const sanitizedSessionPlan = withModuleValidity(
-              sessionPlanRaw,
-              (activeSession as any).modulePlan
-            );
-            if (Array.isArray(sanitizedSessionPlan) && sanitizedSessionPlan.length >= 2) {
-              (activeSession as any).modulePlan = sanitizedSessionPlan;
-            } else if (Array.isArray((journey as any).modulePlan) && (journey as any).modulePlan.length >= 2) {
-              (activeSession as any).modulePlan = withModuleValidity((journey as any).modulePlan, (activeSession as any).modulePlan);
+          }
+          let nextPlan = withModuleValidity(sessionPlanRaw, prevSessionPlan);
+          if (nextPlan.length < 2 && planFromJourney.length >= 2) {
+            const fixed = materializeModulePlanEntries((journey as any).modulePlan);
+            fixed.forEach((m: any, i: number) => {
+              if (prevSessionPlan[i]?.isValid === true) {
+                m.isValid = true;
+              }
+            });
+            const safeIdx = Math.max(0, Math.min(validatedContentPlanIndex, fixed.length - 1));
+            if (fixed[safeIdx]) {
+              fixed[safeIdx] = { ...fixed[safeIdx], isValid: true };
             }
-            const snap =
-              (activeSession as any).contextSnapshot && typeof (activeSession as any).contextSnapshot === 'object'
-                ? ((activeSession as any).contextSnapshot as Record<string, any>)
-                : {};
+            nextPlan = withModuleValidity(fixed, prevSessionPlan);
+          }
+          if (nextPlan.length >= 2) {
+            (activeSession as any).modulePlan = nextPlan;
+          } else {
+            const lastResort = materializeModulePlanEntries((journey as any).modulePlan);
+            if (lastResort.length >= 2) {
+              lastResort.forEach((m: any, i: number) => {
+                if (prevSessionPlan[i]?.isValid === true) {
+                  m.isValid = true;
+                }
+              });
+              const safeIdx = Math.max(0, Math.min(validatedContentPlanIndex, lastResort.length - 1));
+              if (lastResort[safeIdx]) {
+                lastResort[safeIdx] = { ...lastResort[safeIdx], isValid: true };
+              }
+              (activeSession as any).modulePlan = lastResort;
+            }
+          }
+          const snap =
+            (activeSession as any).contextSnapshot && typeof (activeSession as any).contextSnapshot === 'object'
+              ? ((activeSession as any).contextSnapshot as Record<string, any>)
+              : {};
+          let planForSnapshot =
+            Array.isArray((activeSession as any).modulePlan) && (activeSession as any).modulePlan.length >= 2
+              ? (activeSession as any).modulePlan
+              : null;
+          if (!planForSnapshot && planFromJourney.length >= 2) {
+            planForSnapshot = materializeModulePlanEntries((journey as any).modulePlan);
+            planForSnapshot.forEach((m: any, i: number) => {
+              if (prevSessionPlan[i]?.isValid === true) {
+                m.isValid = true;
+              }
+            });
+            const safeIdx = Math.max(0, Math.min(validatedContentPlanIndex, planForSnapshot.length - 1));
+            if (planForSnapshot[safeIdx]) {
+              planForSnapshot[safeIdx] = { ...planForSnapshot[safeIdx], isValid: true };
+            }
+            (activeSession as any).modulePlan = planForSnapshot;
+          }
+          if (planForSnapshot && planForSnapshot.length >= 2) {
             (activeSession as any).contextSnapshot = {
               ...snap,
-              modulePlan: (activeSession as any).modulePlan,
+              modulePlan: planForSnapshot,
               modulePlanUpdatedAt: new Date().toISOString(),
             };
           }
