@@ -36,6 +36,71 @@ const CHAT_GENERATE_CURRENT_MODULE_CMD = '__GENERATE_CURRENT_MODULE__';
 
 const isJourneyBuilderApp = (parsed: any): boolean => String(parsed?.app || '').trim() === 'HARX Journey Builder';
 
+/** Infer fr vs en from the latest user text for canned chat replies (no LLM). */
+const inferJourneyChatLocale = (userMessage: string): 'fr' | 'en' => {
+  const t = String(userMessage || '').trim();
+  if (!t) return 'fr';
+  if (/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/.test(t)) return 'en';
+  try {
+    if (
+      /\p{Script=Han}/u.test(t) ||
+      /\p{Script=Hiragana}/u.test(t) ||
+      /\p{Script=Katakana}/u.test(t) ||
+      /\p{Script=Hangul}/u.test(t)
+    ) {
+      return 'en';
+    }
+  } catch {
+    // ignore environments without Unicode property escapes
+  }
+  if (/[àâäéèêëïîôùûüçœæ]/i.test(t)) return 'fr';
+  const lower = t.toLowerCase();
+  const frHits = /\b(le|la|les|des|un|une|vous|merci|comment|pourquoi|généré|générez|valider|formation|module|déjà|parcours)\b/.test(lower);
+  const enHits = /\b(the|and|what|how|why|please|thanks|thank you|can you|generate|training|plan|module|content|saved|locked|already|journey)\b/.test(lower);
+  if (enHits && !frHits) return 'en';
+  if (frHits && !enHits) return 'fr';
+  if (enHits && frHits) return 'en';
+  // Plain Latin / ASCII without French accents → default English (international UI)
+  if (/^[\x20-\x7E\n\t]+$/u.test(t) && !/[àâäéèêëïîôùûüçœæ]/i.test(t)) return 'en';
+  return 'fr';
+};
+
+const cannedPlanLockedMessage = (locale: 'fr' | 'en'): string =>
+  locale === 'en'
+    ? 'The training plan is already saved and locked. Editing is no longer allowed here. You can request content for an existing module from the saved plan.'
+    : "Le plan de formation est déjà enregistré et verrouillé. L'édition n'est plus autorisée ici. Vous pouvez demander le contenu d'un module existant du plan sauvegardé.";
+
+const cannedNoValidatedPlanMessage = (locale: 'fr' | 'en'): string =>
+  locale === 'en'
+    ? 'No validated training plan is saved for this journey yet. Generate and confirm the training plan before requesting module content or the full training.'
+    : "Aucun plan validé n'est encore enregistré pour ce parcours. Générez et confirmez d'abord le plan de formation avant de demander le contenu d'un module ou de la formation complète.";
+
+const cannedValidatePlanFirstMessage = (locale: 'fr' | 'en'): string =>
+  locale === 'en'
+    ? 'Validation denied: you must validate and save the training plan first.'
+    : "Validation refusée : vous devez d'abord valider et enregistrer le plan.";
+
+const HIDDEN_CHAT_CMD_PREFIX = /^__(?:VALIDATE|GENERATE)/i;
+
+const lastNaturalUserChatText = (session: any, fallback: string): string => {
+  const msgs = Array.isArray(session?.messages) ? session.messages : [];
+  for (let i = msgs.length - 1; i >= 0; i -= 1) {
+    const role = String(msgs[i]?.role || '').toLowerCase();
+    const t = String(msgs[i]?.text || '').trim();
+    if (role === 'user' && t && !HIDDEN_CHAT_CMD_PREFIX.test(t)) {
+      return t;
+    }
+  }
+  return String(fallback || '').trim();
+};
+
+/** Prefer the current user message for locale; if it is a hidden system command, use the last natural user line. */
+const userTextForLocaleInference = (session: any, message: string): string => {
+  const t = String(message || '').trim();
+  if (t && !HIDDEN_CHAT_CMD_PREFIX.test(t)) return t;
+  return lastNaturalUserChatText(session, t);
+};
+
 const stripStyleTagsForReadiness = (raw: string): string =>
   String(raw || '')
     .replace(/<harx-style>[\s\S]*?<\/harx-style>/gi, '')
@@ -92,12 +157,13 @@ const appendTrainingReadinessBlock = async (params: {
     '- not_applicable: pas de plan de formation clair dans cette reponse (banalites, questions seules, hors sujet).',
     'Si curriculumOutline est vide/incomplet, deduis les modules depuis la reponse assistant (patterns "Module X" ou emojis 🟢🟡🟠🔵) avant de conclure.',
     'REGLE ABSOLUE: si missingModules contient au moins un module, readiness DOIT etre incomplete (jamais ready). ready implique missingModules vide [].',
-    'messageFr: phrase courte en francais pour l utilisateur (ex: ce qui manque).',
+    'messageFr: phrase courte pour l’utilisateur, dans la MÊME langue que le dernier message utilisateur ci-dessus (la clé JSON reste "messageFr" pour compatibilité).',
   ].join('\n');
 
   const systemPrompt = [
     'Tu es un controleur qualite pedagogique HARX.',
     'Reponds en JSON strict uniquement, sans markdown ni code fence.',
+    'Si le dernier message utilisateur est en anglais, ecris messageFr en anglais; si en francais, en francais.',
   ].join(' ');
 
   let raw = '';
@@ -140,16 +206,24 @@ const appendTrainingReadinessBlock = async (params: {
     readiness = 'incomplete';
   }
 
+  const readinessLocale = inferJourneyChatLocale(userMessage);
   let messageFr =
     String(data?.messageFr || '').trim() ||
     (readiness === 'ready'
-      ? 'La formation semble prête. Vous pouvez la valider pour l’enregistrer.'
+      ? readinessLocale === 'en'
+        ? 'The training looks ready. You can validate it to save.'
+        : 'La formation semble prête. Vous pouvez la valider pour l’enregistrer.'
       : readiness === 'incomplete' && missingModules.length > 0
-        ? `Il manque encore du contenu pour ${missingModules.length} module(s).`
+        ? readinessLocale === 'en'
+          ? `Content is still missing for ${missingModules.length} module(s).`
+          : `Il manque encore du contenu pour ${missingModules.length} module(s).`
         : '');
 
   if (readiness === 'incomplete' && missingModules.length > 0 && !messageFr) {
-    messageFr = `Il manque encore du contenu pour ${missingModules.length} module(s).`;
+    messageFr =
+      readinessLocale === 'en'
+        ? `Content is still missing for ${missingModules.length} module(s).`
+        : `Il manque encore du contenu pour ${missingModules.length} module(s).`;
   }
 
   const requestedOutput = String(parsedContext?.requestedOutput || '').toLowerCase();
@@ -173,33 +247,59 @@ const appendTrainingReadinessBlock = async (params: {
   const actions: { id: string; label: string }[] = [];
   const wf = parsedContext?.workflowState as JourneyWorkflowState | undefined;
   if (!isPlanValidated && isTrainingPlanResponse) {
-    actions.push({ id: 'validate_plan', label: 'Valider le plan' });
-    messageFr = 'Le plan est prêt. Cliquez sur "Valider le plan" pour l’enregistrer en base.';
+    actions.push({
+      id: 'validate_plan',
+      label: readinessLocale === 'en' ? 'Validate plan' : 'Valider le plan',
+    });
+    messageFr =
+      readinessLocale === 'en'
+        ? 'The plan is ready. Click "Validate plan" to save it.'
+        : 'Le plan est prêt. Cliquez sur "Valider le plan" pour l’enregistrer en base.';
   } else if (isPlanValidated) {
     if (wf?.phase === 'all_modules_validated') {
       if (requestedOutput !== 'module_content' && requestedOutput !== 'full_training_content') {
-        actions.push({ id: 'validate_training', label: 'Valider la formation' });
+        actions.push({
+          id: 'validate_training',
+          label: readinessLocale === 'en' ? 'Validate training' : 'Valider la formation',
+        });
       }
-      messageFr = 'Tous les modules sont validés. Vous pouvez valider la formation.';
+      messageFr =
+        readinessLocale === 'en'
+          ? 'All modules are validated. You can validate the full training.'
+          : 'Tous les modules sont validés. Vous pouvez valider la formation.';
     } else if (wf && wf.totalModules > 0 && wf.currentModuleIndex >= 0) {
       const current = wf.modules[wf.currentModuleIndex];
       if (requestedOutput === 'module_content' || looksLikeModuleContent) {
         actions.push({
           id: 'validate_module_content',
-          label: `Valider le contenu du module ${wf.currentModuleIndex + 1}`,
+          label:
+            readinessLocale === 'en'
+              ? `Validate module ${wf.currentModuleIndex + 1} content`
+              : `Valider le contenu du module ${wf.currentModuleIndex + 1}`,
         });
-        messageFr = `Module en cours : ${current?.title || `Module ${wf.currentModuleIndex + 1}`}. Validez ce contenu pour passer au module suivant.`;
+        messageFr =
+          readinessLocale === 'en'
+            ? `Current module: ${current?.title || `Module ${wf.currentModuleIndex + 1}`}. Validate this content to move to the next module.`
+            : `Module en cours : ${current?.title || `Module ${wf.currentModuleIndex + 1}`}. Validez ce contenu pour passer au module suivant.`;
       } else {
         actions.push({
           id: 'generate_current_module',
-          label: `Générer le contenu du module ${wf.currentModuleIndex + 1}`,
+          label:
+            readinessLocale === 'en'
+              ? `Generate module ${wf.currentModuleIndex + 1} content`
+              : `Générer le contenu du module ${wf.currentModuleIndex + 1}`,
         });
-        messageFr = `Plan validé. Prochaine étape : générer le contenu du module ${wf.currentModuleIndex + 1}.`;
+        messageFr =
+          readinessLocale === 'en'
+            ? `Plan validated. Next step: generate content for module ${wf.currentModuleIndex + 1}.`
+            : `Plan validé. Prochaine étape : générer le contenu du module ${wf.currentModuleIndex + 1}.`;
       }
     }
   } else {
     messageFr =
-      "Le plan n'est pas encore validé. Validez d'abord le plan pour activer les boutons de validation du contenu.";
+      readinessLocale === 'en'
+        ? 'The plan is not validated yet. Validate the plan first to enable content validation buttons.'
+        : "Le plan n'est pas encore validé. Validez d'abord le plan pour activer les boutons de validation du contenu.";
   }
 
   if (actions.length === 0) return '';
@@ -2232,7 +2332,6 @@ export const chat = async (
     const selectedDuration = parsedContext?.selectedDuration || 'non specifiee';
     const selectedMethodology = parsedContext?.selectedMethodology || 'Methodologie 360';
     const isFreeChatMode = String(parsedContext?.chatStyle || '').toLowerCase() === 'free_chat';
-    const forceFrenchResponse = isJourneyBuilderApp(parsedContext);
     let requestedOutput = String(parsedContext?.requestedOutput || '').toLowerCase();
     const requestedModuleReference = String(parsedContext?.requestedModuleReference || '').trim();
     const inferredDomain = inferKbDomainFromContext(parsedContext);
@@ -2495,8 +2594,8 @@ export const chat = async (
         trimmedMessage === CHAT_VALIDATE_ALL_MODULES_CONTENT_CMD)
     ) {
       if (!isPlanFrozen) {
-        const denied = "Validation refusée : vous devez d'abord valider et enregistrer le plan.";
-        return res.status(400).json({ success: false, error: denied });
+        const loc = inferJourneyChatLocale(userTextForLocaleInference(activeSession, message.trim()));
+        return res.status(400).json({ success: false, error: cannedValidatePlanFirstMessage(loc) });
       }
       const linkedJourneyId =
         toObjectIdOrUndefined(parsedContext?.trainingJourneyId) ||
@@ -2751,8 +2850,9 @@ export const chat = async (
       requestedOutput === 'training_plan' &&
       isPlanEditRequest(message.trim())
     ) {
-      const lockMsg =
-        "Le plan de formation est déjà enregistré et verrouillé. L'édition n'est plus autorisée ici. Vous pouvez demander le contenu d'un module existant du plan sauvegardé.";
+      const lockMsg = cannedPlanLockedMessage(
+        inferJourneyChatLocale(userTextForLocaleInference(activeSession, message.trim()))
+      );
       activeSession.messages.push(
         { role: 'user', text: message.trim(), createdAt: new Date() } as any,
         { role: 'assistant', text: lockMsg, createdAt: new Date() } as any
@@ -2786,8 +2886,9 @@ export const chat = async (
       !isPlanFrozen &&
       (requestedOutput === 'module_content' || requestedOutput === 'full_training_content')
     ) {
-      const lockMsg =
-        "Aucun plan validé n'est encore enregistré pour ce parcours. Générez et confirmez d'abord le plan de formation avant de demander le contenu d'un module ou de la formation complète.";
+      const lockMsg = cannedNoValidatedPlanMessage(
+        inferJourneyChatLocale(userTextForLocaleInference(activeSession, message.trim()))
+      );
       activeSession.messages.push(
         { role: 'user', text: message.trim(), createdAt: new Date() } as any,
         { role: 'assistant', text: lockMsg, createdAt: new Date() } as any
@@ -2834,10 +2935,12 @@ export const chat = async (
       message.trim()
     ].join('\n');
 
+    const userLocaleHint = inferJourneyChatLocale(userTextForLocaleInference(activeSession, message.trim()));
     const systemPrompt = [
-      forceFrenchResponse
-        ? 'You are Professor academic. Reply only in French (fr-FR), regardless of the user language. Be simple, clear, pedagogical.'
-        : 'You are Professor academic. Reply in the user language. Be simple, clear, pedagogical.',
+      'You are Professor academic. Reply in the same language as the user’s latest message (English if they write in English, French if they write in French, etc.). Be simple, clear, pedagogical.',
+      userLocaleHint === 'en'
+        ? 'LANGUAGE LOCK: the latest user message is English — write the entire reply in English only (no French), including explanations about locked plans, extra modules, or next steps. Do not switch to French because earlier turns were French.'
+        : 'LANGUAGE LOCK: the latest user message is French — write the entire reply in French only.',
       'Use markdown only. Never output HTML/CSS/JS or fake UI buttons.',
       'Keep business context from conversation unless user changes it.',
       'If critical info is missing, infer reasonably and ask max 2 focused questions at the end.',
@@ -3215,7 +3318,7 @@ Regenerate now with strict compliance.
 
       const readinessExtra = await appendTrainingReadinessBlock({
         assistantMessage: finalResponse,
-        userMessage: message.trim(),
+        userMessage: userTextForLocaleInference(activeSession, message.trim()),
         parsedContext,
         anthropicKey,
       });
@@ -3318,7 +3421,7 @@ Regenerate now with strict compliance.
 
     const readinessExtra = await appendTrainingReadinessBlock({
       assistantMessage: assistantMessageText,
-      userMessage: userMessageText,
+      userMessage: userTextForLocaleInference(activeSession, userMessageText),
       parsedContext,
       anthropicKey,
     });
