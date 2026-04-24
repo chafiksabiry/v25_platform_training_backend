@@ -60,8 +60,8 @@ const inferJourneyChatLocale = (userMessage: string): 'fr' | 'en' => {
   if (enHits && !frHits) return 'en';
   if (frHits && !enHits) return 'fr';
   if (enHits && frHits) return 'en';
-  // Plain Latin / ASCII without French accents → default English (international UI)
-  if (/^[\x20-\x7E\n\t]+$/u.test(t) && !/[àâäéèêëïîôùûüçœæ]/i.test(t)) return 'en';
+  // Plain Latin / ASCII without French accents → still French by default (product language)
+  if (/^[\x20-\x7E\n\t]+$/u.test(t) && !/[àâäéèêëïîôùûüçœæ]/i.test(t)) return 'fr';
   return 'fr';
 };
 
@@ -157,13 +157,13 @@ const appendTrainingReadinessBlock = async (params: {
     '- not_applicable: pas de plan de formation clair dans cette reponse (banalites, questions seules, hors sujet).',
     'Si curriculumOutline est vide/incomplet, deduis les modules depuis la reponse assistant (patterns "Module X" ou emojis 🟢🟡🟠🔵) avant de conclure.',
     'REGLE ABSOLUE: si missingModules contient au moins un module, readiness DOIT etre incomplete (jamais ready). ready implique missingModules vide [].',
-    'messageFr: phrase courte pour l’utilisateur, dans la MÊME langue que le dernier message utilisateur ci-dessus (la clé JSON reste "messageFr" pour compatibilité).',
+    'messageFr: phrase courte pour l’utilisateur, toujours en français (la clé JSON reste "messageFr" pour compatibilité).',
   ].join('\n');
 
   const systemPrompt = [
     'Tu es un controleur qualite pedagogique HARX.',
     'Reponds en JSON strict uniquement, sans markdown ni code fence.',
-    'Si le dernier message utilisateur est en anglais, ecris messageFr en anglais; si en francais, en francais.',
+    'Ecris toujours messageFr en français, même si le dernier message utilisateur est en anglais.',
   ].join(' ');
 
   let raw = '';
@@ -206,24 +206,16 @@ const appendTrainingReadinessBlock = async (params: {
     readiness = 'incomplete';
   }
 
-  const readinessLocale = inferJourneyChatLocale(userMessage);
   let messageFr =
     String(data?.messageFr || '').trim() ||
     (readiness === 'ready'
-      ? readinessLocale === 'en'
-        ? 'The training looks ready. You can validate it to save.'
-        : 'La formation semble prête. Vous pouvez la valider pour l’enregistrer.'
+      ? 'La formation semble prête. Vous pouvez la valider pour l’enregistrer.'
       : readiness === 'incomplete' && missingModules.length > 0
-        ? readinessLocale === 'en'
-          ? `Content is still missing for ${missingModules.length} module(s).`
-          : `Il manque encore du contenu pour ${missingModules.length} module(s).`
+        ? `Il manque encore du contenu pour ${missingModules.length} module(s).`
         : '');
 
   if (readiness === 'incomplete' && missingModules.length > 0 && !messageFr) {
-    messageFr =
-      readinessLocale === 'en'
-        ? `Content is still missing for ${missingModules.length} module(s).`
-        : `Il manque encore du contenu pour ${missingModules.length} module(s).`;
+    messageFr = `Il manque encore du contenu pour ${missingModules.length} module(s).`;
   }
 
   const requestedOutput = String(parsedContext?.requestedOutput || '').toLowerCase();
@@ -249,57 +241,37 @@ const appendTrainingReadinessBlock = async (params: {
   if (!isPlanValidated && isTrainingPlanResponse) {
     actions.push({
       id: 'validate_plan',
-      label: readinessLocale === 'en' ? 'Validate plan' : 'Valider le plan',
+      label: 'Valider le plan',
     });
-    messageFr =
-      readinessLocale === 'en'
-        ? 'The plan is ready. Click "Validate plan" to save it.'
-        : 'Le plan est prêt. Cliquez sur "Valider le plan" pour l’enregistrer en base.';
+    messageFr = 'Le plan est prêt. Cliquez sur "Valider le plan" pour l’enregistrer en base.';
   } else if (isPlanValidated) {
     if (wf?.phase === 'all_modules_validated') {
       if (requestedOutput !== 'module_content' && requestedOutput !== 'full_training_content') {
         actions.push({
           id: 'validate_training',
-          label: readinessLocale === 'en' ? 'Validate training' : 'Valider la formation',
+          label: 'Valider la formation',
         });
       }
-      messageFr =
-        readinessLocale === 'en'
-          ? 'All modules are validated. You can validate the full training.'
-          : 'Tous les modules sont validés. Vous pouvez valider la formation.';
+      messageFr = 'Tous les modules sont validés. Vous pouvez valider la formation.';
     } else if (wf && wf.totalModules > 0 && wf.currentModuleIndex >= 0) {
       const current = wf.modules[wf.currentModuleIndex];
       if (requestedOutput === 'module_content' || looksLikeModuleContent) {
         actions.push({
           id: 'validate_module_content',
-          label:
-            readinessLocale === 'en'
-              ? `Validate module ${wf.currentModuleIndex + 1} content`
-              : `Valider le contenu du module ${wf.currentModuleIndex + 1}`,
+          label: `Valider le contenu du module ${wf.currentModuleIndex + 1}`,
         });
-        messageFr =
-          readinessLocale === 'en'
-            ? `Current module: ${current?.title || `Module ${wf.currentModuleIndex + 1}`}. Validate this content to move to the next module.`
-            : `Module en cours : ${current?.title || `Module ${wf.currentModuleIndex + 1}`}. Validez ce contenu pour passer au module suivant.`;
+        messageFr = `Module en cours : ${current?.title || `Module ${wf.currentModuleIndex + 1}`}. Validez ce contenu pour passer au module suivant.`;
       } else {
         actions.push({
           id: 'generate_current_module',
-          label:
-            readinessLocale === 'en'
-              ? `Generate module ${wf.currentModuleIndex + 1} content`
-              : `Générer le contenu du module ${wf.currentModuleIndex + 1}`,
+          label: `Générer le contenu du module ${wf.currentModuleIndex + 1}`,
         });
-        messageFr =
-          readinessLocale === 'en'
-            ? `Plan validated. Next step: generate content for module ${wf.currentModuleIndex + 1}.`
-            : `Plan validé. Prochaine étape : générer le contenu du module ${wf.currentModuleIndex + 1}.`;
+        messageFr = `Plan validé. Prochaine étape : générer le contenu du module ${wf.currentModuleIndex + 1}.`;
       }
     }
   } else {
     messageFr =
-      readinessLocale === 'en'
-        ? 'The plan is not validated yet. Validate the plan first to enable content validation buttons.'
-        : "Le plan n'est pas encore validé. Validez d'abord le plan pour activer les boutons de validation du contenu.";
+      "Le plan n'est pas encore validé. Validez d'abord le plan pour activer les boutons de validation du contenu.";
   }
 
   if (actions.length === 0) return '';
@@ -2521,6 +2493,9 @@ export const chat = async (
     const isPlanIntent = requestedOutput === 'training_plan';
     const isModuleIntent = requestedOutput === 'module_content';
     const isFullTrainingIntent = requestedOutput === 'full_training_content';
+    const bootstrapPlanFromGigOnly = Boolean(
+      isJourneyBuilderApp(parsedContext) && (parsedContext as any)?.bootstrapTrainingPlanFromGig === true
+    );
     const requiresTypedStyle = isModuleIntent || isFullTrainingIntent;
     const savedPlanAnchor = buildSavedPlanAnchor(linkedJourney);
 
@@ -2594,8 +2569,7 @@ export const chat = async (
         trimmedMessage === CHAT_VALIDATE_ALL_MODULES_CONTENT_CMD)
     ) {
       if (!isPlanFrozen) {
-        const loc = inferJourneyChatLocale(userTextForLocaleInference(activeSession, message.trim()));
-        return res.status(400).json({ success: false, error: cannedValidatePlanFirstMessage(loc) });
+        return res.status(400).json({ success: false, error: cannedValidatePlanFirstMessage('fr') });
       }
       const linkedJourneyId =
         toObjectIdOrUndefined(parsedContext?.trainingJourneyId) ||
@@ -2850,9 +2824,7 @@ export const chat = async (
       requestedOutput === 'training_plan' &&
       isPlanEditRequest(message.trim())
     ) {
-      const lockMsg = cannedPlanLockedMessage(
-        inferJourneyChatLocale(userTextForLocaleInference(activeSession, message.trim()))
-      );
+      const lockMsg = cannedPlanLockedMessage('fr');
       activeSession.messages.push(
         { role: 'user', text: message.trim(), createdAt: new Date() } as any,
         { role: 'assistant', text: lockMsg, createdAt: new Date() } as any
@@ -2886,9 +2858,7 @@ export const chat = async (
       !isPlanFrozen &&
       (requestedOutput === 'module_content' || requestedOutput === 'full_training_content')
     ) {
-      const lockMsg = cannedNoValidatedPlanMessage(
-        inferJourneyChatLocale(userTextForLocaleInference(activeSession, message.trim()))
-      );
+      const lockMsg = cannedNoValidatedPlanMessage('fr');
       activeSession.messages.push(
         { role: 'user', text: message.trim(), createdAt: new Date() } as any,
         { role: 'assistant', text: lockMsg, createdAt: new Date() } as any
@@ -2935,15 +2905,25 @@ export const chat = async (
       message.trim()
     ].join('\n');
 
-    const userLocaleHint = inferJourneyChatLocale(userTextForLocaleInference(activeSession, message.trim()));
+    const userLocaleHint = isJourneyBuilderApp(parsedContext)
+      ? ('fr' as const)
+      : inferJourneyChatLocale(userTextForLocaleInference(activeSession, message.trim()));
+    const missingInfoQuestionPolicy =
+      bootstrapPlanFromGigOnly && isPlanIntent
+        ? 'DÉMARRAGE FORCÉ (questionnaire Journey terminé) : ne pose aucune question avant ni après le plan. Déduis tout ce qui manque exclusivement à partir du bloc ANCRAGE GIG et des lignes Q/R du message utilisateur (niveau, objectif, format). N’invite pas à joindre des documents, fichiers ou base de connaissances.'
+        : 'If critical info is missing, infer reasonably and ask max 2 focused questions at the end.';
     const systemPrompt = [
-      'You are Professor academic. Reply in the same language as the user’s latest message (English if they write in English, French if they write in French, etc.). Be simple, clear, pedagogical.',
-      userLocaleHint === 'en'
-        ? 'LANGUAGE LOCK: the latest user message is English — write the entire reply in English only (no French), including explanations about locked plans, extra modules, or next steps. Do not switch to French because earlier turns were French.'
-        : 'LANGUAGE LOCK: the latest user message is French — write the entire reply in French only.',
+      isJourneyBuilderApp(parsedContext)
+        ? 'You are Professor academic (HARX Journey Builder). Always write your entire reply in French: headings, bullets, explanations, quizzes, and any questions at the end. If the user writes in English or another language, still answer in French. Be simple, clear, pedagogical.'
+        : 'You are Professor academic. Reply in the same language as the user’s latest message (English if they write in English, French if they write in French, etc.). Be simple, clear, pedagogical.',
+      isJourneyBuilderApp(parsedContext)
+        ? 'LANGUAGE LOCK: French only for this session. Do not reply in English. English is allowed only for unavoidable proper nouns, product names, acronyms, or short quoted terms.'
+        : userLocaleHint === 'en'
+          ? 'LANGUAGE LOCK: the latest user message is English — write the entire reply in English only (no French), including explanations about locked plans, extra modules, or next steps. Do not switch to French because earlier turns were French.'
+          : 'LANGUAGE LOCK: the latest user message is French — write the entire reply in French only.',
       'Use markdown only. Never output HTML/CSS/JS or fake UI buttons.',
       'Keep business context from conversation unless user changes it.',
-      'If critical info is missing, infer reasonably and ask max 2 focused questions at the end.',
+      missingInfoQuestionPolicy,
       inferredDomain.strictTopicGuard,
       ...(gigGrounding.systemRules.length
         ? gigGrounding.systemRules
@@ -2954,6 +2934,14 @@ export const chat = async (
       requestedOutput === 'training_plan'
         ? [
             'INTENT LOCK: TRAINING PLAN',
+            bootstrapPlanFromGigOnly
+              ? [
+                  'BOOTSTRAP (fin du questionnaire Journey) : le message utilisateur résume source, niveau, objectif et format.',
+                  'Réponse unique : émettre immédiatement le plan markdown complet (minimum 3 modules), entièrement en français.',
+                  'Sources pédagogiques : s’appuyer UNIQUEMENT sur la fiche GIG fournie (JSON + champs persistés) et sur les réponses du questionnaire dans ce message. Ne pas supposer de contenu hors gig ; ne pas demander ni KB ni documents si le contexte ou le message indique absence de documents.',
+                  'La première ligne substantielle du corps doit être « ## Module 1: » — pas de préambule (« avant de commencer », « je vais », etc.).',
+                ].join('\n')
+              : '',
             isPlanPatchRequest
               ? 'PLAN PATCH MODE: modify only the module(s) explicitly requested by the user. Keep all other existing modules unchanged (same order, same titles, same content).'
               : '',
@@ -2983,29 +2971,43 @@ export const chat = async (
             '- au moins 3 puces (notions, outils, points de vigilance). Synonymes acceptés pour la ligne de titre: "### 📌 Key Topics" ou ligne "**Contenu clé :**" immédiatement suivie de puces "- ".',
             'Ne pas inclure de section Activités/Livrables/Indicateur d’évaluation dans le plan.',
             '',
-            'INTERDIT dans le corps d’un module: section "## ✅ Prochaines étapes", questions finales type "Quelle option", listes numérotées de choix utilisateur — les placer uniquement APRÈS le dernier module si nécessaire (max 2 questions).',
+            bootstrapPlanFromGigOnly
+              ? 'FIN DE RÉPONSE : terminer strictement après le dernier module (titres ### et puces) — aucune question, aucune section « Prochaines étapes », aucun CTA conversationnel.'
+              : 'INTERDIT dans le corps d’un module: section "## ✅ Prochaines étapes", questions finales type "Quelle option", listes numérotées de choix utilisateur — les placer uniquement APRÈS le dernier module si nécessaire (max 2 questions).',
             'Pas de paragraphes longs: préférer des puces courtes sous chaque ###.',
           ].join('\n')
         : '',
       requestedOutput === 'full_training_content'
         ? [
             'INTENT LOCK: FULL TRAINING CONTENT',
+            isJourneyBuilderApp(parsedContext)
+              ? 'LANGUE OBLIGATOIRE: tout le contenu pédagogique en français (titres, listes, quiz, questions).'
+              : '',
             isPlanFrozen
               ? 'PLAN LOCK: use ONLY modules and scope from the saved training plan provided in context. Do not add, rename, or reorder modules.'
               : '',
             'Generate complete learner-facing content for all modules.',
             'Per module include: Title, Objectives, Detailed Explanation, Examples, Hands-on Exercise, Mini Quiz (3-5), Summary, Reflection, Self-assessment (1-5).',
+            isJourneyBuilderApp(parsedContext)
+              ? 'Traduire ces rubriques en libellés français dans la sortie (ex. « Objectifs », « Explication », « Exercice », « Mini quiz », « Auto-évaluation »).'
+              : '',
             'Keep each module under 800 words; if more depth is needed, ask which module to expand.',
           ].join('\n')
         : '',
       requestedOutput === 'module_content'
         ? [
             `INTENT LOCK: MODULE CONTENT${requestedModuleReference ? ` (${requestedModuleReference})` : ''}`,
+            isJourneyBuilderApp(parsedContext)
+              ? 'LANGUE OBLIGATOIRE: tout le contenu du module en français (titres, listes, quiz, questions).'
+              : '',
             isPlanFrozen
               ? 'PLAN LOCK: the requested module must match an existing module from the saved plan. If not found, ask user to choose one saved module title.'
               : '',
             'Generate only the requested module.',
             'Include: Module Title, Learning Objectives, Deep Explanation, Examples, Practical Exercise, Quick Quiz (3-5), Self-Assessment, Skill Validation, Success/Failure indicator.',
+            isJourneyBuilderApp(parsedContext)
+              ? 'Traduire ces rubriques en libellés français dans la sortie (objectifs, explication, exercice, quiz, auto-évaluation, etc.).'
+              : '',
             'Keep content under 600 words for a single module.',
             'Include one self-check with model answer or reflection prompt.',
           ].join('\n')
@@ -3038,6 +3040,9 @@ export const chat = async (
       for (let i = 0; i < planModulesForContent.length; i++) {
         const module = planModulesForContent[i];
         const modulePrompt = [
+          ...(isJourneyBuilderApp(parsedContext)
+            ? ['LANGUE OBLIGATOIRE: rédiger tout le module en français (titres ###, listes, quiz).']
+            : []),
           'Generate learner-facing content for ONE module only.',
           `Module index: ${i + 1}/${planModulesForContent.length}`,
           '',
