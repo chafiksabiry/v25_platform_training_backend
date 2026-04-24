@@ -23,6 +23,7 @@ export interface ITrainingChatSession extends Document {
   /** Plan structuré persisté sur le document (collection `training_chat_sessions`). */
   modulePlan?: ITrainingChatModulePlanItem[];
   modulePlanUpdatedAt?: Date;
+  planIsValid?: boolean;
   lastActivityAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -93,6 +94,10 @@ const trainingChatSessionSchema = new Schema<ITrainingChatSession>(
     modulePlanUpdatedAt: {
       type: Date,
       default: undefined,
+    },
+    planIsValid: {
+      type: Boolean,
+      default: false,
     },
     lastActivityAt: {
       type: Date,

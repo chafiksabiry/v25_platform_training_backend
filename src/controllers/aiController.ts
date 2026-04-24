@@ -2073,7 +2073,7 @@ export const chat = async (
       toObjectIdOrUndefined(req.body?.trainingJourneyId);
     const linkedJourney = safeTrainingJourneyId
       ? await TrainingJourney.findById(safeTrainingJourneyId)
-          .select('_id modulePlan modules methodologyData')
+          .select('_id modulePlan modules methodologyData planIsValid')
           .lean()
       : null;
     /**
@@ -2081,7 +2081,9 @@ export const chat = async (
      * not merely the presence of a draft modulePlan.
      */
     const isPlanFrozen = Boolean(
-      (linkedJourney as any)?.planIsValid || (linkedJourney as any)?.methodologyData?.planFrozenFromChat
+      (linkedJourney as any)?.planIsValid ||
+      (activeSession as any)?.planIsValid ||
+      (linkedJourney as any)?.methodologyData?.planFrozenFromChat
     );
     const linkedPlanModules = toCompactPlanModules((linkedJourney as any)?.modulePlan);
     const workflowState = isPlanFrozen
@@ -2165,9 +2167,11 @@ export const chat = async (
         trainingJourneyId: saveResult.journeyId,
         modulePlan: saveResult.modulePlan,
         modulePlanUpdatedAt: new Date().toISOString(),
+        planIsValid: true,
       };
       (activeSession as any).modulePlan = saveResult.modulePlan;
       (activeSession as any).modulePlanUpdatedAt = new Date();
+      (activeSession as any).planIsValid = true;
       activeSession.lastActivityAt = new Date();
       await activeSession.save();
 
@@ -3035,6 +3039,10 @@ export const getChatSession = async (
       (snap && Array.isArray(snap.modulePlan) && snap.modulePlan.length > 0 ? snap.modulePlan : undefined);
     const modulePlanUpdatedAtRaw = (session as any).modulePlanUpdatedAt || snap?.modulePlanUpdatedAt;
     const modulePlanUpdatedAt = modulePlanUpdatedAtRaw ? String(modulePlanUpdatedAtRaw) : undefined;
+    const planIsValid =
+      typeof (session as any).planIsValid === 'boolean'
+        ? Boolean((session as any).planIsValid)
+        : Boolean(snap?.planIsValid);
 
     return res.status(200).json({
       success: true,
@@ -3047,6 +3055,7 @@ export const getChatSession = async (
           : undefined,
         modulePlan,
         modulePlanUpdatedAt,
+        planIsValid,
         lastActivityAt: (session as any).lastActivityAt || (session as any).updatedAt || (session as any).createdAt,
         messages: ((session as any).messages || []).map((m: any) => ({
           role: m.role === 'assistant' ? 'assistant' : 'user',
