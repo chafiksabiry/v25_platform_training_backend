@@ -175,14 +175,9 @@ const appendTrainingReadinessBlock = async (params: {
         actions.push({ id: 'validate_training', label: 'Valider la formation' });
       }
     } else if (readiness === 'incomplete' && missingModules.length > 0) {
-      actions.push({
-        id: 'save_without_missing',
-        label: `Enregistrer sans ces ${missingModules.length} module(s)`,
-      });
-      actions.push({
-        id: 'generate_missing_modules',
-        label: 'Générer le contenu des modules manquants',
-      });
+      // Product choice: no content-validation action cards in chat UI.
+      // Keep informational message only in assistant body, without action buttons.
+      actions.length = 0;
     }
   } else {
     messageFr =
