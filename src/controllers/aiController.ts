@@ -2485,6 +2485,7 @@ export const chat = async (
         const compactPlan = toCompactPlanModules((journey as any).modulePlan);
         const workflow = normalizeWorkflowState(md.workflow, compactPlan);
         const currentIdx = Math.max(0, Math.min(workflow.currentModuleIndex, Math.max(workflow.totalModules - 1, 0)));
+        const validatedWorkflowIdx = currentIdx;
         if (workflow.modules[currentIdx]) {
           workflow.modules[currentIdx] = {
             ...workflow.modules[currentIdx],
@@ -2528,19 +2529,41 @@ export const chat = async (
           ? ([...(activeSession as any).modulePlan] as any[])
           : (Array.isArray((journey as any).modulePlan) ? ([...(journey as any).modulePlan] as any[]) : []);
         if (sessionPlanRaw.length > 0) {
-          const currentIdx = Math.max(
-            0,
-            Number(
-              (md.workflow &&
-                typeof md.workflow === 'object' &&
-                typeof (md.workflow as any).currentModuleIndex === 'number')
-                ? (md.workflow as any).currentModuleIndex
-                : 0
-            )
-          );
-          if (sessionPlanRaw[currentIdx]) {
-            sessionPlanRaw[currentIdx] = {
-              ...sessionPlanRaw[currentIdx],
+          const normalizeTitleKey = (t: string) =>
+            String(t || '')
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+
+          const refNumMatch = moduleRef.match(/module\s*(\d+)/i);
+          const refNum = refNumMatch ? Math.max(1, parseInt(refNumMatch[1], 10)) : null;
+
+          const wfValidatedTitle = String(workflow.modules?.[validatedWorkflowIdx]?.title || '').trim();
+          const wfKey = normalizeTitleKey(wfValidatedTitle);
+
+          let updateIdx = validatedWorkflowIdx;
+          if (refNum && refNum >= 1 && refNum <= sessionPlanRaw.length) {
+            updateIdx = refNum - 1;
+          } else if (wfKey) {
+            const scored = sessionPlanRaw.map((m: any, idx: number) => {
+              const t = String(m?.title || '').trim();
+              const k = normalizeTitleKey(t);
+              if (!k) return { idx, score: 0 };
+              if (k === wfKey) return { idx, score: 100 };
+              if (k.includes(wfKey) || wfKey.includes(k)) return { idx, score: 80 };
+              return { idx, score: 0 };
+            });
+            const best = scored.sort((a, b) => b.score - a.score)[0];
+            if (best?.score && best.score > 0) {
+              updateIdx = best.idx;
+            }
+          }
+
+          updateIdx = Math.max(0, Math.min(updateIdx, Math.max(sessionPlanRaw.length - 1, 0)));
+          if (sessionPlanRaw[updateIdx]) {
+            sessionPlanRaw[updateIdx] = {
+              ...sessionPlanRaw[updateIdx],
               isValid: true,
             };
             const sanitizedSessionPlan = withModuleValidity(
@@ -2552,11 +2575,15 @@ export const chat = async (
             } else if (Array.isArray((journey as any).modulePlan) && (journey as any).modulePlan.length >= 2) {
               (activeSession as any).modulePlan = withModuleValidity((journey as any).modulePlan, (activeSession as any).modulePlan);
             }
-            const snap = (activeSession as any).contextSnapshot;
-            if (snap && typeof snap === 'object' && Array.isArray((snap as any).modulePlan)) {
-              (snap as any).modulePlan = (activeSession as any).modulePlan;
-              (snap as any).modulePlanUpdatedAt = new Date().toISOString();
-            }
+            const snap =
+              (activeSession as any).contextSnapshot && typeof (activeSession as any).contextSnapshot === 'object'
+                ? ((activeSession as any).contextSnapshot as Record<string, any>)
+                : {};
+            (activeSession as any).contextSnapshot = {
+              ...snap,
+              modulePlan: (activeSession as any).modulePlan,
+              modulePlanUpdatedAt: new Date().toISOString(),
+            };
           }
         }
       } else {
