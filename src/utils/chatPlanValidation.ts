@@ -563,6 +563,7 @@ export async function persistValidatedChatPlan(params: {
       _id: existing._id,
       modules,
       modulePlan,
+      planIsValid: true,
       methodologyData: mergedMd,
       ...(est ? { estimatedDuration: est } : {}),
     } as any);
@@ -577,14 +578,16 @@ export async function persistValidatedChatPlan(params: {
       status: 'draft',
       modules,
       modulePlan,
+      planIsValid: true,
       methodologyData: md,
       ...(est ? { estimatedDuration: est } : {}),
     } as any);
     journeyId = String(saved._id);
   }
 
-  const fr = `**Plan enregistré** (parcours \`${journeyId}\`). Le plan est sauvegardé en champs structurés : title, objectifs, keyTopics.\n\n**Prochaine étape :** demandez le contenu d'un module (ex: \`Donne le contenu du Module 1\`) ou demandez \`Génère tout le contenu de la formation\`.`;
-  const en = `**Plan saved** (journey \`${journeyId}\`). The plan is stored in structured fields: title, objectives, keyTopics.\n\n**Next step:** ask for one module content (e.g. \`Give me Module 1 content\`) or ask \`Generate full training content based on the saved plan\`.`;
+  // Keep ack minimal; UI progression is driven by harx-training-status actions/buttons.
+  const fr = '';
+  const en = '';
 
   return { journeyId, ackFr: fr, ackEn: en, modulePlan };
 }

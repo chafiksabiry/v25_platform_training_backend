@@ -147,6 +147,7 @@ export interface ITrainingJourney extends Document {
   estimatedDuration?: string;
   targetRoles?: string[];
   methodologyData?: Record<string, any>;
+  planIsValid?: boolean;
   modulePlan?: IModulePlanItem[];
   modules: ITrainingModule[];
   finalExam?: IFinalExam;
@@ -312,6 +313,10 @@ const trainingJourneySchema = new Schema<ITrainingJourney>(
     methodologyData: {
       type: Schema.Types.Mixed,
       default: {}
+    },
+    planIsValid: {
+      type: Boolean,
+      default: false,
     },
     modulePlan: [modulePlanItemSchema],
     modules: [trainingModuleSchema],

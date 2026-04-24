@@ -2080,7 +2080,9 @@ export const chat = async (
      * "Plan validated/frozen" must only reflect explicit chat confirmation save,
      * not merely the presence of a draft modulePlan.
      */
-    const isPlanFrozen = Boolean((linkedJourney as any)?.methodologyData?.planFrozenFromChat);
+    const isPlanFrozen = Boolean(
+      (linkedJourney as any)?.planIsValid || (linkedJourney as any)?.methodologyData?.planFrozenFromChat
+    );
     const linkedPlanModules = toCompactPlanModules((linkedJourney as any)?.modulePlan);
     const workflowState = isPlanFrozen
       ? normalizeWorkflowState((linkedJourney as any)?.methodologyData?.workflow, linkedPlanModules)
