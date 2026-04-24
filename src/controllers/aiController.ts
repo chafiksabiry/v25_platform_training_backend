@@ -171,11 +171,7 @@ const appendTrainingReadinessBlock = async (params: {
     messageFr = 'Le plan est prêt. Cliquez sur "Valider le plan" pour l’enregistrer en base.';
   } else if (isPlanValidated) {
     if (readiness === 'ready' && missingModules.length === 0) {
-      if (requestedOutput === 'module_content') {
-        actions.push({ id: 'validate_module_content', label: 'Valider ce contenu module' });
-      } else if (requestedOutput === 'full_training_content') {
-        actions.push({ id: 'validate_all_modules_content', label: 'Valider le contenu de tous les modules' });
-      } else {
+      if (requestedOutput !== 'module_content' && requestedOutput !== 'full_training_content') {
         actions.push({ id: 'validate_training', label: 'Valider la formation' });
       }
     } else if (readiness === 'incomplete' && missingModules.length > 0) {
