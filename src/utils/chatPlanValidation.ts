@@ -479,10 +479,6 @@ function buildStrictPlanMarkdown(modulePlan: ModulePlanItem[]): string {
     (Array.isArray(m.objectifs) && m.objectifs.length > 0 ? m.objectifs : ['Objectif à définir']).forEach((x) => out.push(`- ${String(x).trim()}`));
     out.push('📌 Key Topics');
     (Array.isArray(m.keyTopics) && m.keyTopics.length > 0 ? m.keyTopics : ['Topic à définir']).forEach((x) => out.push(`- ${String(x).trim()}`));
-    out.push('🧩 Activités');
-    (Array.isArray(m.activites) && m.activites.length > 0 ? m.activites : ['Activité à définir']).forEach((x) => out.push(`- ${String(x).trim()}`));
-    out.push('📊 Indicateur d’évaluation');
-    out.push('- Validation du module via quiz/simulation');
     out.push('');
   });
   return out.join('\n').trim();
@@ -505,7 +501,7 @@ export function sanitizePlanForStorage(planMarkdown: string): string {
 
 /**
  * Parse assistant markdown into the same `modulePlan` shape stored on TrainingJourney
- * (title, objectifs, keyTopics, activites, durationMinutes).
+ * (title, objectifs, keyTopics, durationMinutes).
  */
 export function extractModulePlanFromAssistantMarkdown(rawAssistantText: string): ModulePlanItem[] {
   const planClean = sanitizePlanForStorage(String(rawAssistantText || ''));

@@ -11,7 +11,6 @@ export interface ITrainingChatModulePlanItem {
   title: string;
   objectifs: string[];
   keyTopics: string[];
-  activites: string[];
   durationMinutes?: number;
 }
 
@@ -55,7 +54,6 @@ const trainingChatModulePlanItemSchema = new Schema<ITrainingChatModulePlanItem>
     title: { type: String, required: true, trim: true, maxlength: 600 },
     objectifs: { type: [String], default: [] },
     keyTopics: { type: [String], default: [] },
-    activites: { type: [String], default: [] },
     durationMinutes: { type: Number, min: 1, max: 10080 },
   },
   { _id: false }

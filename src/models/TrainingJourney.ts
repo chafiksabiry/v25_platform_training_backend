@@ -61,7 +61,6 @@ export interface IModulePlanItem {
   title: string;
   objectifs?: string[];
   keyTopics?: string[];
-  activites?: string[];
   durationMinutes?: number;
 }
 
@@ -249,7 +248,6 @@ const modulePlanItemSchema = new Schema<IModulePlanItem>(
     title: { type: String, required: true, trim: true },
     objectifs: [{ type: String }],
     keyTopics: [{ type: String }],
-    activites: [{ type: String }],
     durationMinutes: { type: Number },
   },
   { _id: false }

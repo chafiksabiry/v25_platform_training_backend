@@ -237,7 +237,6 @@ const buildSavedPlanAnchor = (journey: any): string => {
         title: String(m?.title || '').trim(),
         objectifs: Array.isArray(m?.objectifs) ? m.objectifs.slice(0, 8) : [],
         keyTopics: Array.isArray(m?.keyTopics) ? m.keyTopics.slice(0, 10) : [],
-        activites: Array.isArray(m?.activites) ? m.activites.slice(0, 10) : [],
         durationMinutes: typeof m?.durationMinutes === 'number' ? m.durationMinutes : undefined,
       }))
       .filter((x: any) => x.title);
