@@ -295,6 +295,25 @@ const buildSessionTitle = (seedText: string): string => {
   return normalized.length > 90 ? `${normalized.slice(0, 87)}...` : normalized;
 };
 
+type CompactPlanModule = {
+  title: string;
+  objectifs: string[];
+  keyTopics: string[];
+  durationMinutes?: number;
+};
+
+const toCompactPlanModules = (raw: any): CompactPlanModule[] => {
+  const arr = Array.isArray(raw) ? raw : [];
+  return arr
+    .map((m: any) => ({
+      title: String(m?.title || '').trim(),
+      objectifs: Array.isArray(m?.objectifs) ? m.objectifs.map((x: any) => String(x || '').trim()).filter(Boolean) : [],
+      keyTopics: Array.isArray(m?.keyTopics) ? m.keyTopics.map((x: any) => String(x || '').trim()).filter(Boolean) : [],
+      durationMinutes: typeof m?.durationMinutes === 'number' ? m.durationMinutes : undefined,
+    }))
+    .filter((m: CompactPlanModule) => m.title);
+};
+
 const normalizeGeneratedTitle = (rawTitle: string, fallback: string): string => {
   const cleaned = String(rawTitle || '')
     .replace(/<[^>]+>/g, ' ')
@@ -2252,6 +2271,9 @@ export const chat = async (
     }
 
     const gigGrounding = await buildGigGroundingBlocks(safeGigId, parsedContext);
+    const savedPlanModules = toCompactPlanModules((linkedJourney as any)?.modulePlan);
+    const contextPlanModules = toCompactPlanModules((parsedContext as any)?.modulePlan);
+    const planModulesForContent = savedPlanModules.length >= 1 ? savedPlanModules : contextPlanModules;
 
     const prompt = [
       'HARX conversation context:',
@@ -2341,6 +2363,89 @@ export const chat = async (
         ? 'Style profile full training: minimal, high readability.'
         : '',
     ].filter(Boolean).join('\n');
+
+    const generateFullTrainingByModules = async (): Promise<string> => {
+      if (planModulesForContent.length === 0) {
+        return '';
+      }
+
+      const catalog = planModulesForContent.map((m, idx) => ({
+        module: idx + 1,
+        title: m.title,
+        objectifs: m.objectifs.slice(0, 8),
+        keyTopics: m.keyTopics.slice(0, 12),
+        durationMinutes: m.durationMinutes,
+      }));
+
+      const outputs: string[] = [];
+      for (let i = 0; i < planModulesForContent.length; i++) {
+        const module = planModulesForContent[i];
+        const modulePrompt = [
+          'Generate learner-facing content for ONE module only.',
+          `Module index: ${i + 1}/${planModulesForContent.length}`,
+          '',
+          'LOCKED TRAINING PLAN (all modules, do not drift):',
+          JSON.stringify(catalog),
+          '',
+          'TARGET MODULE (must match exactly):',
+          JSON.stringify({
+            module: i + 1,
+            title: module.title,
+            objectifs: module.objectifs,
+            keyTopics: module.keyTopics,
+            durationMinutes: module.durationMinutes,
+          }),
+          '',
+          'Required output format (markdown only):',
+          `## ${module.title}`,
+          '### 🎯 Objectifs',
+          '- Reprise fidèle et concise des objectifs du module',
+          '### 📚 Explication détaillée',
+          '- Explications pédagogiques structurées basées sur les key topics du module',
+          '### 🧪 Exemple(s) pratique(s)',
+          '- Exemples opérationnels ancrés sur ce module',
+          '### ✅ Mini quiz (3-5 questions)',
+          '- Questions + réponses attendues courtes',
+          '### 📝 Auto-évaluation',
+          '- 3-5 critères notés 1-5',
+          '',
+          'Hard constraints:',
+          '- Do not add/remove/rename modules.',
+          '- Stay strictly within this module title/objectifs/keyTopics.',
+          '- Avoid references to unrelated modules.',
+          '- Keep this module under ~700 words.',
+        ].join('\n');
+
+        const moduleSystemPrompt = [
+          systemPrompt,
+          'STRICT MODULE EXECUTION: produce content ONLY for the provided target module.',
+        ].join('\n');
+
+        let moduleText = '';
+        let lastErr: any;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            moduleText = await aiService.generateWithClaude(modulePrompt, moduleSystemPrompt, anthropicKey, 2400);
+            if (String(moduleText || '').trim()) break;
+          } catch (e) {
+            lastErr = e;
+          }
+        }
+
+        if (!String(moduleText || '').trim()) {
+          const fallback = `## ${module.title}\n\nLe contenu de ce module n'a pas pu être généré automatiquement pour le moment. Réessayez uniquement ce module avec: \`Donne le contenu du ${module.title}\`.`;
+          outputs.push(fallback);
+          if (lastErr) {
+            console.warn('[chat] module generation failed', { module: module.title, error: String((lastErr as any)?.message || lastErr) });
+          }
+          continue;
+        }
+
+        outputs.push(String(moduleText).trim());
+      }
+
+      return outputs.join('\n\n---\n\n').trim();
+    };
 
     const isWeakPlanDraft = (value: string): boolean => {
       const txt = String(value || '').trim();
@@ -2515,14 +2620,21 @@ export const chat = async (
     const streamEnabled = String(req.query.stream ?? 'true').toLowerCase() !== 'false';
     const shouldValidateDomain = inferredDomain.kbKeywords.length > 0;
     if (!streamEnabled) {
-      let response = await aiService.generateWithClaude(
-        prompt,
-        systemPrompt,
-        anthropicKey
-      );
+      let response = '';
+      if (isFullTrainingIntent && planModulesForContent.length > 0) {
+        response = await generateFullTrainingByModules();
+      } else {
+        response = await aiService.generateWithClaude(
+          prompt,
+          systemPrompt,
+          anthropicKey
+        );
+      }
       if (shouldValidateDomain && isKbTopicMismatch(String(response || ''), inferredDomain.kbKeywords)) {
         const correctiveSystemPrompt = `${systemPrompt} CRITICAL DOMAIN LOCK: ${inferredDomain.strictTopicGuard} If draft is off-domain, regenerate fully in the correct domain.`;
-        response = await aiService.generateWithClaude(prompt, correctiveSystemPrompt, anthropicKey);
+        response = isFullTrainingIntent && planModulesForContent.length > 0
+          ? await generateFullTrainingByModules()
+          : await aiService.generateWithClaude(prompt, correctiveSystemPrompt, anthropicKey);
       }
       if (isPlanIntent && isWeakPlanDraft(String(response || ''))) {
         const correctivePlanPrompt = `${systemPrompt}
@@ -2592,10 +2704,14 @@ Regenerate now with strict compliance.
     const forceLockedIntentResponse = isPlanIntent || isModuleIntent || isFullTrainingIntent;
     if (shouldValidateDomain || forceLockedIntentResponse) {
       // For strict domain lock, generate once then stream-safe write validated content.
-      let response = await aiService.generateWithClaude(prompt, systemPrompt, anthropicKey);
+      let response = isFullTrainingIntent && planModulesForContent.length > 0
+        ? await generateFullTrainingByModules()
+        : await aiService.generateWithClaude(prompt, systemPrompt, anthropicKey);
       if (isKbTopicMismatch(String(response || ''), inferredDomain.kbKeywords)) {
         const correctiveSystemPrompt = `${systemPrompt} CRITICAL DOMAIN LOCK: ${inferredDomain.strictTopicGuard} If draft is off-domain, regenerate fully in the correct domain.`;
-        response = await aiService.generateWithClaude(prompt, correctiveSystemPrompt, anthropicKey);
+        response = isFullTrainingIntent && planModulesForContent.length > 0
+          ? await generateFullTrainingByModules()
+          : await aiService.generateWithClaude(prompt, correctiveSystemPrompt, anthropicKey);
       }
       if (isPlanIntent && isWeakPlanDraft(String(response || ''))) {
         const correctivePlanPrompt = `${systemPrompt}
