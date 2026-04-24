@@ -3221,9 +3221,26 @@ Regenerate now with strict compliance.
     await activeSession.save();
 
     return res.end();
-  } catch (error) {
-    if (!res.headersSent) return next(error);
-    res.write('\n[STREAM_ERROR]');
+  } catch (error: any) {
+    const rawError = String(error?.message || error || '');
+    const aiBillingExhausted =
+      String((error as any)?.code || '') === 'AI_BILLING_EXHAUSTED' ||
+      /AI_BILLING_EXHAUSTED|insufficient_quota|credit balance is too low|exceeded your current quota/i.test(rawError);
+    const billingMessage =
+      "Les crédits IA sont actuellement épuisés (Claude et OpenAI). Merci de recharger au moins un provider (ANTHROPIC_API_KEY ou OPENAI_API_KEY) puis réessayer.";
+
+    if (!res.headersSent) {
+      if (aiBillingExhausted) {
+        return res.status(200).json({
+          success: true,
+          response: billingMessage,
+          sessionId: req.body?.sessionId ? String(req.body.sessionId) : undefined,
+        });
+      }
+      return next(error);
+    }
+
+    res.write(aiBillingExhausted ? `\n${billingMessage}` : '\n[STREAM_ERROR]');
     return res.end();
   }
 };

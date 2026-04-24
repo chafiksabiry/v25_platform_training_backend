@@ -14,6 +14,21 @@ class AIService {
     });
   }
 
+  private isQuotaOrBillingError(error: any): boolean {
+    const raw = String(error?.message || error || '').toLowerCase();
+    const code = String(error?.code || '').toLowerCase();
+    const apiCode = String(error?.error?.code || '').toLowerCase();
+    const status = Number(error?.status || error?.statusCode || 0);
+    return (
+      code === 'insufficient_quota' ||
+      apiCode === 'insufficient_quota' ||
+      raw.includes('insufficient_quota') ||
+      raw.includes('credit balance is too low') ||
+      raw.includes('exceeded your current quota') ||
+      (status === 429 && (raw.includes('quota') || raw.includes('billing')))
+    );
+  }
+
   /** Extrait le premier objet ou tableau JSON équilibré (évite lastIndexOf sur ] internes ex. visualElements). */
   private extractBalancedJsonFragment(s: string, open: '{' | '['): string | null {
     const start = s.indexOf(open);
@@ -283,6 +298,7 @@ class AIService {
         : parseFloat(process.env.OPENAI_TEMPERATURE || '0.7');
 
     let lastError: any;
+    let claudeBillingFailed = false;
     for (const model of modelsToTry) {
       try {
         console.log(`🤖 Attempting analysis with Claude model: ${model}${apiKey ? ' (using custom API key)' : ''}`);
@@ -316,7 +332,11 @@ class AIService {
       } catch (error: any) {
         lastError = error;
         console.warn(`⚠️ Claude model ${model} failed: ${error.message}`);
-        // If it's not a 404/401/403, we might want to stop, but for now we follow the waterfall
+        if (this.isQuotaOrBillingError(error)) {
+          claudeBillingFailed = true;
+          // No need to try all Claude variants when account credit is exhausted.
+          break;
+        }
       }
     }
 
@@ -365,6 +385,13 @@ class AIService {
       }
     } catch (openaiError: any) {
       console.error('❌ ALL AI models failed (Claude & OpenAI):', openaiError);
+      if (claudeBillingFailed && this.isQuotaOrBillingError(openaiError)) {
+        const exhausted = new Error(
+          'AI_BILLING_EXHAUSTED: Anthropic credit is exhausted and OpenAI quota is also exhausted.'
+        ) as Error & { code?: string };
+        exhausted.code = 'AI_BILLING_EXHAUSTED';
+        throw exhausted;
+      }
       throw new Error(`AI Analysis failed: ${lastError?.message || openaiError.message}`);
     }
   }
