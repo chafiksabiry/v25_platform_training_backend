@@ -296,22 +296,29 @@ const appendTrainingReadinessBlock = async (params: {
   ].join(' ');
 
   let raw = '';
+  let readinessFromFallback = false;
   try {
     raw = await aiService.generateWithClaude(prompt, systemPrompt, anthropicKey, 640, {
       temperature: 0.12,
       preferredModels: ['claude-sonnet-4-5'],
     });
   } catch (e) {
-    console.warn('[chat] training readiness inference failed:', e);
-    return '';
+    console.warn('[chat] training readiness inference failed, using deterministic fallback:', e);
+    readinessFromFallback = true;
+    raw = '';
   }
 
-  let data: any;
+  let data: any = {};
   try {
-    data = aiService.parseJson(String(raw || ''), 'trainingReadiness');
+    if (raw) {
+      data = aiService.parseJson(String(raw || ''), 'trainingReadiness');
+    } else {
+      readinessFromFallback = true;
+    }
   } catch {
-    console.warn('[chat] training readiness JSON parse failed');
-    return '';
+    console.warn('[chat] training readiness JSON parse failed, using deterministic fallback');
+    readinessFromFallback = true;
+    data = {};
   }
 
   const readinessRaw = String(data?.readiness || '').trim();
@@ -370,6 +377,7 @@ const appendTrainingReadinessBlock = async (params: {
         console.log('[training-readiness] skip: not_applicable and not training plan response', {
           requestedOutput,
           looksLikePlan,
+          readinessFromFallback,
         });
         return '';
       }
@@ -432,6 +440,7 @@ const appendTrainingReadinessBlock = async (params: {
     isTrainingPlanResponse,
     isPlanValidated,
     readiness,
+    readinessFromFallback,
     missingModulesCount: missingModules.length,
     actions: actions.map((a) => a.id),
   });
