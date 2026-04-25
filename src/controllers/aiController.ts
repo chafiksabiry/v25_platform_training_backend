@@ -51,112 +51,6 @@ const METHODOLOGY_360_DEFAULT_PILLARS: string[] = [
   'US Federal & State Compliance Framework',
 ];
 
-/** 360° methodology: detect only from gig title + description (not wizard methodology name). */
-const METHODOLOGY_360_FROM_GIG_REGEX =
-  /360\s*degr|360\s*°|méthodologie\s*360|methodologie\s*360|360[-\s]?deg|\b360\s*methodology\b|\b360\s*degree\b|\b360-degree\b/i;
-
-/** Infer fr vs en from gig title + description only. Null = ambiguous / empty → caller may fall back to user message. */
-const inferLocaleFromGigTitleDescription = (raw: string): 'fr' | 'en' | null => {
-  const t = String(raw || '').trim();
-  if (!t) return null;
-  if (/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/.test(t)) return 'en';
-  if (/[àâäéèêëïîôùûüçœæ]/i.test(t)) return 'fr';
-  try {
-    if (
-      /\p{Script=Han}/u.test(t) ||
-      /\p{Script=Hiragana}/u.test(t) ||
-      /\p{Script=Katakana}/u.test(t) ||
-      /\p{Script=Hangul}/u.test(t)
-    ) {
-      return 'en';
-    }
-  } catch {
-    // ignore environments without Unicode property escapes
-  }
-  const lower = t.toLowerCase();
-  const frHits =
-    /\b(le|la|les|des|un|une|vous|merci|comment|pourquoi|formation|parcours|méthodologie|générez|valider|objectifs)\b/.test(
-      lower
-    );
-  const enHits =
-    /\b(the|and|what|how|why|please|thanks|thank you|training|plan|module|customer|compliance|insurance|sales|overview|skills|responsible|required|experience|years)\b/.test(
-      lower
-    );
-  if (frHits && !enHits) return 'fr';
-  if (enHits && !frHits) return 'en';
-  if (frHits && enHits) return 'en';
-  if (/^[\x20-\x7E\n\t]+$/u.test(t)) {
-    const words = lower.split(/[^a-z]+/).filter(Boolean);
-    const commonEn = new Set([
-      'customer',
-      'sales',
-      'insurance',
-      'health',
-      'compliance',
-      'training',
-      'support',
-      'contact',
-      'data',
-      'protection',
-      'federal',
-      'state',
-      'regulatory',
-      'underwriting',
-      'claims',
-    ]);
-    if (words.some((w) => commonEn.has(w))) return 'en';
-  }
-  return null;
-};
-
-const buildMethodology360PlanLockText = (params: {
-  pillars: string[];
-  durationLabel: string;
-  methodologyDescription?: string;
-  locale: 'fr' | 'en';
-}): string => {
-  const { pillars, durationLabel, methodologyDescription, locale } = params;
-  const n = pillars.length;
-  const descLine =
-    methodologyDescription && methodologyDescription.trim()
-      ? locale === 'en'
-        ? `Methodology reference (context JSON — methodologyDescription): ${methodologyDescription.slice(0, 1400)}`
-        : `Référence méthodologique (contexte JSON — methodologyDescription) : ${methodologyDescription.slice(0, 1400)}`
-      : '';
-  if (locale === 'en') {
-    return [
-      '360° METHODOLOGY — MANDATORY PLAN FRAMING:',
-      descLine,
-      'The plan must follow a full “360° vision” progression. Pillar labels (adapt wording in module titles to match the reply language aligned with the GIG, without diluting meaning):',
-      ...pillars.map((p, idx) => `${idx + 1}. ${p}`),
-      '',
-      `Duration / duration context from JSON: ${durationLabel}.`,
-      'Strict rules:',
-      `- Propose at least 8 modules; ideally as many modules as pillars (${n}) when duration allows (one module = one pillar). If duration forces fewer modules, merge only adjacent pillars and state that in the “Key topics” / “Contenu clé” bullets.`,
-      '- In EACH module, under "### 📌 Contenu clé" or "### 📌 Key Topics", include at least one bullet like "360° methodology axes: …" explicitly naming the pillar(s) covered.',
-      '- Across the whole plan, each pillar listed above must appear at least once (in objectives and/or key topics). No major pillar may be omitted.',
-      '- Methodology drives PROGRESSION and COMPETENCIES; the GIG (mission brief) drives FIELD VOCABULARY and EXAMPLES (see GIG ANCHOR).',
-    ]
-      .filter(Boolean)
-      .join('\n');
-  }
-  return [
-    'MÉTHODOLOGIE 360° — CADRAGE OBLIGATOIRE DU PLAN :',
-    descLine,
-    'Le plan doit respecter la progression « vision 360° ». Intitulés des piliers (adapter la formulation des titres de modules à la langue de réponse alignée sur le GIG, sans vider le sens) :',
-    ...pillars.map((p, idx) => `${idx + 1}. ${p}`),
-    '',
-    `Durée / contexte durée indiqué dans le JSON : ${durationLabel}.`,
-    'Règles strictes :',
-    `- Proposer au minimum 8 modules ; viser idéalement autant de modules que de piliers (${n}) lorsque la durée le permet (un module = un pilier). Si la durée impose moins de modules, fusionner seulement des piliers adjacents et le signaler dans les puces « Contenu clé » / « Key Topics ».`,
-    '- Dans CHAQUE module, sous « ### 📌 Contenu clé » ou « ### 📌 Key Topics », inclure au moins une puce du type « Axes méthodologie 360° : … » qui cite explicitement le ou les piliers couverts.',
-    '- Sur l’ensemble du plan, chaque pilier listé ci-dessus doit apparaître au moins une fois (dans les objectifs et/ou le contenu clé). Aucun pilier majeur ne doit être omis.',
-    '- La méthodologie pilote la PROGRESSION et les COMPÉTENCES ; le GIG (fiche mission) pilote le VOCABULAIRE et les EXEMPLES terrain (voir ANCRAGE GIG).',
-  ]
-    .filter(Boolean)
-    .join('\n');
-};
-
 /** Infer fr vs en from the latest user text for canned chat replies (no LLM). */
 const inferJourneyChatLocale = (userMessage: string): 'fr' | 'en' => {
   const t = String(userMessage || '').trim();
@@ -517,18 +411,14 @@ const buildSavedPlanAnchor = (journey: any): string => {
 const buildGigGroundingBlocks = async (
   safeGigId: mongoose.Types.ObjectId | undefined,
   parsedContext: any
-): Promise<{ promptAppend: string; systemRules: string[]; gigTitleDescriptionText: string }> => {
+): Promise<{ promptAppend: string; systemRules: string[] }> => {
   const snap = parsedContext?.gigSnapshot && typeof parsedContext.gigSnapshot === 'object' ? parsedContext.gigSnapshot : null;
-  let titleLine = String(snap?.title || '').trim();
-  let descriptionLine = String(snap?.description || '').trim();
   const snapText = snap ? JSON.stringify(snap).slice(0, 12000) : '';
   let dbLines = '';
   if (safeGigId) {
     try {
       const g = await Gig.findById(safeGigId).lean();
       if (g) {
-        if (!titleLine) titleLine = String((g as any).title || '').trim();
-        if (!descriptionLine) descriptionLine = String((g as any).description || '').trim();
         dbLines =
           `\nGIG (base formation — champs persistés)\n- titre: ${String((g as any).title || '')}\n- description: ${String((g as any).description || '')}\n- industrie: ${String((g as any).industry || '')}\n`;
       }
@@ -536,8 +426,7 @@ const buildGigGroundingBlocks = async (
       /* ignore */
     }
   }
-  const gigTitleDescriptionText = `${titleLine}\n${descriptionLine}`.trim();
-  if (!snapText && !dbLines) return { promptAppend: '', systemRules: [], gigTitleDescriptionText };
+  if (!snapText && !dbLines) return { promptAppend: '', systemRules: [] };
   const promptAppend =
     `\n\n--- ANCRAGE GIG (prioritaire pour plan, modules, contenu pédagogique) ---\n` +
     (snapText ? `Fiche gig (JSON):\n${snapText}\n` : '') +
@@ -546,7 +435,7 @@ const buildGigGroundingBlocks = async (
     'GIG ANCRAGE: Une fiche GIG est fournie (JSON et/ou base formation). Tout plan, module ou contenu slide-ready DOIT rester aligné sur cette mission (titre, description, industries, activités, secteurs). Ne pas inventer un autre métier ou vertical.',
     'La méthodologie pilote le format pédagogique ; le GIG pilote le domaine métier et le vocabulaire terrain.',
   ];
-  return { promptAppend, systemRules, gigTitleDescriptionText };
+  return { promptAppend, systemRules };
 };
 
 const buildSessionTitle = (seedText: string): string => {
@@ -2478,16 +2367,6 @@ export const chat = async (
       }
     }
     const trimmedMessage = String(message || '').trim();
-    const gigGrounding = await buildGigGroundingBlocks(safeGigId, parsedContext);
-    const userLocaleHint: 'fr' | 'en' = (() => {
-      if (!isJourneyBuilderApp(parsedContext)) {
-        return inferJourneyChatLocale(userTextForLocaleInference(activeSession, trimmedMessage));
-      }
-      return (
-        inferLocaleFromGigTitleDescription(gigGrounding.gigTitleDescriptionText) ??
-        inferJourneyChatLocale(userTextForLocaleInference(activeSession, trimmedMessage))
-      );
-    })();
     const asksExplicitModuleCountForPlan =
       /\b(je\s+veux|g[ée]n[ée]r\w*|cr[ée]e\w*|fais|produi\w*|donne)\b[\s\S]{0,50}\b(\d+|un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix)\s+modules?\b/i.test(
         trimmedMessage
@@ -2522,10 +2401,7 @@ export const chat = async (
       if (!looksLikeTrainingPlanText(planCandidate)) {
         return res.status(400).json({
           success: false,
-          error:
-            userLocaleHint === 'en'
-              ? 'No valid training plan was found in the latest assistant reply.'
-              : 'Aucun plan valide trouvé dans la dernière réponse assistant.',
+          error: 'Aucun plan valide trouvé dans la dernière réponse assistant.',
         });
       }
 
@@ -2708,7 +2584,7 @@ export const chat = async (
         trimmedMessage === CHAT_VALIDATE_ALL_MODULES_CONTENT_CMD)
     ) {
       if (!isPlanFrozen) {
-        return res.status(400).json({ success: false, error: cannedValidatePlanFirstMessage(userLocaleHint) });
+        return res.status(400).json({ success: false, error: cannedValidatePlanFirstMessage('fr') });
       }
       const linkedJourneyId =
         toObjectIdOrUndefined(parsedContext?.trainingJourneyId) ||
@@ -2963,7 +2839,7 @@ export const chat = async (
       requestedOutput === 'training_plan' &&
       isPlanEditRequest(message.trim())
     ) {
-      const lockMsg = cannedPlanLockedMessage(userLocaleHint);
+      const lockMsg = cannedPlanLockedMessage('fr');
       activeSession.messages.push(
         { role: 'user', text: message.trim(), createdAt: new Date() } as any,
         { role: 'assistant', text: lockMsg, createdAt: new Date() } as any
@@ -2997,7 +2873,7 @@ export const chat = async (
       !isPlanFrozen &&
       (requestedOutput === 'module_content' || requestedOutput === 'full_training_content')
     ) {
-      const lockMsg = cannedNoValidatedPlanMessage(userLocaleHint);
+      const lockMsg = cannedNoValidatedPlanMessage('fr');
       activeSession.messages.push(
         { role: 'user', text: message.trim(), createdAt: new Date() } as any,
         { role: 'assistant', text: lockMsg, createdAt: new Date() } as any
@@ -3026,6 +2902,7 @@ export const chat = async (
       return res.end();
     }
 
+    const gigGrounding = await buildGigGroundingBlocks(safeGigId, parsedContext);
     const savedPlanModules = toCompactPlanModules((linkedJourney as any)?.modulePlan);
     const contextPlanModules = toCompactPlanModules((parsedContext as any)?.modulePlan);
     const planModulesForContent = savedPlanModules.length >= 1 ? savedPlanModules : contextPlanModules;
@@ -3043,11 +2920,12 @@ export const chat = async (
       message.trim()
     ].join('\n');
 
+    const userLocaleHint = isJourneyBuilderApp(parsedContext)
+      ? ('fr' as const)
+      : inferJourneyChatLocale(userTextForLocaleInference(activeSession, message.trim()));
     const missingInfoQuestionPolicy =
       bootstrapPlanFromGigOnly && isPlanIntent
-        ? userLocaleHint === 'en'
-          ? 'FORCED START (Journey questionnaire completed): do not ask any question before or after the plan. Infer anything missing exclusively from the GIG ANCHOR block and the Q/A lines in the user message (level, goal, format). Do not invite documents, files, or knowledge base uploads.'
-          : 'DÉMARRAGE FORCÉ (questionnaire Journey terminé) : ne pose aucune question avant ni après le plan. Déduis tout ce qui manque exclusivement à partir du bloc ANCRAGE GIG et des lignes Q/R du message utilisateur (niveau, objectif, format). N’invite pas à joindre des documents, fichiers ou base de connaissances.'
+        ? 'DÉMARRAGE FORCÉ (questionnaire Journey terminé) : ne pose aucune question avant ni après le plan. Déduis tout ce qui manque exclusivement à partir du bloc ANCRAGE GIG et des lignes Q/R du message utilisateur (niveau, objectif, format). N’invite pas à joindre des documents, fichiers ou base de connaissances.'
         : 'If critical info is missing, infer reasonably and ask max 2 focused questions at the end.';
 
     const methodologyComponentsFromContext = Array.isArray((parsedContext as any)?.methodologyComponents)
@@ -3056,38 +2934,42 @@ export const chat = async (
           .filter(Boolean)
       : [];
     const methodologyDescriptionFromContext = String((parsedContext as any)?.methodologyDescription || '').trim();
-    const methodology360FromGigTitleDescription =
-      isJourneyBuilderApp(parsedContext) &&
-      METHODOLOGY_360_FROM_GIG_REGEX.test(String(gigGrounding.gigTitleDescriptionText || ''));
+    const methodology360NameMatch =
+      /360\s*degr|360\s*°|méthodologie\s*360|methodologie\s*360|360[-\s]?deg/i.test(String(selectedMethodology || '')) ||
+      /\b360\b/i.test(String((parsedContext as any)?.methodologyName || ''));
     const methodologyPlanPillars =
-      methodology360FromGigTitleDescription && isJourneyBuilderApp(parsedContext)
-        ? methodologyComponentsFromContext.length > 0
-          ? methodologyComponentsFromContext
-          : [...METHODOLOGY_360_DEFAULT_PILLARS]
-        : [];
+      methodologyComponentsFromContext.length > 0
+        ? methodologyComponentsFromContext
+        : methodology360NameMatch && isJourneyBuilderApp(parsedContext)
+          ? [...METHODOLOGY_360_DEFAULT_PILLARS]
+          : [];
     const methodology360PlanLock =
       isJourneyBuilderApp(parsedContext) && isPlanIntent && methodologyPlanPillars.length > 0
-        ? buildMethodology360PlanLockText({
-            pillars: methodologyPlanPillars,
-            durationLabel:
-              userLocaleHint === 'en'
-                ? String(selectedDuration || 'not specified')
-                : String(selectedDuration || 'non spécifiée'),
-            methodologyDescription: methodologyDescriptionFromContext || undefined,
-            locale: userLocaleHint,
-          })
+        ? [
+            'MÉTHODOLOGIE 360° — CADRAGE OBLIGATOIRE DU PLAN :',
+            methodologyDescriptionFromContext
+              ? `Référence méthodologique (contexte JSON — methodologyDescription) : ${methodologyDescriptionFromContext.slice(0, 1400)}`
+              : '',
+            'Le plan doit respecter la progression « vision 360° ». Intitulés des piliers (adapter en français dans les titres de modules si besoin, sans vider le sens) :',
+            ...methodologyPlanPillars.map((p, idx) => `${idx + 1}. ${p}`),
+            '',
+            `Durée / contexte durée indiqué dans le JSON : ${String(selectedDuration || 'non spécifiée')}.`,
+            'Règles strictes :',
+            `- Proposer au minimum 8 modules ; viser idéalement autant de modules que de piliers (${methodologyPlanPillars.length}) lorsque la durée le permet (un module = un pilier). Si la durée impose moins de modules, fusionner seulement des piliers adjacents et le signaler dans les puces « Contenu clé ».`,
+            '- Dans CHAQUE module, sous « ### 📌 Contenu clé », inclure au moins une puce du type « Axes méthodologie 360° : … » qui cite explicitement le ou les piliers couverts.',
+            '- Sur l’ensemble du plan, chaque pilier listé ci-dessus doit apparaître au moins une fois (dans les objectifs et/ou le contenu clé). Aucun pilier majeur ne doit être omis.',
+            '- La méthodologie pilote la PROGRESSION et les COMPÉTENCES ; le GIG (fiche mission) pilote le VOCABULAIRE et les EXEMPLES terrain (voir ANCRAGE GIG).',
+          ]
+            .filter(Boolean)
+            .join('\n')
         : '';
 
     const systemPrompt = [
       isJourneyBuilderApp(parsedContext)
-        ? userLocaleHint === 'en'
-          ? 'You are Professor academic (HARX Journey Builder). Write your entire reply in English: headings, bullets, explanations, quizzes, and any closing questions. Match the language of the GIG title/description (see GIG anchor); if the GIG is bilingual, prefer English. Be simple, clear, pedagogical.'
-          : 'You are Professor academic (HARX Journey Builder). Write your entire reply in French: headings, bullets, explanations, quizzes, and any closing questions. Match the language of the GIG title/description (see GIG anchor); if the GIG is bilingual, prefer French. Be simple, clear, pedagogical.'
+        ? 'You are Professor academic (HARX Journey Builder). Always write your entire reply in French: headings, bullets, explanations, quizzes, and any questions at the end. If the user writes in English or another language, still answer in French. Be simple, clear, pedagogical.'
         : 'You are Professor academic. Reply in the same language as the user’s latest message (English if they write in English, French if they write in French, etc.). Be simple, clear, pedagogical.',
       isJourneyBuilderApp(parsedContext)
-        ? userLocaleHint === 'en'
-          ? 'LANGUAGE LOCK: English only for this session (Journey Builder). Do not reply in French. French is allowed only for unavoidable proper nouns, product names, acronyms, or short quoted terms.'
-          : 'LANGUAGE LOCK: French only for this session (Journey Builder). Do not reply in English. English is allowed only for unavoidable proper nouns, product names, acronyms, or short quoted terms.'
+        ? 'LANGUAGE LOCK: French only for this session. Do not reply in English. English is allowed only for unavoidable proper nouns, product names, acronyms, or short quoted terms.'
         : userLocaleHint === 'en'
           ? 'LANGUAGE LOCK: the latest user message is English — write the entire reply in English only (no French), including explanations about locked plans, extra modules, or next steps. Do not switch to French because earlier turns were French.'
           : 'LANGUAGE LOCK: the latest user message is French — write the entire reply in French only.',
@@ -3106,19 +2988,12 @@ export const chat = async (
             'INTENT LOCK: TRAINING PLAN',
             methodology360PlanLock,
             bootstrapPlanFromGigOnly
-              ? userLocaleHint === 'en'
-                ? [
-                    'BOOTSTRAP (Journey questionnaire completed): the user message summarizes source, level, goal, and format.',
-                    'Single response: emit the full markdown training plan immediately (minimum 3 modules), entirely in English (same language lock as the GIG).',
-                    'Pedagogical sources: rely ONLY on the provided GIG brief (JSON + persisted fields) and the questionnaire answers in this message. Do not assume content outside the gig; do not ask for KB or documents when context or message indicates none.',
-                    'The first substantive line of the body must be "## Module 1:" — no preamble ("before we start", "I will", etc.).',
-                  ].join('\n')
-                : [
-                    'BOOTSTRAP (fin du questionnaire Journey) : le message utilisateur résume source, niveau, objectif et format.',
-                    'Réponse unique : émettre immédiatement le plan markdown complet (minimum 3 modules), entièrement en français (même langue que le verrou GIG).',
-                    'Sources pédagogiques : s’appuyer UNIQUEMENT sur la fiche GIG fournie (JSON + champs persistés) et sur les réponses du questionnaire dans ce message. Ne pas supposer de contenu hors gig ; ne pas demander ni KB ni documents si le contexte ou le message indique absence de documents.',
-                    'La première ligne substantielle du corps doit être « ## Module 1: » — pas de préambule (« avant de commencer », « je vais », etc.).',
-                  ].join('\n')
+              ? [
+                  'BOOTSTRAP (fin du questionnaire Journey) : le message utilisateur résume source, niveau, objectif et format.',
+                  'Réponse unique : émettre immédiatement le plan markdown complet (minimum 3 modules), entièrement en français.',
+                  'Sources pédagogiques : s’appuyer UNIQUEMENT sur la fiche GIG fournie (JSON + champs persistés) et sur les réponses du questionnaire dans ce message. Ne pas supposer de contenu hors gig ; ne pas demander ni KB ni documents si le contexte ou le message indique absence de documents.',
+                  'La première ligne substantielle du corps doit être « ## Module 1: » — pas de préambule (« avant de commencer », « je vais », etc.).',
+                ].join('\n')
               : '',
             isPlanPatchRequest
               ? 'PLAN PATCH MODE: modify only the module(s) explicitly requested by the user. Keep all other existing modules unchanged (same order, same titles, same content).'
@@ -3138,51 +3013,28 @@ export const chat = async (
             'Output a structured LMS-style training plan (markdown only). No long intro before Module 1.',
             isPlanPatchRequest
               ? 'Start immediately with "## Module 1: <titre court>". Preserve the existing plan size; only add/remove modules that the user explicitly requested.'
-              : userLocaleHint === 'en'
-                ? 'Start immediately with "## Module 1: <short title>". Minimum 3 modules (prefer 4+ if duration allows), progressive from beginner to advanced.'
-                : 'Start immediately with "## Module 1: <titre court>". Minimum 3 modules (prefer 4+ if duration allows), progressive du débutant vers l’avancé.',
+              : 'Start immediately with "## Module 1: <titre court>". Minimum 3 modules (prefer 4+ if duration allows), progressive du débutant vers l’avancé.',
             '',
-            userLocaleHint === 'en'
-              ? 'modulePlan alignment (server JSON): each module maps to title, objectifs[], keyTopics[]. To populate these fields, EVERY module must repeat the SAME skeleton with ### headings and "- " bullets (required, in this order):'
-              : 'ALIGNEMENT modulePlan (JSON côté serveur): chaque module est découpé en title, objectifs[], keyTopics[]. Pour remplir ces champs, CHAQUE module doit répéter le MÊME squelette avec des titres ### et des puces "- " (obligatoire, dans cet ordre):',
+            'ALIGNEMENT modulePlan (JSON côté serveur): chaque module est découpé en title, objectifs[], keyTopics[]. Pour remplir ces champs, CHAQUE module doit répéter le MÊME squelette avec des titres ### et des puces "- " (obligatoire, dans cet ordre):',
             '',
-            userLocaleHint === 'en'
-              ? [
-                  '## Module N: <title> *(optional duration e.g. 40 min)*',
-                  '### 🎯 Objectives',
-                  '- at least 3 bullets, action verbs, no questions.',
-                  '### 📌 Key Topics',
-                  '- at least 3 bullets (concepts, tools, watch-outs). Accepted title synonyms: "### 📌 Contenu clé" or a line "**Key topics:**" immediately followed by "- " bullets.',
-                  'Do not include Activities/Deliverables/Assessment-indicator sections in the plan.',
-                ].join('\n')
-              : [
-                  '## Module N: <titre> *(durée optionnelle ex: 40 min)*',
-                  '### 🎯 Objectifs',
-                  '- au moins 3 puces, verbes d’action, sans questions.',
-                  '### 📌 Contenu clé',
-                  '- au moins 3 puces (notions, outils, points de vigilance). Synonymes acceptés pour la ligne de titre: "### 📌 Key Topics" ou ligne "**Contenu clé :**" immédiatement suivie de puces "- ".',
-                  'Ne pas inclure de section Activités/Livrables/Indicateur d’évaluation dans le plan.',
-                ].join('\n'),
+            '## Module N: <titre> *(durée optionnelle ex: 40 min)*',
+            '### 🎯 Objectifs',
+            '- au moins 3 puces, verbes d’action, sans questions.',
+            '### 📌 Contenu clé',
+            '- au moins 3 puces (notions, outils, points de vigilance). Synonymes acceptés pour la ligne de titre: "### 📌 Key Topics" ou ligne "**Contenu clé :**" immédiatement suivie de puces "- ".',
+            'Ne pas inclure de section Activités/Livrables/Indicateur d’évaluation dans le plan.',
             '',
             bootstrapPlanFromGigOnly
-              ? userLocaleHint === 'en'
-                ? 'END OF RESPONSE: stop strictly after the last module (### headings and bullets) — no questions, no "Next steps" section, no conversational CTA.'
-                : 'FIN DE RÉPONSE : terminer strictement après le dernier module (titres ### et puces) — aucune question, aucune section « Prochaines étapes », aucun CTA conversationnel.'
-              : userLocaleHint === 'en'
-                ? 'FORBIDDEN inside a module body: "## ✅ Next steps" section, final questions like "Which option", numbered user-choice lists — place them only AFTER the last module if needed (max 2 questions).'
-                : 'INTERDIT dans le corps d’un module: section "## ✅ Prochaines étapes", questions finales type "Quelle option", listes numérotées de choix utilisateur — les placer uniquement APRÈS le dernier module si nécessaire (max 2 questions).',
-            userLocaleHint === 'en'
-              ? 'No long paragraphs: prefer short bullets under each ###.'
-              : 'Pas de paragraphes longs: préférer des puces courtes sous chaque ###.',
+              ? 'FIN DE RÉPONSE : terminer strictement après le dernier module (titres ### et puces) — aucune question, aucune section « Prochaines étapes », aucun CTA conversationnel.'
+              : 'INTERDIT dans le corps d’un module: section "## ✅ Prochaines étapes", questions finales type "Quelle option", listes numérotées de choix utilisateur — les placer uniquement APRÈS le dernier module si nécessaire (max 2 questions).',
+            'Pas de paragraphes longs: préférer des puces courtes sous chaque ###.',
           ].join('\n')
         : '',
       requestedOutput === 'full_training_content'
         ? [
             'INTENT LOCK: FULL TRAINING CONTENT',
             isJourneyBuilderApp(parsedContext)
-              ? userLocaleHint === 'en'
-                ? 'LANGUAGE: all learner-facing content in English (headings, lists, quiz, questions), consistent with the GIG language lock.'
-                : 'LANGUE OBLIGATOIRE: tout le contenu pédagogique en français (titres, listes, quiz, questions).'
+              ? 'LANGUE OBLIGATOIRE: tout le contenu pédagogique en français (titres, listes, quiz, questions).'
               : '',
             isPlanFrozen
               ? 'PLAN LOCK: use ONLY modules and scope from the saved training plan provided in context. Do not add, rename, or reorder modules.'
@@ -3190,9 +3042,7 @@ export const chat = async (
             'Generate complete learner-facing content for all modules.',
             'Per module include: Title, Objectives, Detailed Explanation, Examples, Hands-on Exercise, Mini Quiz (3-5), Summary, Reflection, Self-assessment (1-5).',
             isJourneyBuilderApp(parsedContext)
-              ? userLocaleHint === 'en'
-                ? 'Use clear English section labels in the output (e.g. "Objectives", "Explanation", "Exercise", "Mini quiz", "Self-assessment").'
-                : 'Traduire ces rubriques en libellés français dans la sortie (ex. « Objectifs », « Explication », « Exercice », « Mini quiz », « Auto-évaluation »).'
+              ? 'Traduire ces rubriques en libellés français dans la sortie (ex. « Objectifs », « Explication », « Exercice », « Mini quiz », « Auto-évaluation »).'
               : '',
             'Keep each module under 800 words; if more depth is needed, ask which module to expand.',
           ].join('\n')
@@ -3201,9 +3051,7 @@ export const chat = async (
         ? [
             `INTENT LOCK: MODULE CONTENT${requestedModuleReference ? ` (${requestedModuleReference})` : ''}`,
             isJourneyBuilderApp(parsedContext)
-              ? userLocaleHint === 'en'
-                ? 'LANGUAGE: all module content in English (headings, lists, quiz, questions), consistent with the GIG language lock.'
-                : 'LANGUE OBLIGATOIRE: tout le contenu du module en français (titres, listes, quiz, questions).'
+              ? 'LANGUE OBLIGATOIRE: tout le contenu du module en français (titres, listes, quiz, questions).'
               : '',
             isPlanFrozen
               ? 'PLAN LOCK: the requested module must match an existing module from the saved plan. If not found, ask user to choose one saved module title.'
@@ -3211,9 +3059,7 @@ export const chat = async (
             'Generate only the requested module.',
             'Include: Module Title, Learning Objectives, Deep Explanation, Examples, Practical Exercise, Quick Quiz (3-5), Self-Assessment, Skill Validation, Success/Failure indicator.',
             isJourneyBuilderApp(parsedContext)
-              ? userLocaleHint === 'en'
-                ? 'Use clear English labels in the output (objectives, explanation, exercise, quiz, self-assessment, etc.).'
-                : 'Traduire ces rubriques en libellés français dans la sortie (objectifs, explication, exercice, quiz, auto-évaluation, etc.).'
+              ? 'Traduire ces rubriques en libellés français dans la sortie (objectifs, explication, exercice, quiz, auto-évaluation, etc.).'
               : '',
             'Keep content under 600 words for a single module.',
             'Include one self-check with model answer or reflection prompt.',
@@ -3229,29 +3075,6 @@ export const chat = async (
         ? 'Style profile full training: minimal, high readability.'
         : '',
     ].filter(Boolean).join('\n');
-
-    const weakPlanCorrectiveSuffix =
-      userLocaleHint === 'en'
-        ? `
-HARD PLAN ENFORCEMENT:
-Regenerate now with strict compliance.
-- Start at "## Module 1: <title>"
-- Minimum 3 modules (4+ if duration allows), progressive
-- Each module MUST use this exact skeleton (### headings + "- " bullets only under each):
-  ### 🎯 Objectives (min 3 bullets)
-  ### 📌 Key Topics (min 3 bullets; alias "### 📌 Contenu clé" or "**Key topics:**" + bullets allowed)
-- Do NOT include Activities/Deliverables/Assessment sections in training plan output
-- No intro before Module 1; no "Next steps" / CTA inside a module body; max 2 short questions only after the last module if needed`
-        : `
-HARD PLAN ENFORCEMENT:
-Regenerate now with strict compliance.
-- Start at "## Module 1: <titre>"
-- Minimum 3 modules (4+ if duration allows), progressive
-- Each module MUST use this exact skeleton (### headings + "- " bullets only under each):
-  ### 🎯 Objectifs (min 3 bullets)
-  ### 📌 Contenu clé (min 3 bullets; alias "### 📌 Key Topics" or "**Contenu clé :**" + bullets allowed)
-- Do NOT include Activités/Livrables/Indicateur d’évaluation sections in training plan output
-- No intro before Module 1; no "Prochaines étapes" / CTA inside a module body; max 2 short questions only after the last module if needed`;
 
     const generateFullTrainingByModules = async (): Promise<string> => {
       if (planModulesForContent.length === 0) {
@@ -3271,11 +3094,7 @@ Regenerate now with strict compliance.
         const module = planModulesForContent[i];
         const modulePrompt = [
           ...(isJourneyBuilderApp(parsedContext)
-            ? [
-                userLocaleHint === 'en'
-                  ? 'LANGUAGE: write the entire module in English (### headings, lists, quiz), consistent with the GIG language lock.'
-                  : 'LANGUE OBLIGATOIRE: rédiger tout le module en français (titres ###, listes, quiz).',
-              ]
+            ? ['LANGUE OBLIGATOIRE: rédiger tout le module en français (titres ###, listes, quiz).']
             : []),
           'Generate learner-facing content for ONE module only.',
           `Module index: ${i + 1}/${planModulesForContent.length}`,
@@ -3533,7 +3352,16 @@ Regenerate now with strict compliance.
           : await aiService.generateWithClaude(prompt, correctiveSystemPrompt, anthropicKey);
       }
       if (isPlanIntent && isWeakPlanDraft(String(response || ''))) {
-        const correctivePlanPrompt = `${systemPrompt}${weakPlanCorrectiveSuffix}`;
+        const correctivePlanPrompt = `${systemPrompt}
+HARD PLAN ENFORCEMENT:
+Regenerate now with strict compliance.
+- Start at "## Module 1: <titre>"
+- Minimum 3 modules (4+ if duration allows), progressive
+- Each module MUST use this exact skeleton (### headings + "- " bullets only under each):
+  ### 🎯 Objectifs (min 3 bullets)
+  ### 📌 Contenu clé (min 3 bullets; alias "### 📌 Key Topics" or "**Contenu clé :**" + bullets allowed)
+- Do NOT include Activités/Livrables/Indicateur d’évaluation sections in training plan output
+- No intro before Module 1; no "Prochaines étapes" / CTA inside a module body; max 2 short questions only after the last module if needed`;
         response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
       }
       let finalResponse = await ensureVisualResponseContract(
@@ -3602,7 +3430,16 @@ Regenerate now with strict compliance.
           : await aiService.generateWithClaude(prompt, correctiveSystemPrompt, anthropicKey);
       }
       if (isPlanIntent && isWeakPlanDraft(String(response || ''))) {
-        const correctivePlanPrompt = `${systemPrompt}${weakPlanCorrectiveSuffix}`;
+        const correctivePlanPrompt = `${systemPrompt}
+HARD PLAN ENFORCEMENT:
+Regenerate now with strict compliance.
+- Start at "## Module 1: <titre>"
+- Minimum 3 modules (4+ if duration allows), progressive
+- Each module MUST use this exact skeleton (### headings + "- " bullets only under each):
+  ### 🎯 Objectifs (min 3 bullets)
+  ### 📌 Contenu clé (min 3 bullets; alias "### 📌 Key Topics" or "**Contenu clé :**" + bullets allowed)
+- Do NOT include Activités/Livrables/Indicateur d’évaluation sections in training plan output
+- No intro before Module 1; no "Prochaines étapes" / CTA inside a module body; max 2 short questions only after the last module if needed`;
         response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
       }
       fullResponse = String(response || '');
