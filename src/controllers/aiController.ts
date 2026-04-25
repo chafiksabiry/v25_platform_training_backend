@@ -25,6 +25,7 @@ import { promisify } from 'util';
 import crypto from 'crypto';
 import { GoogleAuth } from 'google-auth-library';
 import { ImageGenerationService } from '../services/imageGenerationService';
+import { generateInteractivePresentationFromModule } from '../services/interactivePresentationService';
 
 const unlinkAsync = promisify(fs.unlink);
 const HARX_STYLE_TAG_REGEX = /<harx-style>\s*\{[\s\S]*?\}\s*<\/harx-style>/i;
@@ -2622,6 +2623,7 @@ export const chat = async (
         : {};
       let nextModuleLabel: string | null = null;
       let allModulesValidated = false;
+      let validatedInteractiveModuleLabel: string | null = null;
       if (trimmedMessage === CHAT_VALIDATE_MODULE_CONTENT_CMD) {
         const lastAssistantModuleMessage = [...(activeSession.messages || [])]
           .reverse()
@@ -2723,13 +2725,48 @@ export const chat = async (
 
           updateIdx = Math.max(0, Math.min(updateIdx, Math.max(sessionPlanRaw.length - 1, 0)));
           validatedContentPlanIndex = updateIdx;
+          const moduleTitleForInteractive =
+            String(sessionPlanRaw[updateIdx]?.title || '').trim() ||
+            String(workflow.modules?.[validatedWorkflowIdx]?.title || '').trim() ||
+            `Module ${updateIdx + 1}`;
+          let interactivePayload: Record<string, any> | null = null;
+          let interactiveModel = '';
+          let interactiveGeneratedAt: Date | null = null;
+          if (moduleDetailedContent.length >= 120) {
+            try {
+              const interactive = await generateInteractivePresentationFromModule({
+                moduleTitle: moduleTitleForInteractive,
+                moduleMarkdown: moduleDetailedContent,
+                methodologyName: String(parsedContext?.selectedMethodology || '').trim() || 'Methodologie 360',
+                language: inferJourneyChatLocale(userTextForLocaleInference(activeSession, trimmedMessage)),
+              });
+              interactivePayload = {
+                version: 'InteractivePresentationV1',
+                pedagogicalPlan: interactive.pedagogicalPlan,
+                presentationPlan: interactive.presentationPlan,
+              };
+              interactiveModel = interactive.model;
+              interactiveGeneratedAt = new Date(interactive.generatedAt);
+            } catch (interactiveError: any) {
+              console.warn('[chat] interactive presentation generation failed during module validation:', interactiveError?.message || interactiveError);
+            }
+          }
           if (sessionPlanRaw[updateIdx]) {
             sessionPlanRaw[updateIdx] = {
               ...sessionPlanRaw[updateIdx],
               isValid: true,
               detailedContentMarkdown:
                 moduleDetailedContent || String(sessionPlanRaw[updateIdx]?.detailedContentMarkdown || ''),
+              interactivePresentation:
+                interactivePayload || (sessionPlanRaw[updateIdx] as any)?.interactivePresentation || undefined,
+              interactiveGeneratedAt:
+                interactiveGeneratedAt || (sessionPlanRaw[updateIdx] as any)?.interactiveGeneratedAt || undefined,
+              interactiveSourceModel:
+                interactiveModel || String((sessionPlanRaw[updateIdx] as any)?.interactiveSourceModel || ''),
             };
+            if ((sessionPlanRaw[updateIdx] as any)?.interactivePresentation) {
+              validatedInteractiveModuleLabel = `module ${updateIdx + 1}`;
+            }
           }
           const journeyModulesRaw = Array.isArray((journey as any).modules)
             ? [...((journey as any).modules as any[])]
@@ -2758,6 +2795,12 @@ export const chat = async (
               sections: Array.isArray(existing?.sections) ? existing.sections : [],
               quizzes: Array.isArray(existing?.quizzes) ? existing.quizzes : [],
               order: typeof existing?.order === 'number' ? existing.order : updateIdx + 1,
+              interactivePresentation:
+                interactivePayload || existing?.interactivePresentation || undefined,
+              interactiveGeneratedAt:
+                interactiveGeneratedAt || existing?.interactiveGeneratedAt || undefined,
+              interactiveSourceModel:
+                interactiveModel || String(existing?.interactiveSourceModel || ''),
             };
           }
           (journey as any).modules = journeyModulesRaw;
@@ -2839,6 +2882,12 @@ export const chat = async (
       let readinessBlock = '';
       if (trimmedMessage === CHAT_VALIDATE_MODULE_CONTENT_CMD) {
         const actions: Array<{ id: string; label: string }> = [];
+        if (validatedInteractiveModuleLabel) {
+          actions.push({
+            id: 'view_interactive_presentation',
+            label: `Voir la présentation interactive du ${validatedInteractiveModuleLabel}`,
+          });
+        }
         if (!allModulesValidated && nextModuleLabel) {
           actions.push({
             id: 'generate_current_module',

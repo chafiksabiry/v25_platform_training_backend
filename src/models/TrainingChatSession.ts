@@ -14,6 +14,9 @@ export interface ITrainingChatModulePlanItem {
   durationMinutes?: number;
   isValid?: boolean;
   detailedContentMarkdown?: string;
+  interactivePresentation?: Record<string, unknown>;
+  interactiveGeneratedAt?: Date;
+  interactiveSourceModel?: string;
 }
 
 export type ChatBuildStatus = 'pending' | 'in_progress' | 'completed';
@@ -75,6 +78,9 @@ const trainingChatModulePlanItemSchema = new Schema<ITrainingChatModulePlanItem>
     durationMinutes: { type: Number, min: 1, max: 10080 },
     isValid: { type: Boolean, default: false },
     detailedContentMarkdown: { type: String, trim: true, maxlength: 250000 },
+    interactivePresentation: { type: Schema.Types.Mixed, default: undefined },
+    interactiveGeneratedAt: { type: Date, default: undefined },
+    interactiveSourceModel: { type: String, trim: true, maxlength: 120 },
   },
   { _id: false }
 );

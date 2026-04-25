@@ -46,6 +46,9 @@ export interface ITrainingModule {
   order?: number;
   imageDescription?: string;
   imageUrl?: string;
+  interactivePresentation?: Record<string, any>;
+  interactiveGeneratedAt?: Date;
+  interactiveSourceModel?: string;
 }
 
 export interface IFinalExam {
@@ -227,7 +230,10 @@ const trainingModuleSchema = new Schema<ITrainingModule>(
     quizzes: [quizSchema],
     order: { type: Number },
     imageDescription: { type: String },
-    imageUrl: { type: String }
+    imageUrl: { type: String },
+    interactivePresentation: { type: Schema.Types.Mixed, default: undefined },
+    interactiveGeneratedAt: { type: Date, default: undefined },
+    interactiveSourceModel: { type: String, trim: true, maxlength: 120 },
   },
   { _id: false }
 );
