@@ -2755,7 +2755,7 @@ export const chat = async (
                 methodologyName: String(parsedContext?.selectedMethodology || '').trim() || 'Methodologie 360',
                 language: inferJourneyChatLocale(userTextForLocaleInference(activeSession, trimmedMessage)),
               });
-              const timeoutMs = 12000;
+              const timeoutMs = 2500;
               const interactive = await Promise.race([
                 interactivePromise,
                 new Promise<never>((_, reject) =>
