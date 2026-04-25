@@ -236,23 +236,44 @@ const appendTrainingReadinessBlock = async (params: {
   const requestedOutput = String(parsedContext?.requestedOutput || '').toLowerCase();
   const looksLikePlan = looksLikeTrainingPlanText(compactAssistant);
   const looksLikeModuleContent =
-    /###\s*(📚|🧪|✅|📝)\s*|explication\s+d[ée]taill[ée]e|mini\s+quiz|auto[-\s]?[eé]valuation|hands-on\s+exercise/i.test(
+    /###\s*(📚|🧪|✅|📝)\s*|##\s*(📚|🧪|✅|📝)\s*|explication\s+(?:d[ée]taill[ée]e|approfondie)|mini\s+quiz|auto[-\s]?[eé]valuation|hands-on\s+exercise|objectifs\s+d['']apprentissage/i.test(
       compactAssistant
     );
   const isTrainingPlanResponse = looksLikePlan || requestedOutput === 'training_plan';
   if (readiness === 'not_applicable') {
     if (!isTrainingPlanResponse) {
-      console.log('[training-readiness] skip: not_applicable and not training plan response', {
-        requestedOutput,
-        looksLikePlan,
-      });
-      return '';
+      /** Long module markdown is often tagged not_applicable by the classifier; still need CTAs. */
+      const treatAsValidatedPlanModule =
+        (requestedOutput === 'module_content' || requestedOutput === 'full_training_content') &&
+        Boolean(parsedContext?.planValidatedFromDb);
+      if (treatAsValidatedPlanModule) {
+        readiness = 'incomplete';
+        if (!messageFr) {
+          messageFr =
+            'Contenu pédagogique généré. Validez ce module pour enregistrer l’avancement et passer à la suite.';
+        }
+      } else {
+        console.log('[training-readiness] skip: not_applicable and not training plan response', {
+          requestedOutput,
+          looksLikePlan,
+        });
+        return '';
+      }
+    } else {
+      // If classifier is unsure but response clearly looks like a plan, allow CTA rendering.
+      readiness = 'ready';
     }
-    // If classifier is unsure but response clearly looks like a plan, allow CTA rendering.
-    readiness = 'ready';
   }
   const actions: { id: string; label: string }[] = [];
-  const wf = parsedContext?.workflowState as JourneyWorkflowState | undefined;
+  let wf = parsedContext?.workflowState as JourneyWorkflowState | undefined;
+  if (
+    isPlanValidated &&
+    !wf &&
+    Array.isArray((parsedContext as any)?.modulePlan) &&
+    (parsedContext as any).modulePlan.length >= 2
+  ) {
+    wf = normalizeWorkflowState(undefined, toCompactPlanModules((parsedContext as any).modulePlan));
+  }
   if (!isPlanValidated && isTrainingPlanResponse) {
     actions.push({
       id: 'validate_plan',
