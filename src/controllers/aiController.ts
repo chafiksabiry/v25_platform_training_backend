@@ -2623,6 +2623,12 @@ export const chat = async (
       let nextModuleLabel: string | null = null;
       let allModulesValidated = false;
       if (trimmedMessage === CHAT_VALIDATE_MODULE_CONTENT_CMD) {
+        const lastAssistantModuleMessage = [...(activeSession.messages || [])]
+          .reverse()
+          .find((m: any) => String(m?.role || '').toLowerCase() === 'assistant');
+        const moduleDetailedContent = stripStyleTagsForReadiness(
+          String(lastAssistantModuleMessage?.text || '')
+        ).slice(0, 250000);
         const compactPlan = toCompactPlanModules((journey as any).modulePlan);
         const workflow = normalizeWorkflowState(md.workflow, compactPlan);
         const currentIdx = Math.max(0, Math.min(workflow.currentModuleIndex, Math.max(workflow.totalModules - 1, 0)));
@@ -2721,8 +2727,40 @@ export const chat = async (
             sessionPlanRaw[updateIdx] = {
               ...sessionPlanRaw[updateIdx],
               isValid: true,
+              detailedContentMarkdown:
+                moduleDetailedContent || String(sessionPlanRaw[updateIdx]?.detailedContentMarkdown || ''),
             };
           }
+          const journeyModulesRaw = Array.isArray((journey as any).modules)
+            ? [...((journey as any).modules as any[])]
+            : [];
+          while (journeyModulesRaw.length <= updateIdx) {
+            const fallbackTitle =
+              String(sessionPlanRaw[journeyModulesRaw.length]?.title || '').trim() ||
+              String(workflow.modules?.[journeyModulesRaw.length]?.title || '').trim() ||
+              `Module ${journeyModulesRaw.length + 1}`;
+            journeyModulesRaw.push({
+              title: fallbackTitle,
+              sections: [],
+              quizzes: [],
+              order: journeyModulesRaw.length + 1,
+            });
+          }
+          if (journeyModulesRaw[updateIdx]) {
+            const existing = journeyModulesRaw[updateIdx];
+            journeyModulesRaw[updateIdx] = {
+              ...existing,
+              title:
+                String(existing?.title || '').trim() ||
+                String(sessionPlanRaw[updateIdx]?.title || '').trim() ||
+                String(workflow.modules?.[validatedWorkflowIdx]?.title || '').trim() ||
+                `Module ${updateIdx + 1}`,
+              sections: Array.isArray(existing?.sections) ? existing.sections : [],
+              quizzes: Array.isArray(existing?.quizzes) ? existing.quizzes : [],
+              order: typeof existing?.order === 'number' ? existing.order : updateIdx + 1,
+            };
+          }
+          (journey as any).modules = journeyModulesRaw;
           let nextPlan = withModuleValidity(sessionPlanRaw, prevSessionPlan);
           if (nextPlan.length < 2 && planFromJourney.length >= 2) {
             const fixed = materializeModulePlanEntries((journey as any).modulePlan);

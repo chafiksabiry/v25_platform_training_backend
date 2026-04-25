@@ -13,6 +13,7 @@ export interface ITrainingChatModulePlanItem {
   keyTopics: string[];
   durationMinutes?: number;
   isValid?: boolean;
+  detailedContentMarkdown?: string;
 }
 
 export type ChatBuildStatus = 'pending' | 'in_progress' | 'completed';
@@ -73,6 +74,7 @@ const trainingChatModulePlanItemSchema = new Schema<ITrainingChatModulePlanItem>
     keyTopics: { type: [String], default: [] },
     durationMinutes: { type: Number, min: 1, max: 10080 },
     isValid: { type: Boolean, default: false },
+    detailedContentMarkdown: { type: String, trim: true, maxlength: 250000 },
   },
   { _id: false }
 );
