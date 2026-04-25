@@ -3086,7 +3086,7 @@ export const chat = async (
             `Durée / contexte durée indiqué dans le JSON : ${String(selectedDuration || 'non spécifiée')}.`,
             'Règles strictes :',
             `- Proposer au minimum 8 modules ; viser idéalement autant de modules que de piliers (${methodologyPlanPillars.length}) lorsque la durée le permet (un module = un pilier). Si la durée impose moins de modules, fusionner seulement des piliers adjacents et le signaler dans les puces « Contenu clé ».`,
-            '- Dans CHAQUE module, sous « ### 📌 Contenu clé », inclure au moins une puce du type « Axes méthodologie 360° : … » qui cite explicitement le ou les piliers couverts.',
+            '- Ne JAMAIS écrire le préfixe « Axes méthodologie 360° ». Intégrer directement les piliers comme intitulés naturels (titres, objectifs et/ou puces contenu clé) sans formule technique.',
             '- Sur l’ensemble du plan, chaque pilier listé ci-dessus doit apparaître au moins une fois (dans les objectifs et/ou le contenu clé). Aucun pilier majeur ne doit être omis.',
             '- La méthodologie pilote la PROGRESSION et les COMPÉTENCES ; le GIG (fiche mission) pilote le VOCABULAIRE et les EXEMPLES terrain (voir ANCRAGE GIG).',
           ]
@@ -3461,6 +3461,10 @@ export const chat = async (
       const withoutExisting = text.replace(/<harx-style>[\s\S]*?<\/harx-style>/gi, '').trim();
       return `${withoutExisting}\n\n${styleBlock}`;
     };
+    const stripMethodologyAxisLabel = (raw: string): string =>
+      String(raw || '')
+        .replace(/(?:\*\*)?\s*Axes\s+m[ée]thodologie\s*360°\s*:\s*/gi, '')
+        .replace(/(?:\*\*)?\s*Methodology\s*360°\s*axes\s*:\s*/gi, '');
 
     const streamEnabled = String(req.query.stream ?? 'true').toLowerCase() !== 'false';
     const shouldValidateDomain = inferredDomain.kbKeywords.length > 0;
@@ -3503,6 +3507,7 @@ Regenerate now with strict compliance.
         { skip: isPlanIntent }
       );
       finalResponse = enforceHarxStyleByIntent(finalResponse, requestedOutput);
+      finalResponse = stripMethodologyAxisLabel(finalResponse);
 
       const readinessExtra = await appendTrainingReadinessBlock({
         assistantMessage: finalResponse,
@@ -3597,6 +3602,7 @@ Regenerate now with strict compliance.
       { skip: isPlanIntent }
     );
     assistantMessageText = enforceHarxStyleByIntent(assistantMessageText, requestedOutput);
+    assistantMessageText = stripMethodologyAxisLabel(assistantMessageText);
     if (assistantMessageText !== String(fullResponse || '').trim()) {
       const appended = assistantMessageText.slice(String(fullResponse || '').trim().length);
       if (appended) {
