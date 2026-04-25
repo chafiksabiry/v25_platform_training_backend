@@ -125,6 +125,111 @@ const userTextForLocaleInference = (session: any, message: string): string => {
   return lastNaturalUserChatText(session, t);
 };
 
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+const enqueueInteractivePresentationGeneration = (params: {
+  sessionId: string;
+  journeyId: string;
+  moduleIndex: number;
+  moduleTitle: string;
+  moduleMarkdown: string;
+  methodologyName: string;
+  language: 'fr' | 'en';
+}): void => {
+  setTimeout(() => {
+    void (async () => {
+      const moduleMarkdown = String(params.moduleMarkdown || '').trim();
+      if (moduleMarkdown.length < 120) return;
+      const timeoutMs = 18000;
+      const maxAttempts = 3;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          const interactive = await Promise.race([
+            generateInteractivePresentationFromModule({
+              moduleTitle: params.moduleTitle,
+              moduleMarkdown,
+              methodologyName: params.methodologyName,
+              language: params.language,
+            }),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error(`interactive_generation_timeout_${timeoutMs}ms`)), timeoutMs)
+            ),
+          ]);
+          const interactivePayload = {
+            version: 'InteractivePresentationV1',
+            pedagogicalPlan: interactive.pedagogicalPlan,
+            presentationPlan: interactive.presentationPlan,
+          };
+          const interactiveModel = String(interactive.model || '').trim();
+          const interactiveGeneratedAt = new Date(interactive.generatedAt);
+
+          const sessionDoc = await TrainingChatSession.findById(params.sessionId);
+          if (sessionDoc) {
+            const modulePlan = Array.isArray((sessionDoc as any).modulePlan) ? [...(sessionDoc as any).modulePlan] : [];
+            if (modulePlan[params.moduleIndex]) {
+              modulePlan[params.moduleIndex] = {
+                ...modulePlan[params.moduleIndex],
+                interactivePresentation: interactivePayload,
+                interactiveGeneratedAt,
+                interactiveSourceModel: interactiveModel,
+              };
+              (sessionDoc as any).modulePlan = modulePlan;
+            }
+            const snap =
+              (sessionDoc as any).contextSnapshot && typeof (sessionDoc as any).contextSnapshot === 'object'
+                ? { ...((sessionDoc as any).contextSnapshot as Record<string, any>) }
+                : {};
+            if (Array.isArray(snap.modulePlan) && snap.modulePlan[params.moduleIndex]) {
+              const snapPlan = [...snap.modulePlan];
+              snapPlan[params.moduleIndex] = {
+                ...snapPlan[params.moduleIndex],
+                interactivePresentation: interactivePayload,
+                interactiveGeneratedAt: interactiveGeneratedAt.toISOString(),
+                interactiveSourceModel: interactiveModel,
+              };
+              (sessionDoc as any).contextSnapshot = {
+                ...snap,
+                modulePlan: snapPlan,
+                modulePlanUpdatedAt: new Date().toISOString(),
+              };
+            }
+            await sessionDoc.save();
+          }
+
+          const journeyDoc = await TrainingJourney.findById(params.journeyId);
+          if (journeyDoc) {
+            const modules = Array.isArray((journeyDoc as any).modules) ? [...((journeyDoc as any).modules as any[])] : [];
+            if (modules[params.moduleIndex]) {
+              modules[params.moduleIndex] = {
+                ...modules[params.moduleIndex],
+                interactivePresentation: interactivePayload,
+                interactiveGeneratedAt,
+                interactiveSourceModel: interactiveModel,
+              };
+              (journeyDoc as any).modules = modules;
+            }
+            await journeyDoc.save();
+          }
+
+          console.log(
+            `[chat] interactive presentation generated asynchronously (module ${params.moduleIndex + 1}, attempt ${attempt})`
+          );
+          return;
+        } catch (error: any) {
+          const message = String(error?.message || error || 'unknown_error');
+          if (attempt >= maxAttempts) {
+            console.warn(
+              `[chat] interactive presentation async generation failed after ${maxAttempts} attempts (module ${params.moduleIndex + 1}): ${message}`
+            );
+            return;
+          }
+          await sleep(1200 * attempt);
+        }
+      }
+    })();
+  }, 0);
+};
+
 const stripStyleTagsForReadiness = (raw: string): string =>
   String(raw || '')
     .replace(/<harx-style>[\s\S]*?<\/harx-style>/gi, '')
@@ -2639,6 +2744,15 @@ export const chat = async (
       let nextModuleLabel: string | null = null;
       let allModulesValidated = false;
       let validatedInteractiveModuleLabel: string | null = null;
+      let deferredInteractiveTask: {
+        sessionId: string;
+        journeyId: string;
+        moduleIndex: number;
+        moduleTitle: string;
+        moduleMarkdown: string;
+        methodologyName: string;
+        language: 'fr' | 'en';
+      } | null = null;
       if (validateModuleIntent) {
         const lastAssistantModuleMessage = [...(activeSession.messages || [])]
           .reverse()
@@ -2748,30 +2862,15 @@ export const chat = async (
           let interactiveModel = '';
           let interactiveGeneratedAt: Date | null = null;
           if (moduleDetailedContent.length >= 120) {
-            try {
-              const interactivePromise = generateInteractivePresentationFromModule({
-                moduleTitle: moduleTitleForInteractive,
-                moduleMarkdown: moduleDetailedContent,
-                methodologyName: String(parsedContext?.selectedMethodology || '').trim() || 'Methodologie 360',
-                language: inferJourneyChatLocale(userTextForLocaleInference(activeSession, trimmedMessage)),
-              });
-              const timeoutMs = 2500;
-              const interactive = await Promise.race([
-                interactivePromise,
-                new Promise<never>((_, reject) =>
-                  setTimeout(() => reject(new Error(`interactive_generation_timeout_${timeoutMs}ms`)), timeoutMs)
-                ),
-              ]);
-              interactivePayload = {
-                version: 'InteractivePresentationV1',
-                pedagogicalPlan: interactive.pedagogicalPlan,
-                presentationPlan: interactive.presentationPlan,
-              };
-              interactiveModel = interactive.model;
-              interactiveGeneratedAt = new Date(interactive.generatedAt);
-            } catch (interactiveError: any) {
-              console.warn('[chat] interactive presentation generation failed during module validation:', interactiveError?.message || interactiveError);
-            }
+            deferredInteractiveTask = {
+              sessionId: String(activeSession._id),
+              journeyId: String((journey as any)._id),
+              moduleIndex: updateIdx,
+              moduleTitle: moduleTitleForInteractive,
+              moduleMarkdown: moduleDetailedContent,
+              methodologyName: String(parsedContext?.selectedMethodology || '').trim() || 'Methodologie 360',
+              language: inferJourneyChatLocale(userTextForLocaleInference(activeSession, trimmedMessage)),
+            };
           }
           if (sessionPlanRaw[updateIdx]) {
             sessionPlanRaw[updateIdx] = {
@@ -2942,6 +3041,9 @@ export const chat = async (
       persistWorkflowStatusOnSessionDoc((md.workflow as JourneyWorkflowState) || null);
       activeSession.lastActivityAt = new Date();
       await activeSession.save();
+      if (deferredInteractiveTask) {
+        enqueueInteractivePresentationGeneration(deferredInteractiveTask);
+      }
       const streamEnabledEarly = String(req.query.stream ?? 'true').toLowerCase() !== 'false';
       if (!streamEnabledEarly) {
         return res.status(200).json({
