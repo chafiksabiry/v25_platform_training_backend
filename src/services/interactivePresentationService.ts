@@ -40,7 +40,7 @@ const validatePresentationPlan = (raw: any): raw is Record<string, any> => {
 
 const parseOrRepairJson = async (raw: string, label: string): Promise<Record<string, any>> => {
   try {
-    return aiService.parseJson(raw, label) as Record<string, any>;
+    return aiService.parseJson(raw, label, { suppressLogs: true }) as Record<string, any>;
   } catch {
     const repairPrompt = [
       `Le texte ci-dessous doit etre converti en JSON strict pour ${label}.`,
@@ -56,7 +56,7 @@ const parseOrRepairJson = async (raw: string, label: string): Promise<Record<str
       3000,
       { temperature: 0.0, preferredModels: [MODEL_SLUG] }
     );
-    return aiService.parseJson(repaired, `${label}_repaired`) as Record<string, any>;
+    return aiService.parseJson(repaired, `${label}_repaired`, { suppressLogs: true }) as Record<string, any>;
   }
 };
 
@@ -110,14 +110,14 @@ export const generateInteractivePresentationFromModule = async (params: {
     `Titre module: ${moduleTitle}`,
     '',
     'Contenu module source:',
-    moduleMarkdown.slice(0, 22000),
+    moduleMarkdown.slice(0, 12000),
   ].join('\n');
 
   const pedagogicalRaw = await aiService.generateWithClaude(
     pedagogicalPrompt,
     'Tu es un architecte pedagogique e-learning. Return valid JSON only.',
     undefined,
-    5000,
+    3500,
     { temperature: 0.2, preferredModels: [MODEL_SLUG] }
   );
   const pedagogicalPlan = await parseOrRepairJson(pedagogicalRaw, 'interactive_pedagogical_plan');
@@ -153,18 +153,22 @@ export const generateInteractivePresentationFromModule = async (params: {
     }),
     'Regles:',
     '- 1 screen intro, 1 screen summary, et au moins 1 screen interactive (quiz/scenario/poll/hotspot).',
+    '- Maximum 6 screens au total.',
+    '- Maximum 4 composants par screen.',
+    '- Chaque texte de composant <= 220 caracteres.',
+    '- Reponse compacte: pas de contenu redondant.',
     '- Pas de markdown.',
     '- Pas de texte hors JSON.',
     '',
     'Plan pedagogique JSON:',
-    JSON.stringify(pedagogicalPlan).slice(0, 25000),
+    JSON.stringify(pedagogicalPlan).slice(0, 12000),
   ].join('\n');
 
   const presentationRaw = await aiService.generateWithClaude(
     presentationPrompt,
     'You are an expert instructional UI architect. Return valid JSON only.',
     undefined,
-    6000,
+    3500,
     { temperature: 0.15, preferredModels: [MODEL_SLUG] }
   );
   const presentationPlan = await parseOrRepairJson(presentationRaw, 'interactive_presentation_plan');

@@ -36,6 +36,14 @@ const CHAT_VALIDATE_ALL_MODULES_CONTENT_CMD = '__VALIDATE_ALL_MODULES_CONTENT__'
 const CHAT_GENERATE_CURRENT_MODULE_CMD = '__GENERATE_CURRENT_MODULE__';
 
 const isJourneyBuilderApp = (parsed: any): boolean => String(parsed?.app || '').trim() === 'HARX Journey Builder';
+const isNaturalValidateModuleContentIntent = (message: string): boolean =>
+  /\b(je\s+)?(valide|valider|validation|confirme|j['’]approuve)\b[\s\S]{0,60}\b(contenu|module)\b/i.test(
+    String(message || '').trim()
+  );
+const isNaturalValidateAllModulesIntent = (message: string): boolean =>
+  /\b(je\s+)?(valide|valider|validation|confirme|j['’]approuve)\b[\s\S]{0,80}\b(tous?\s+les?\s+modules?|formation\s+compl[èe]te)\b/i.test(
+    String(message || '').trim()
+  );
 
 /** Piliers par défaut — méthodologie 360° (couverture attendue du plan Journey Builder). */
 const METHODOLOGY_360_DEFAULT_PILLARS: string[] = [
@@ -2600,11 +2608,18 @@ export const chat = async (
       ? basePlanModuleCount + (addModulesCount as number)
       : 0;
 
-    if (
-      isJourneyBuilderApp(parsedContext) &&
-      (trimmedMessage === CHAT_VALIDATE_MODULE_CONTENT_CMD ||
-        trimmedMessage === CHAT_VALIDATE_ALL_MODULES_CONTENT_CMD)
-    ) {
+    const validateModuleIntent =
+      trimmedMessage === CHAT_VALIDATE_MODULE_CONTENT_CMD ||
+      (isJourneyBuilderApp(parsedContext) &&
+        isPlanFrozen &&
+        isNaturalValidateModuleContentIntent(trimmedMessage) &&
+        !isNaturalValidateAllModulesIntent(trimmedMessage));
+    const validateAllModulesIntent =
+      trimmedMessage === CHAT_VALIDATE_ALL_MODULES_CONTENT_CMD ||
+      (isJourneyBuilderApp(parsedContext) &&
+        isPlanFrozen &&
+        isNaturalValidateAllModulesIntent(trimmedMessage));
+    if (isJourneyBuilderApp(parsedContext) && (validateModuleIntent || validateAllModulesIntent)) {
       if (!isPlanFrozen) {
         return res.status(400).json({ success: false, error: cannedValidatePlanFirstMessage('fr') });
       }
@@ -2624,7 +2639,7 @@ export const chat = async (
       let nextModuleLabel: string | null = null;
       let allModulesValidated = false;
       let validatedInteractiveModuleLabel: string | null = null;
-      if (trimmedMessage === CHAT_VALIDATE_MODULE_CONTENT_CMD) {
+      if (validateModuleIntent) {
         const lastAssistantModuleMessage = [...(activeSession.messages || [])]
           .reverse()
           .find((m: any) => String(m?.role || '').toLowerCase() === 'assistant');
@@ -2734,12 +2749,19 @@ export const chat = async (
           let interactiveGeneratedAt: Date | null = null;
           if (moduleDetailedContent.length >= 120) {
             try {
-              const interactive = await generateInteractivePresentationFromModule({
+              const interactivePromise = generateInteractivePresentationFromModule({
                 moduleTitle: moduleTitleForInteractive,
                 moduleMarkdown: moduleDetailedContent,
                 methodologyName: String(parsedContext?.selectedMethodology || '').trim() || 'Methodologie 360',
                 language: inferJourneyChatLocale(userTextForLocaleInference(activeSession, trimmedMessage)),
               });
+              const timeoutMs = 12000;
+              const interactive = await Promise.race([
+                interactivePromise,
+                new Promise<never>((_, reject) =>
+                  setTimeout(() => reject(new Error(`interactive_generation_timeout_${timeoutMs}ms`)), timeoutMs)
+                ),
+              ]);
               interactivePayload = {
                 version: 'InteractivePresentationV1',
                 pedagogicalPlan: interactive.pedagogicalPlan,
@@ -2871,7 +2893,7 @@ export const chat = async (
       await journey.save();
 
       const baseAck =
-        trimmedMessage === CHAT_VALIDATE_MODULE_CONTENT_CMD
+        validateModuleIntent
           ? (allModulesValidated
               ? 'Contenu du module validé. Tous les modules sont désormais validés.'
               : nextModuleLabel
@@ -2880,7 +2902,7 @@ export const chat = async (
           : 'Contenu de tous les modules validé et enregistré.';
 
       let readinessBlock = '';
-      if (trimmedMessage === CHAT_VALIDATE_MODULE_CONTENT_CMD) {
+      if (validateModuleIntent) {
         const actions: Array<{ id: string; label: string }> = [];
         if (validatedInteractiveModuleLabel) {
           actions.push({
