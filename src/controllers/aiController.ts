@@ -145,6 +145,94 @@ const stripStyleTagsForReadiness = (raw: string): string =>
     .replace(HARX_TRAINING_STATUS_REGEX, '')
     .trim();
 
+const parseModuleSectionsAndQuizzes = (markdownRaw: string): { sections: any[]; quizzes: any[] } => {
+  const markdown = stripStyleTagsForReadiness(String(markdownRaw || '')).trim();
+  if (!markdown) return { sections: [], quizzes: [] };
+
+  const lines = markdown.split(/\r?\n/);
+  const headingRegex = /^(#{2,3})\s+(.+?)\s*$/;
+  const chunks: Array<{ title: string; content: string }> = [];
+  let currentTitle = '';
+  let buffer: string[] = [];
+  for (const line of lines) {
+    const m = line.match(headingRegex);
+    if (m) {
+      if (currentTitle || buffer.length) {
+        chunks.push({ title: currentTitle || 'Contenu', content: buffer.join('\n').trim() });
+      }
+      currentTitle = String(m[2] || '').replace(/\*\*/g, '').trim();
+      buffer = [];
+    } else {
+      buffer.push(line);
+    }
+  }
+  if (currentTitle || buffer.length) {
+    chunks.push({ title: currentTitle || 'Contenu', content: buffer.join('\n').trim() });
+  }
+
+  const sections: any[] = [];
+  const quizzes: any[] = [];
+
+  for (const chunk of chunks) {
+    const title = String(chunk.title || '').trim() || 'Section';
+    const content = String(chunk.content || '').trim();
+    if (!content) continue;
+    const isQuiz = /\b(quiz|qcm|questionnaire)\b/i.test(title);
+    if (!isQuiz) {
+      sections.push({
+        title,
+        content,
+        type: 'text',
+      });
+      continue;
+    }
+
+    const quizLines = content.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const questions: Array<{ question: string; options: string[]; correctAnswer: number; explanation?: string }> = [];
+    let currentQuestion: { question: string; options: string[]; correctAnswer: number; explanation?: string } | null = null;
+    for (const line of quizLines) {
+      if (/^(\d+[\).\s-]+|[-*]\s*)?(question\s*\d+|q\d+[:.)-]?)/i.test(line) || /^\d+[\).\s-]+/.test(line)) {
+        if (currentQuestion && currentQuestion.question) questions.push(currentQuestion);
+        currentQuestion = { question: line.replace(/^(\d+[\).\s-]+|[-*]\s*)/i, '').trim(), options: [], correctAnswer: 0 };
+        continue;
+      }
+      if (/^[a-dA-D][\).:\-]\s+/.test(line) || /^[-*]\s+/.test(line)) {
+        if (!currentQuestion) {
+          currentQuestion = { question: 'Question', options: [], correctAnswer: 0 };
+        }
+        currentQuestion.options.push(line.replace(/^[a-dA-D][\).:\-]\s+/, '').replace(/^[-*]\s+/, '').trim());
+        continue;
+      }
+      const answerMatch = line.match(/^(r[ée]ponse|answer)\s*[:\-]\s*([a-d1-4])/i);
+      if (answerMatch && currentQuestion) {
+        const token = String(answerMatch[2] || '').toLowerCase();
+        currentQuestion.correctAnswer = /[a-d]/.test(token) ? token.charCodeAt(0) - 97 : Math.max(0, parseInt(token, 10) - 1);
+      } else if (currentQuestion && !currentQuestion.explanation && /^(explication|explanation)\s*[:\-]/i.test(line)) {
+        currentQuestion.explanation = line.replace(/^(explication|explanation)\s*[:\-]\s*/i, '').trim();
+      }
+    }
+    if (currentQuestion && currentQuestion.question) questions.push(currentQuestion);
+    const normalizedQuestions = questions
+      .map((q) => ({
+        question: q.question,
+        options: q.options.length ? q.options : ['Vrai', 'Faux'],
+        correctAnswer: Math.max(0, Math.min(q.correctAnswer, Math.max((q.options.length ? q.options.length : 2) - 1, 0))),
+        explanation: q.explanation,
+      }))
+      .filter((q) => q.question);
+    if (normalizedQuestions.length > 0) {
+      quizzes.push({
+        title,
+        description: 'Quiz généré automatiquement depuis le contenu module.',
+        questions: normalizedQuestions.slice(0, 8),
+        passingScore: 70,
+      });
+    }
+  }
+
+  return { sections: sections.slice(0, 16), quizzes: quizzes.slice(0, 4) };
+};
+
 /**
  * Second pass (Claude): decide if the training reply is ready to validate, incomplete, or N/A.
  * Appends <harx-training-status>{...}</harx-training-status> for the Journey Builder UI (actions outside the composer).
@@ -2373,6 +2461,78 @@ export const chat = async (
       };
     };
 
+    const persistGeneratedModuleContent = async (assistantMessageText: string): Promise<void> => {
+      if (requestedOutput !== 'module_content') return;
+      const linkedJourneyId =
+        toObjectIdOrUndefined(parsedContext?.trainingJourneyId) ||
+        toObjectIdOrUndefined(req.body?.trainingJourneyId);
+      if (!linkedJourneyId) return;
+
+      const cleanMarkdown = stripStyleTagsForReadiness(String(assistantMessageText || '')).slice(0, 250000);
+      if (!cleanMarkdown || cleanMarkdown.length < 80) return;
+
+      const sessionPlan = materializeModulePlanEntries(Array.isArray((activeSession as any).modulePlan) ? (activeSession as any).modulePlan : []);
+      if (sessionPlan.length === 0) return;
+
+      const moduleRef = String(parsedContext?.requestedModuleReference || '').trim();
+      const wf = normalizeWorkflowState((parsedContext as any)?.workflowState, toCompactPlanModules(sessionPlan));
+      const refMatch = moduleRef.match(/module\s*(\d+)/i);
+      let moduleIdx = typeof wf.currentModuleIndex === 'number' && wf.currentModuleIndex >= 0 ? wf.currentModuleIndex : 0;
+      if (refMatch) {
+        moduleIdx = Math.max(0, Math.min(parseInt(refMatch[1], 10) - 1, sessionPlan.length - 1));
+      }
+      const existingPlanEntry = sessionPlan[moduleIdx] || {};
+      const { sections, quizzes } = parseModuleSectionsAndQuizzes(cleanMarkdown);
+      const hasQuizInMarkdown = /###?\s*.*(quiz|qcm|questionnaire)/i.test(cleanMarkdown);
+      if (sections.length === 0 && !hasQuizInMarkdown) return;
+
+      sessionPlan[moduleIdx] = {
+        ...existingPlanEntry,
+        isValid: Boolean(existingPlanEntry?.isValid),
+        detailedContentMarkdown: cleanMarkdown,
+        sections,
+        quizzes,
+      };
+      (activeSession as any).modulePlan = sessionPlan;
+      (activeSession as any).modulePlanUpdatedAt = new Date();
+      const snap =
+        (activeSession as any).contextSnapshot && typeof (activeSession as any).contextSnapshot === 'object'
+          ? ((activeSession as any).contextSnapshot as Record<string, any>)
+          : {};
+      (activeSession as any).contextSnapshot = {
+        ...snap,
+        modulePlan: sessionPlan,
+        modulePlanUpdatedAt: new Date().toISOString(),
+      };
+
+      const journeyDoc = await TrainingJourney.findById(linkedJourneyId);
+      if (!journeyDoc) return;
+      const modules = Array.isArray((journeyDoc as any).modules) ? [...((journeyDoc as any).modules as any[])] : [];
+      while (modules.length <= moduleIdx) {
+        const planTitle = String(sessionPlan[modules.length]?.title || '').trim() || `Module ${modules.length + 1}`;
+        modules.push({
+          title: planTitle,
+          sections: [],
+          quizzes: [],
+          order: modules.length + 1,
+        });
+      }
+      const existingModule = modules[moduleIdx] || {};
+      modules[moduleIdx] = {
+        ...existingModule,
+        title:
+          String(existingModule?.title || '').trim() ||
+          String(sessionPlan[moduleIdx]?.title || '').trim() ||
+          `Module ${moduleIdx + 1}`,
+        description: cleanMarkdown.slice(0, 50000),
+        sections,
+        quizzes,
+        order: typeof existingModule?.order === 'number' ? existingModule.order : moduleIdx + 1,
+      };
+      (journeyDoc as any).modules = modules;
+      await journeyDoc.save();
+    };
+
     const selectedDuration = parsedContext?.selectedDuration || 'non specifiee';
     const selectedMethodology = parsedContext?.selectedMethodology || 'Methodologie 360';
     const isFreeChatMode = String(parsedContext?.chatStyle || '').toLowerCase() === 'free_chat';
@@ -3189,12 +3349,32 @@ export const chat = async (
               ? 'PLAN LOCK: the requested module must match an existing module from the saved plan. If not found, ask user to choose one saved module title.'
               : '',
             'Generate only the requested module.',
-            'Include: Module Title, Learning Objectives, Deep Explanation, Examples, Practical Exercise, Quick Quiz (3-5), Self-Assessment, Skill Validation, Success/Failure indicator.',
+            'STRICT OUTPUT FORMAT (no extra sections, no open-ended reflection):',
+            '- ## Module X : <Titre>',
+            '- ### Section 1 : <Titre section>',
+            '- <contenu section 1>',
+            '- ### Section 2 : <Titre section>',
+            '- <contenu section 2>',
+            '- ### Section 3 : <Titre section> (optionnel)',
+            '- <contenu section 3>',
+            '- ### Quiz',
+            '- Q1 : <question>',
+            '- a) <option 1>',
+            '- b) <option 2>',
+            '- c) <option 3>',
+            '- d) <option 4>',
+            '- Réponse : <a|b|c|d>',
+            '- Q2...Q5 same format',
+            '- Minimum 2 sections, maximum 6 sections.',
+            '- Quiz must contain 3 to 5 MCQ questions.',
+            '- NEVER ask open questions to the user.',
+            '- NEVER include reflection prompts, self-assessment prompts, or "questions de consolidation".',
+            '- Do not add any content outside this structure.',
             isJourneyBuilderApp(parsedContext)
-              ? 'Traduire ces rubriques en libellés français dans la sortie (objectifs, explication, exercice, quiz, auto-évaluation, etc.).'
+              ? 'Respect strict des libellés en français dans la sortie (Section, Quiz, Q1, Réponse).'
               : '',
             'Keep content under 600 words for a single module.',
-            'Include one self-check with model answer or reflection prompt.',
+            'Focus on concise, operational learning content.',
           ].join('\n')
         : '',
       requiresTypedStyle
@@ -3523,6 +3703,7 @@ Regenerate now with strict compliance.
 
       const userMessageText = message.trim();
       const assistantMessageText = finalResponse;
+      await persistGeneratedModuleContent(assistantMessageText);
       activeSession.messages.push(
         { role: 'user', text: userMessageText, createdAt: new Date() } as any,
         { role: 'assistant', text: assistantMessageText, createdAt: new Date() } as any
@@ -3629,6 +3810,7 @@ Regenerate now with strict compliance.
       }
     }
 
+    await persistGeneratedModuleContent(assistantMessageText);
     activeSession.messages.push(
       { role: 'user', text: userMessageText, createdAt: new Date() } as any,
       { role: 'assistant', text: assistantMessageText, createdAt: new Date() } as any

@@ -14,6 +14,25 @@ export interface ITrainingChatModulePlanItem {
   durationMinutes?: number;
   isValid?: boolean;
   detailedContentMarkdown?: string;
+  sections?: Array<{
+    title: string;
+    content: string;
+    type?: string;
+    duration?: number;
+    resources?: Array<{ title?: string; url?: string; type?: string }>;
+  }>;
+  quizzes?: Array<{
+    title: string;
+    description?: string;
+    questions: Array<{
+      question: string;
+      options: string[];
+      correctAnswer: number;
+      explanation?: string;
+    }>;
+    passingScore?: number;
+    duration?: number;
+  }>;
   interactivePresentation?: Record<string, unknown>;
   interactiveGeneratedAt?: Date;
   interactiveSourceModel?: string;
@@ -78,6 +97,8 @@ const trainingChatModulePlanItemSchema = new Schema<ITrainingChatModulePlanItem>
     durationMinutes: { type: Number, min: 1, max: 10080 },
     isValid: { type: Boolean, default: false },
     detailedContentMarkdown: { type: String, trim: true, maxlength: 250000 },
+    sections: { type: [Schema.Types.Mixed], default: undefined },
+    quizzes: { type: [Schema.Types.Mixed], default: undefined },
     interactivePresentation: { type: Schema.Types.Mixed, default: undefined },
     interactiveGeneratedAt: { type: Date, default: undefined },
     interactiveSourceModel: { type: String, trim: true, maxlength: 120 },
