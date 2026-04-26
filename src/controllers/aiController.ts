@@ -124,6 +124,21 @@ const userTextForLocaleInference = (session: any, message: string): string => {
   return lastNaturalUserChatText(session, t);
 };
 
+/** Prefer gig language (title/description) when available in Journey Builder context. */
+const inferGigLocaleHint = (parsedContext: any): 'fr' | 'en' | null => {
+  const title = String(parsedContext?.selectedGigTitle || parsedContext?.gigSnapshot?.title || '').trim();
+  const description = String(parsedContext?.gigSnapshot?.description || '').trim();
+  const source = `${title}\n${description}`.trim();
+  if (!source) return null;
+  const lower = source.toLowerCase();
+  const frHits = (lower.match(/\b(le|la|les|des|un|une|avec|pour|dans|sur|est|sont|développement|formation|objectif|compétences)\b/g) || []).length;
+  const enHits = (lower.match(/\b(the|and|with|for|in|on|is|are|development|training|objective|skills|support)\b/g) || []).length;
+  if (enHits > frHits) return 'en';
+  if (frHits > enHits) return 'fr';
+  if (/[àâäéèêëïîôùûüçœæ]/i.test(source)) return 'fr';
+  return 'en';
+};
+
 const stripStyleTagsForReadiness = (raw: string): string =>
   String(raw || '')
     .replace(/<harx-style>[\s\S]*?<\/harx-style>/gi, '')
@@ -3028,9 +3043,10 @@ export const chat = async (
       message.trim()
     ].join('\n');
 
-    const userLocaleHint = isJourneyBuilderApp(parsedContext)
-      ? ('fr' as const)
-      : inferJourneyChatLocale(userTextForLocaleInference(activeSession, message.trim()));
+    const gigLocaleHint = isJourneyBuilderApp(parsedContext) ? inferGigLocaleHint(parsedContext) : null;
+    const userLocaleHint =
+      gigLocaleHint ||
+      inferJourneyChatLocale(userTextForLocaleInference(activeSession, message.trim()));
     const missingInfoQuestionPolicy =
       bootstrapPlanFromGigOnly && isPlanIntent
         ? 'DÉMARRAGE FORCÉ (questionnaire Journey terminé) : ne pose aucune question avant ni après le plan. Déduis tout ce qui manque exclusivement à partir du bloc ANCRAGE GIG et des lignes Q/R du message utilisateur (niveau, objectif, format). N’invite pas à joindre des documents, fichiers ou base de connaissances.'
@@ -3074,12 +3090,16 @@ export const chat = async (
 
     const systemPrompt = [
       isJourneyBuilderApp(parsedContext)
-        ? 'You are Professor academic (HARX Journey Builder). Always write your entire reply in French: headings, bullets, explanations, quizzes, and any questions at the end. If the user writes in English or another language, still answer in French. Be simple, clear, pedagogical.'
+        ? userLocaleHint === 'en'
+          ? 'You are Professor academic (HARX Journey Builder). Write your entire reply in English: headings, bullets, explanations, quizzes, and follow-up questions. Be simple, clear, pedagogical.'
+          : 'You are Professor academic (HARX Journey Builder). Write your entire reply in French: headings, bullets, explanations, quizzes, and follow-up questions. Be simple, clear, pedagogical.'
         : 'You are Professor academic. Reply in the same language as the user’s latest message (English if they write in English, French if they write in French, etc.). Be simple, clear, pedagogical.',
-      isJourneyBuilderApp(parsedContext)
-        ? 'LANGUAGE LOCK: French only for this session. Do not reply in English. English is allowed only for unavoidable proper nouns, product names, acronyms, or short quoted terms.'
-        : userLocaleHint === 'en'
-          ? 'LANGUAGE LOCK: the latest user message is English — write the entire reply in English only (no French), including explanations about locked plans, extra modules, or next steps. Do not switch to French because earlier turns were French.'
+      userLocaleHint === 'en'
+        ? isJourneyBuilderApp(parsedContext)
+          ? 'LANGUAGE LOCK: use English for this session because gig title/description are English. French is allowed only for unavoidable proper nouns or short quoted terms.'
+          : 'LANGUAGE LOCK: the latest user message is English — write the entire reply in English only (no French), including explanations about locked plans, extra modules, or next steps. Do not switch to French because earlier turns were French.'
+        : isJourneyBuilderApp(parsedContext)
+          ? 'LANGUAGE LOCK: use French for this session because gig title/description are French. English is allowed only for unavoidable proper nouns, product names, acronyms, or short quoted terms.'
           : 'LANGUAGE LOCK: the latest user message is French — write the entire reply in French only.',
       'Use markdown only. Never output HTML/CSS/JS or fake UI buttons.',
       'Keep business context from conversation unless user changes it.',
