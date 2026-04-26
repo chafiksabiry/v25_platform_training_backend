@@ -3089,7 +3089,7 @@ export const chat = async (
           : 'Contenu de tous les modules validé et enregistré.';
 
       let readinessBlock = '';
-      if (validateModuleIntent) {
+      if (validateModuleIntent || validateAllModulesIntent) {
         const actions: Array<{ id: string; label: string }> = [];
         if (validatedInteractiveModuleLabel) {
           actions.push({
@@ -3103,6 +3103,10 @@ export const chat = async (
             label: `Générer le contenu du ${nextModuleLabel}`,
           });
         } else if (allModulesValidated) {
+          actions.push({
+            id: 'generate_interactive_presentation',
+            label: 'Générer la présentation interactive',
+          });
           actions.push({
             id: 'validate_all_modules_content',
             label: 'Valider la formation complète',
