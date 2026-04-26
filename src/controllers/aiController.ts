@@ -3212,8 +3212,8 @@ export const chat = async (
       gigLocaleHint ||
       inferJourneyChatLocale(userTextForLocaleInference(activeSession, message.trim()));
     const missingInfoQuestionPolicy =
-      bootstrapPlanFromGigOnly && isPlanIntent
-        ? 'DÉMARRAGE FORCÉ (questionnaire Journey terminé) : ne pose aucune question avant ni après le plan. Déduis tout ce qui manque exclusivement à partir du bloc ANCRAGE GIG et des lignes Q/R du message utilisateur (niveau, objectif, format). N’invite pas à joindre des documents, fichiers ou base de connaissances.'
+      isPlanIntent
+        ? 'TRAINING PLAN MODE: never ask questions before or after the plan. Infer missing details from available context and output the plan directly.'
         : 'If critical info is missing, infer reasonably and ask max 2 focused questions at the end.';
 
     const methodologyComponentsFromContext = Array.isArray((parsedContext as any)?.methodologyComponents)
@@ -3278,48 +3278,18 @@ export const chat = async (
       requestedOutput === 'training_plan'
         ? [
             'INTENT LOCK: TRAINING PLAN',
-            methodology360PlanLock,
-            bootstrapPlanFromGigOnly
-              ? [
-                  'BOOTSTRAP (fin du questionnaire Journey) : le message utilisateur résume source, niveau, objectif et format.',
-                  'Réponse unique : émettre immédiatement le plan markdown complet (minimum 3 modules), entièrement en français.',
-                  'Sources pédagogiques : s’appuyer UNIQUEMENT sur la fiche GIG fournie (JSON + champs persistés) et sur les réponses du questionnaire dans ce message. Ne pas supposer de contenu hors gig ; ne pas demander ni KB ni documents si le contexte ou le message indique absence de documents.',
-                  'La première ligne substantielle du corps doit être « ## Module 1: » — pas de préambule (« avant de commencer », « je vais », etc.).',
-                ].join('\n')
-              : '',
-            isPlanPatchRequest
-              ? 'PLAN PATCH MODE: modify only the module(s) explicitly requested by the user. Keep all other existing modules unchanged (same order, same titles, same content).'
-              : '',
-            isPlanPatchRequest
-              ? 'If user references module position (for example "module 2"), map it to the corresponding saved plan module index. If ambiguous, ask one clarifying question before patching.'
-              : '',
-            isPlanPatchRequest
-              ? 'Return the full plan after patching, but do not regenerate untouched modules.'
-              : '',
-            hasStrictAddCount
-              ? `STRICT MODULE COUNT: the current plan has ${basePlanModuleCount} modules. The user asked to ADD exactly ${addModulesCount} new module(s). Output EXACTLY ${strictTotalModuleCount} modules total — no more, no less. Preserve the first ${basePlanModuleCount} modules UNCHANGED (same numbering 1..${basePlanModuleCount}, same titles, same objectives, same key topics). Append exactly ${addModulesCount} NEW module(s) numbered ${basePlanModuleCount + 1} to ${strictTotalModuleCount}. Do NOT invent additional modules beyond ${strictTotalModuleCount}. Do NOT rename, reorder, or merge existing modules.`
-              : '',
-            isPlanPatchRequest
-              ? `MANDATORY FULL RE-EMISSION: output the COMPLETE plan with EVERY module (including preserved ones) as a full block using the EXACT skeleton below (heading "## Module N: ..." + "### 🎯 Objectifs" + bullets + "### 📌 Contenu clé" + bullets). Do NOT summarize preserved modules as a numbered list or a table or a one-liner. Each module MUST start with a dedicated "## Module N:" heading. Do NOT introduce a "Modules existants" / "Existing modules" summary section. Do NOT emit a recap table of all modules at the end.`
-              : '',
-            'Output a structured LMS-style training plan (markdown only). No long intro before Module 1.',
-            isPlanPatchRequest
-              ? 'Start immediately with "## Module 1: <titre court>". Preserve the existing plan size; only add/remove modules that the user explicitly requested.'
-              : 'Start immediately with "## Module 1: <titre court>". Minimum 3 modules (prefer 4+ if duration allows), progressive du débutant vers l’avancé.',
-            '',
-            'ALIGNEMENT modulePlan (JSON côté serveur): chaque module est découpé en title, objectifs[], keyTopics[]. Pour remplir ces champs, CHAQUE module doit répéter le MÊME squelette avec des titres ### et des puces "- " (obligatoire, dans cet ordre):',
-            '',
-            '## Module N: <titre> *(durée optionnelle ex: 40 min)*',
-            '### 🎯 Objectifs',
-            '- au moins 3 puces, verbes d’action, sans questions.',
-            '### 📌 Contenu clé',
-            '- au moins 3 puces (notions, outils, points de vigilance). Synonymes acceptés pour la ligne de titre: "### 📌 Key Topics" ou ligne "**Contenu clé :**" immédiatement suivie de puces "- ".',
-            'Ne pas inclure de section Activités/Livrables/Indicateur d’évaluation dans le plan.',
-            '',
-            bootstrapPlanFromGigOnly
-              ? 'FIN DE RÉPONSE : terminer strictement après le dernier module (titres ### et puces) — aucune question, aucune section « Prochaines étapes », aucun CTA conversationnel.'
-              : 'INTERDIT dans le corps d’un module: section "## ✅ Prochaines étapes", questions finales type "Quelle option", listes numérotées de choix utilisateur — les placer uniquement APRÈS le dernier module si nécessaire (max 2 questions).',
-            'Pas de paragraphes longs: préférer des puces courtes sous chaque ###.',
+            'Generate a training plan based ONLY on gig title and gig description from context.',
+            'Do not use other assumptions beyond the gig context.',
+            'Output markdown only and start directly with Module 1.',
+            'For each module, output ONLY these parts (and nothing else):',
+            '- ## Module N : <Titre du module>',
+            '- ### 🎯 Objectifs',
+            '- 3 to 5 bullet points',
+            '- ### 📌 Key Topics',
+            '- 3 to 6 bullet points',
+            'Never add intros, conclusions, next steps, questions, quizzes, exercises, self-evaluation, or CTA.',
+            'Keep module titles concise and aligned with the gig mission.',
+            'Minimum 3 modules.',
           ].join('\n')
         : '',
       requestedOutput === 'full_training_content'
@@ -3677,7 +3647,7 @@ Regenerate now with strict compliance.
   ### 🎯 Objectifs (min 3 bullets)
   ### 📌 Contenu clé (min 3 bullets; alias "### 📌 Key Topics" or "**Contenu clé :**" + bullets allowed)
 - Do NOT include Activités/Livrables/Indicateur d’évaluation sections in training plan output
-- No intro before Module 1; no "Prochaines étapes" / CTA inside a module body; max 2 short questions only after the last module if needed`;
+- No intro before Module 1; no "Prochaines étapes" / CTA inside a module body; no questions at the end of the plan`;
         response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
       }
       let finalResponse = await ensureVisualResponseContract(
@@ -3757,7 +3727,7 @@ Regenerate now with strict compliance.
   ### 🎯 Objectifs (min 3 bullets)
   ### 📌 Contenu clé (min 3 bullets; alias "### 📌 Key Topics" or "**Contenu clé :**" + bullets allowed)
 - Do NOT include Activités/Livrables/Indicateur d’évaluation sections in training plan output
-- No intro before Module 1; no "Prochaines étapes" / CTA inside a module body; max 2 short questions only after the last module if needed`;
+- No intro before Module 1; no "Prochaines étapes" / CTA inside a module body; no questions at the end of the plan`;
         response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
       }
       fullResponse = String(response || '');
