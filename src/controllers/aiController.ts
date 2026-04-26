@@ -145,9 +145,9 @@ const stripStyleTagsForReadiness = (raw: string): string =>
     .replace(HARX_TRAINING_STATUS_REGEX, '')
     .trim();
 
-const parseModuleSectionsAndQuizzes = (markdownRaw: string): { sections: any[]; quizzes: any[] } => {
+const parseModuleSectionsFromMarkdown = (markdownRaw: string): { sections: any[] } => {
   const markdown = stripStyleTagsForReadiness(String(markdownRaw || '')).trim();
-  if (!markdown) return { sections: [], quizzes: [] };
+  if (!markdown) return { sections: [] };
 
   const lines = markdown.split(/\r?\n/);
   const headingRegex = /^(#{2,3})\s+(.+?)\s*$/;
@@ -230,7 +230,81 @@ const parseModuleSectionsAndQuizzes = (markdownRaw: string): { sections: any[]; 
     }
   }
 
-  return { sections: sections.slice(0, 16), quizzes: quizzes.slice(0, 4) };
+  return { sections: sections.slice(0, 16) };
+};
+
+const generateModuleQuizzesWithClaude = async (params: {
+  markdown: string;
+  moduleTitle?: string;
+  anthropicKey?: string;
+}): Promise<any[]> => {
+  const content = String(params.markdown || '').trim();
+  if (!content || content.length < 120) return [];
+  if (!params.anthropicKey) return [];
+
+  const prompt = [
+    'Create quiz JSON from this training module content.',
+    `Module title: ${String(params.moduleTitle || '').trim() || 'Module'}`,
+    '',
+    'Rules:',
+    '- Output STRICT JSON only.',
+    '- Build 3 to 5 multiple-choice questions.',
+    '- Each question must have exactly 4 options.',
+    '- Set correctAnswer as zero-based index (0..3).',
+    '- Keep the same language as the module content.',
+    '- Questions must be specific and grounded in the provided content.',
+    '',
+    'Expected JSON shape:',
+    '{"quizzes":[{"title":"Quiz","description":"Quiz généré automatiquement depuis le contenu module.","questions":[{"question":"","options":["","","",""],"correctAnswer":0,"explanation":""}],"passingScore":70}]}',
+    '',
+    'Module content:',
+    content.slice(0, 26000),
+  ].join('\n');
+
+  const systemPrompt = [
+    'You generate strict valid JSON only.',
+    'Do not add markdown fences or comments.',
+    'Never add extra keys outside the expected schema.',
+  ].join(' ');
+
+  try {
+    const raw = await aiService.generateWithClaude(prompt, systemPrompt, params.anthropicKey, 1200);
+    const parsed = aiService.parseJson(String(raw || ''), 'moduleQuizGeneration');
+    const quizzesRaw = Array.isArray((parsed as any)?.quizzes) ? (parsed as any).quizzes : [];
+    const quizzes = quizzesRaw
+      .map((quiz: any) => {
+        const questionsRaw = Array.isArray(quiz?.questions) ? quiz.questions : [];
+        const questions = questionsRaw
+          .map((q: any) => {
+            const options = Array.isArray(q?.options)
+              ? q.options.map((o: any) => String(o || '').trim()).filter(Boolean).slice(0, 4)
+              : [];
+            if (options.length !== 4) return null;
+            const correct = Number(q?.correctAnswer);
+            if (!Number.isFinite(correct) || correct < 0 || correct > 3) return null;
+            return {
+              question: String(q?.question || '').trim(),
+              options,
+              correctAnswer: correct,
+              explanation: String(q?.explanation || '').trim() || undefined,
+            };
+          })
+          .filter((q: any) => q && q.question);
+        if (questions.length < 3) return null;
+        return {
+          title: String(quiz?.title || 'Quiz').trim() || 'Quiz',
+          description:
+            String(quiz?.description || '').trim() || 'Quiz généré automatiquement depuis le contenu module.',
+          questions: questions.slice(0, 5),
+          passingScore: 70,
+        };
+      })
+      .filter(Boolean);
+    return quizzes.slice(0, 2);
+  } catch (error) {
+    console.warn('[module-quiz-generation] Claude quiz generation failed:', String((error as any)?.message || error));
+    return [];
+  }
 };
 
 /**
@@ -2511,9 +2585,13 @@ export const chat = async (
         moduleIdx = Math.max(0, Math.min(parseInt(refMatch[1], 10) - 1, sessionPlan.length - 1));
       }
       const existingPlanEntry = sessionPlan[moduleIdx] || {};
-      const { sections, quizzes } = parseModuleSectionsAndQuizzes(cleanMarkdown);
-      const hasQuizInMarkdown = /###?\s*.*(quiz|qcm|questionnaire)/i.test(cleanMarkdown);
-      if (sections.length === 0 && !hasQuizInMarkdown) return;
+      const { sections } = parseModuleSectionsFromMarkdown(cleanMarkdown);
+      if (sections.length === 0) return;
+      const quizzes = await generateModuleQuizzesWithClaude({
+        markdown: cleanMarkdown,
+        moduleTitle: String(existingPlanEntry?.title || sessionPlan[moduleIdx]?.title || '').trim(),
+        anthropicKey,
+      });
 
       sessionPlan[moduleIdx] = {
         ...existingPlanEntry,
