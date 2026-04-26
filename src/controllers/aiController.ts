@@ -2433,12 +2433,41 @@ export const chat = async (
       if (!snap?.modulePlan || !Array.isArray(snap.modulePlan) || snap.modulePlan.length < 2) {
         return;
       }
+      const existingPlan = Array.isArray((activeSession as any).modulePlan) ? (activeSession as any).modulePlan : [];
       const normalizedModulePlan = withModuleValidity(
         materializeModulePlanEntries(snap.modulePlan),
-        (activeSession as any).modulePlan
+        existingPlan
       );
-      snap.modulePlan = normalizedModulePlan;
-      (activeSession as any).modulePlan = normalizedModulePlan;
+      const mergedPlan = normalizedModulePlan.map((entry: any, idx: number) => {
+        const prev = existingPlan[idx] || {};
+        return {
+          ...entry,
+          detailedContentMarkdown:
+            String((entry as any)?.detailedContentMarkdown || '').trim() ||
+            String((prev as any)?.detailedContentMarkdown || '').trim() ||
+            undefined,
+          sections:
+            Array.isArray((entry as any)?.sections) && (entry as any).sections.length > 0
+              ? (entry as any).sections
+              : Array.isArray((prev as any)?.sections) && (prev as any).sections.length > 0
+                ? (prev as any).sections
+                : undefined,
+          quizzes:
+            Array.isArray((entry as any)?.quizzes) && (entry as any).quizzes.length > 0
+              ? (entry as any).quizzes
+              : Array.isArray((prev as any)?.quizzes) && (prev as any).quizzes.length > 0
+                ? (prev as any).quizzes
+                : undefined,
+          interactivePresentation:
+            (entry as any)?.interactivePresentation || (prev as any)?.interactivePresentation || undefined,
+          interactiveGeneratedAt:
+            (entry as any)?.interactiveGeneratedAt || (prev as any)?.interactiveGeneratedAt || undefined,
+          interactiveSourceModel:
+            String((entry as any)?.interactiveSourceModel || (prev as any)?.interactiveSourceModel || ''),
+        };
+      });
+      snap.modulePlan = mergedPlan;
+      (activeSession as any).modulePlan = mergedPlan;
       (activeSession as any).modulePlanUpdatedAt = snap.modulePlanUpdatedAt
         ? new Date(snap.modulePlanUpdatedAt)
         : new Date();
