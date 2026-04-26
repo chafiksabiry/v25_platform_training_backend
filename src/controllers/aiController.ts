@@ -2859,8 +2859,9 @@ export const chat = async (
           const nextMod = workflow.modules[workflow.currentModuleIndex];
           const nextTitle = String(nextMod?.title || '').trim();
           const nextNumber = workflow.currentModuleIndex + 1;
+          const normalizedNextTitle = nextTitle.replace(/^module\s*\d+\s*[-:—]\s*/i, '').trim();
           nextModuleLabel = nextTitle
-            ? `Module ${nextNumber} — ${nextTitle}`
+            ? `Module ${nextNumber} — ${normalizedNextTitle || nextTitle}`
             : `Module ${nextNumber}`;
         }
         if (parsedContext && typeof parsedContext === 'object') {
