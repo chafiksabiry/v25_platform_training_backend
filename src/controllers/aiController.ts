@@ -265,6 +265,9 @@ const appendTrainingReadinessBlock = async (params: {
 
   const requestedOutput = String(parsedContext?.requestedOutput || '').toLowerCase();
   const looksLikePlan = looksLikeTrainingPlanText(compactAssistant);
+  const isModuleEditIntent = /\b(modifi|modifier|change|changer|corrig|ajuste|am[ée]liore|ameliore|r[eé]écris|reecris|rewrite|update)\b[\s\S]{0,80}\b(module|contenu)\b/i.test(
+    String(userMessage || '').trim()
+  );
   const looksLikeModuleContent =
     /###\s*(📚|🧪|✅|📝)\s*|##\s*(📚|🧪|✅|📝)\s*|explication\s+(?:d[ée]taill[ée]e|approfondie)|mini\s+quiz|auto[-\s]?[eé]valuation|hands-on\s+exercise|objectifs\s+d['']apprentissage/i.test(
       compactAssistant
@@ -322,7 +325,7 @@ const appendTrainingReadinessBlock = async (params: {
       messageFr = 'Tous les modules sont validés. Vous pouvez valider la formation.';
     } else if (wf && wf.totalModules > 0 && wf.currentModuleIndex >= 0) {
       const current = wf.modules[wf.currentModuleIndex];
-      if (requestedOutput === 'module_content' || looksLikeModuleContent) {
+      if (requestedOutput === 'module_content' || looksLikeModuleContent || isModuleEditIntent) {
         actions.push({
           id: 'validate_module_content',
           label: `Valider le contenu du module ${wf.currentModuleIndex + 1}`,
@@ -350,6 +353,7 @@ const appendTrainingReadinessBlock = async (params: {
     isPlanValidated,
     readiness,
     readinessFromFallback,
+    isModuleEditIntent,
     missingModulesCount: missingModules.length,
     actions: actions.map((a) => a.id),
   });
