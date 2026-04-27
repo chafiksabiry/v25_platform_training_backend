@@ -35,6 +35,8 @@ const CHAT_VALIDATE_ALL_MODULES_CONTENT_CMD = '__VALIDATE_ALL_MODULES_CONTENT__'
 const CHAT_GENERATE_CURRENT_MODULE_CMD = '__GENERATE_CURRENT_MODULE__';
 
 const isJourneyBuilderApp = (parsed: any): boolean => String(parsed?.app || '').trim() === 'HARX Journey Builder';
+const isScriptGeneratorApp = (parsed: any): boolean =>
+  /\bscript\b/i.test(String(parsed?.app || '').trim());
 const isNaturalValidateModuleContentIntent = (message: string): boolean =>
   /\b(je\s+)?(valide|valider|validation|confirme|j['’]approuve)\b[\s\S]{0,60}\b(contenu|module)\b/i.test(
     String(message || '').trim()
@@ -2341,15 +2343,19 @@ export const chat = async (
     }
 
     const anthropicKey = req.headers['x-anthropic-key'] as string;
+    let parsedContext: any = null;
     const safeContext =
       typeof context === 'string' && context.trim().length > 0
         ? context.trim()
         : 'No additional context provided.';
-    let parsedContext: any = null;
-    try {
-      parsedContext = JSON.parse(safeContext);
-    } catch {
-      parsedContext = null;
+    if (context && typeof context === 'object' && !Array.isArray(context)) {
+      parsedContext = context;
+    } else {
+      try {
+        parsedContext = JSON.parse(safeContext);
+      } catch {
+        parsedContext = null;
+      }
     }
     const safeGigId = toObjectIdOrUndefined(gigId);
     const safeCompanyId = toObjectIdOrUndefined(companyId);
@@ -3317,18 +3323,32 @@ export const chat = async (
     const contextPlanModules = toCompactPlanModules((parsedContext as any)?.modulePlan);
     const planModulesForContent = savedPlanModules.length >= 1 ? savedPlanModules : contextPlanModules;
 
-    const prompt = [
-      'HARX conversation context:',
-      effectiveContextString,
-      gigGrounding.promptAppend,
-      savedPlanAnchor,
-      isPlanPatchRequest
-        ? `\n--- CURRENT PLAN TO PATCH (KEEP OTHER MODULES UNCHANGED) ---\n${planPatchBaseText.slice(0, 15000)}\n`
-        : '',
-      '',
-      'User message:',
-      message.trim()
-    ].join('\n');
+    const isScriptApp = isScriptGeneratorApp(parsedContext);
+    const scriptGigTitle = String(
+      parsedContext?.gigSnapshot?.title || parsedContext?.selectedGigTitle || ''
+    ).trim();
+    const scriptGigDescription = String(parsedContext?.gigSnapshot?.description || '').trim();
+    const prompt = isScriptApp
+      ? [
+          'SCRIPT CHAT INPUT:',
+          `Gig title: ${scriptGigTitle || 'N/A'}`,
+          `Gig description: ${scriptGigDescription || 'N/A'}`,
+          '',
+          'User message:',
+          message.trim(),
+        ].join('\n')
+      : [
+          'HARX conversation context:',
+          effectiveContextString,
+          gigGrounding.promptAppend,
+          savedPlanAnchor,
+          isPlanPatchRequest
+            ? `\n--- CURRENT PLAN TO PATCH (KEEP OTHER MODULES UNCHANGED) ---\n${planPatchBaseText.slice(0, 15000)}\n`
+            : '',
+          '',
+          'User message:',
+          message.trim(),
+        ].join('\n');
 
     const gigLocaleHint = isJourneyBuilderApp(parsedContext) ? inferGigLocaleHint(parsedContext) : null;
     const userLocaleHint =
@@ -3376,7 +3396,11 @@ export const chat = async (
         : '';
 
     const systemPrompt = [
-      isJourneyBuilderApp(parsedContext)
+      isScriptApp
+        ? userLocaleHint === 'en'
+          ? 'You are HARX Script Assistant. Keep responses simple and practical.'
+          : 'Tu es HARX Script Assistant. Réponses simples, directes, pratiques.'
+        : isJourneyBuilderApp(parsedContext)
         ? userLocaleHint === 'en'
           ? 'You are Professor academic (HARX Journey Builder). Write your entire reply in English: headings, bullets, explanations, quizzes, and follow-up questions. Be simple, clear, pedagogical.'
           : 'You are Professor academic (HARX Journey Builder). Write your entire reply in French: headings, bullets, explanations, quizzes, and follow-up questions. Be simple, clear, pedagogical.'
@@ -3397,6 +3421,16 @@ export const chat = async (
         : ['Do not invent company/gig context not provided by user.']),
       isFreeChatMode && requestedOutput !== 'training_plan'
         ? 'FREE CHAT MODE: natural concise assistant style. Do not force module structures unless user explicitly asks plan/training/module.'
+        : '',
+      isScriptApp
+        ? [
+            'SCRIPT CHAT MODE (STRICT):',
+            '- Base the answer ONLY on gig title and gig description provided in the input.',
+            '- Keep output simple and concise. No long discussions.',
+            '- No markdown tables, no HTML, no JSON.',
+            '- Use short actionable script text directly.',
+            '- If user asks to generate script, provide ready-to-use lines immediately.',
+          ].join('\n')
         : '',
       requestedOutput === 'training_plan'
         ? [
