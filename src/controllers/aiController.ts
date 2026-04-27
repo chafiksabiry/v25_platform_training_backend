@@ -2336,9 +2336,25 @@ export const chat = async (
   next: NextFunction
 ) => {
   try {
-    const { message, context, gigId, companyId, sessionId } = req.body || {};
+    const {
+      message,
+      context,
+      gigId,
+      companyId,
+      sessionId,
+      contexte,
+      gig,
+      typeClient,
+      langueTon,
+    } = req.body || {};
+    const inputMessage =
+      typeof message === 'string' && message.trim()
+        ? message.trim()
+        : typeof contexte === 'string' && contexte.trim()
+          ? contexte.trim()
+          : '';
 
-    if (!message || typeof message !== 'string' || !message.trim()) {
+    if (!inputMessage) {
       return res.status(400).json({ success: false, error: 'message is required' });
     }
 
@@ -2357,6 +2373,60 @@ export const chat = async (
         parsedContext = null;
       }
     }
+
+    // KB-only script mode: bypass training/session orchestration entirely.
+    // This keeps the endpoint focused on gig title + description + user message.
+    const looksLikeKbScriptPayload =
+      gig &&
+      typeof gig === 'object' &&
+      !Array.isArray(gig) &&
+      (typeof typeClient === 'string' || typeof langueTon === 'string');
+    const isKbScriptMode =
+      isScriptGeneratorApp(parsedContext) ||
+      String((parsedContext as any)?.sourceMode || '').trim().toLowerCase() === 'knowledge_base' ||
+      looksLikeKbScriptPayload;
+    if (isKbScriptMode) {
+      const scriptGigTitle = String(
+        (parsedContext as any)?.gigSnapshot?.title ||
+        (parsedContext as any)?.selectedGigTitle ||
+        gig?.title ||
+        ''
+      ).trim();
+      const scriptGigDescription = String(
+        (parsedContext as any)?.gigSnapshot?.description ||
+        gig?.description ||
+        ''
+      ).trim();
+
+      const scriptPrompt = [
+        'SCRIPT CHAT INPUT:',
+        `Gig title: ${scriptGigTitle || 'N/A'}`,
+        `Gig description: ${scriptGigDescription || 'N/A'}`,
+        '',
+        'User message:',
+        inputMessage,
+      ].join('\n');
+
+      const scriptSystemPrompt = [
+        'You are HARX KB Script Assistant.',
+        'Use ONLY the provided gig title and gig description as context.',
+        'No DISC profiling. No training plan/course/module language.',
+        'Return directly usable script lines in plain markdown text.',
+        'Keep it simple, concise, and practical.',
+      ].join('\n');
+
+      const raw = await aiService.generateWithClaude(scriptPrompt, scriptSystemPrompt, anthropicKey, 900);
+      const responseText = String(raw || '').trim();
+      return res.json({
+        success: true,
+        response: responseText || 'Je n’ai pas pu générer de script.',
+        script: responseText || 'Je n’ai pas pu générer de script.',
+        data: {
+          script: responseText || 'Je n’ai pas pu générer de script.',
+          text: responseText || 'Je n’ai pas pu générer de script.',
+        },
+      });
+    }
     const safeGigId = toObjectIdOrUndefined(gigId);
     const safeCompanyId = toObjectIdOrUndefined(companyId);
     const safeSessionId = toObjectIdOrUndefined(sessionId);
@@ -2368,7 +2438,7 @@ export const chat = async (
       activeSession = await TrainingChatSession.create({
         gigId: safeGigId,
         companyId: safeCompanyId,
-        title: buildSessionTitle(message),
+        title: buildSessionTitle(inputMessage),
         messages: [],
         lastActivityAt: new Date(),
       });
@@ -2707,7 +2777,7 @@ export const chat = async (
         (parsedContext as any).workflowState = workflowState;
       }
     }
-    const trimmedMessage = String(message || '').trim();
+    const trimmedMessage = inputMessage;
     const asksExplicitModuleCountForPlan =
       /\b(je\s+veux|g[ée]n[ée]r\w*|cr[ée]e\w*|fais|produi\w*|donne)\b[\s\S]{0,50}\b(\d+|un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix)\s+modules?\b/i.test(
         trimmedMessage
@@ -3253,11 +3323,11 @@ export const chat = async (
       isJourneyBuilderApp(parsedContext) &&
       isPlanFrozen &&
       requestedOutput === 'training_plan' &&
-      isPlanEditRequest(message.trim())
+      isPlanEditRequest(trimmedMessage)
     ) {
       const lockMsg = cannedPlanLockedMessage('fr');
       activeSession.messages.push(
-        { role: 'user', text: message.trim(), createdAt: new Date() } as any,
+        { role: 'user', text: trimmedMessage, createdAt: new Date() } as any,
         { role: 'assistant', text: lockMsg, createdAt: new Date() } as any
       );
       persistWorkflowStatusOnSessionDoc((parsedContext as any)?.workflowState || null);
@@ -3291,7 +3361,7 @@ export const chat = async (
     ) {
       const lockMsg = cannedNoValidatedPlanMessage('fr');
       activeSession.messages.push(
-        { role: 'user', text: message.trim(), createdAt: new Date() } as any,
+        { role: 'user', text: trimmedMessage, createdAt: new Date() } as any,
         { role: 'assistant', text: lockMsg, createdAt: new Date() } as any
       );
       persistWorkflowStatusOnSessionDoc((parsedContext as any)?.workflowState || null);
@@ -3335,7 +3405,7 @@ export const chat = async (
           `Gig description: ${scriptGigDescription || 'N/A'}`,
           '',
           'User message:',
-          message.trim(),
+          trimmedMessage,
         ].join('\n')
       : [
           'HARX conversation context:',
@@ -3347,13 +3417,13 @@ export const chat = async (
             : '',
           '',
           'User message:',
-          message.trim(),
+          trimmedMessage,
         ].join('\n');
 
     const gigLocaleHint = isJourneyBuilderApp(parsedContext) ? inferGigLocaleHint(parsedContext) : null;
     const userLocaleHint =
       gigLocaleHint ||
-      inferJourneyChatLocale(userTextForLocaleInference(activeSession, message.trim()));
+      inferJourneyChatLocale(userTextForLocaleInference(activeSession, trimmedMessage));
     const missingInfoQuestionPolicy =
       isPlanIntent
         ? 'TRAINING PLAN MODE: never ask questions before or after the plan. Infer missing details from available context and output the plan directly.'
@@ -3825,7 +3895,7 @@ Regenerate now with strict compliance.
         String(response || ''),
         selectedDuration,
         selectedMethodology,
-        message.trim(),
+        trimmedMessage,
         anthropicKey,
         { skip: isPlanIntent }
       );
@@ -3834,7 +3904,7 @@ Regenerate now with strict compliance.
 
       const readinessExtra = await appendTrainingReadinessBlock({
         assistantMessage: finalResponse,
-        userMessage: userTextForLocaleInference(activeSession, message.trim()),
+        userMessage: userTextForLocaleInference(activeSession, trimmedMessage),
         parsedContext,
         anthropicKey,
       });
@@ -3842,7 +3912,7 @@ Regenerate now with strict compliance.
         finalResponse = `${finalResponse}${readinessExtra}`;
       }
 
-      const userMessageText = message.trim();
+      const userMessageText = trimmedMessage;
       const assistantMessageText = finalResponse;
       await persistGeneratedModuleContent(assistantMessageText);
       activeSession.messages.push(
@@ -3916,12 +3986,12 @@ Regenerate now with strict compliance.
       }
     }
 
-    const userMessageText = message.trim();
+    const userMessageText = trimmedMessage;
     let assistantMessageText = await ensureVisualResponseContract(
       String(fullResponse || ''),
       selectedDuration,
       selectedMethodology,
-      message.trim(),
+      trimmedMessage,
       anthropicKey,
       { skip: isPlanIntent }
     );
