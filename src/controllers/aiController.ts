@@ -240,7 +240,6 @@ const generateModuleQuizzesWithClaude = async (params: {
 }): Promise<any[]> => {
   const content = String(params.markdown || '').trim();
   if (!content || content.length < 120) return [];
-  if (!params.anthropicKey) return [];
 
   const prompt = [
     'Create quiz JSON from this training module content.',
@@ -2587,11 +2586,17 @@ export const chat = async (
       const existingPlanEntry = sessionPlan[moduleIdx] || {};
       const { sections } = parseModuleSectionsFromMarkdown(cleanMarkdown);
       if (sections.length === 0) return;
-      const quizzes = await generateModuleQuizzesWithClaude({
+      const generatedQuizzes = await generateModuleQuizzesWithClaude({
         markdown: cleanMarkdown,
         moduleTitle: String(existingPlanEntry?.title || sessionPlan[moduleIdx]?.title || '').trim(),
         anthropicKey,
       });
+      const quizzes =
+        generatedQuizzes.length > 0
+          ? generatedQuizzes
+          : Array.isArray(existingPlanEntry?.quizzes)
+            ? existingPlanEntry.quizzes
+            : [];
 
       sessionPlan[moduleIdx] = {
         ...existingPlanEntry,
@@ -2625,6 +2630,12 @@ export const chat = async (
         });
       }
       const existingModule = modules[moduleIdx] || {};
+      const safeJourneyQuizzes =
+        generatedQuizzes.length > 0
+          ? generatedQuizzes
+          : Array.isArray(existingModule?.quizzes)
+            ? existingModule.quizzes
+            : [];
       modules[moduleIdx] = {
         ...existingModule,
         title:
@@ -2633,7 +2644,7 @@ export const chat = async (
           `Module ${moduleIdx + 1}`,
         description: cleanMarkdown.slice(0, 50000),
         sections,
-        quizzes,
+        quizzes: safeJourneyQuizzes,
         order: typeof existingModule?.order === 'number' ? existingModule.order : moduleIdx + 1,
       };
       (journeyDoc as any).modules = modules;
