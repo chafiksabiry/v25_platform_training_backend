@@ -419,7 +419,7 @@ class TrainingJourneyService {
       .sort({ updatedAt: -1 });
   }
 
-  /** Trainee-facing: journeys tied to a gig and visible to enrolled reps (not draft/archived). */
+  /** Rep-facing: return all journeys tied to a gig (no status filter). */
   async getPublishedJourneysByGigId(gigId: string): Promise<ITrainingJourney[]> {
     const gid = String(gigId || '').trim();
     if (!gid) return [];
@@ -429,16 +429,11 @@ class TrainingJourneyService {
       gigClauses.push({ gigId: new mongoose.Types.ObjectId(gid) });
     }
 
-    const query = {
-      $and: [
-        { $or: gigClauses },
-        { status: { $in: ['active', 'rehearsal', 'completed'] } }
-      ]
-    };
+    const query = { $or: gigClauses };
     console.log('[TrainingJourneyService:getPublishedJourneysByGigId] query', {
       requestedGigId: gid,
       hasObjectIdVariant: mongoose.Types.ObjectId.isValid(gid),
-      statuses: ['active', 'rehearsal', 'completed']
+      statuses: 'ALL'
     });
 
     const journeys = await TrainingJourney.find(query)
