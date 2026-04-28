@@ -874,7 +874,10 @@ class TrainingJourneyService {
       [`slides.${slideKey}`]: { completed }
     };
     if (input.moduleId != null && String(input.moduleId).trim()) {
-      $set.moduleId = requireObjectId(input.moduleId, 'moduleId');
+      const rawModuleId = String(input.moduleId).trim();
+      if (mongoose.Types.ObjectId.isValid(rawModuleId)) {
+        $set.moduleId = new mongoose.Types.ObjectId(rawModuleId);
+      }
     }
     if (typeof input.durationMs === 'number' && Number.isFinite(input.durationMs) && input.durationMs >= 0) {
       $set.durationMs = Math.floor(input.durationMs);
