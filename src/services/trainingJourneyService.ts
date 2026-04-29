@@ -1364,6 +1364,21 @@ class TrainingJourneyService {
           (r: any) => r?.sectionId != null && mongoose.Types.ObjectId.isValid(String(r.sectionId))
         );
       }
+      // Last-resort consistency guard:
+      // never keep a module as not_started when we already have completed sections.
+      const doneSectionCount = Array.isArray(m?.completedSections) ? m.completedSections.length : 0;
+      if (doneSectionCount > 0) {
+        const totalSections = Array.isArray(m?.sectionProgress) ? m.sectionProgress.length : 0;
+        const inferredProgress =
+          totalSections > 0 ? Math.min(100, Math.round((doneSectionCount / totalSections) * 100)) : 1;
+        const currentProgress = Number(m?.progress || 0);
+        if (!Number.isFinite(currentProgress) || currentProgress <= 0) {
+          m.progress = inferredProgress;
+        }
+        if (String(m?.status || '') === 'not_started') {
+          m.status = 'in_progress';
+        }
+      }
     }
 
     const modules = Array.from(doc.modules.values()) as any[];
