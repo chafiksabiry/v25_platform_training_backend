@@ -458,8 +458,16 @@ function computeModuleProgressAndStatus(
 
   let recomputedProgress = 0;
   if (totalSections > 0) {
-    const nDone = (current.sectionProgress || []).filter((r: any) => String(r?.status) === 'completed')
-      .length;
+    const nDone = (Array.isArray(jm.sections) ? jm.sections : []).reduce((acc: number, s: any, si: number) => {
+      const done = isSectionCompleted(
+        s,
+        si,
+        jmIdx,
+        Array.isArray(current.completedSections) ? current.completedSections : [],
+        current.sectionProgress
+      );
+      return acc + (done ? 1 : 0);
+    }, 0);
     recomputedProgress = Math.min(100, Math.round((nDone / totalSections) * 100));
   } else if (totalSections === 0 && totalQuizzes > 0) {
     recomputedProgress = allQuizzesPassed
@@ -1249,16 +1257,49 @@ class TrainingJourneyService {
           : [];
         const mergedCompletedSections = [...new Set([...currentCompletedSections, ...incomingCompletedSections])];
         current.completedSections = mergedCompletedSections.map((s) => new mongoose.Types.ObjectId(s));
+        // Self-heal legacy inconsistencies:
+        // if a section id is in completedSections, keep sectionProgress aligned as completed.
+        const completedHex = new Set(
+          current.completedSections
+            .map((s: unknown) => String(s || '').trim())
+            .filter((s: string) => mongoose.Types.ObjectId.isValid(s))
+            .map((s: string) => new mongoose.Types.ObjectId(s).toHexString())
+        );
+        if (Array.isArray(current.sectionProgress)) {
+          current.sectionProgress = current.sectionProgress.map((row: any) => {
+            const sid = progressRowMergeKey(row, 'sectionId');
+            if (!sid || !completedHex.has(sid)) return row;
+            return {
+              ...row,
+              status: 'completed',
+              updatedAt: new Date()
+            };
+          });
+        }
 
         const granularDuration = applyDur(input.sectionUpdate?.durationMs) + applyDur(input.quizUpdate?.durationMs);
         const legacyDelta =
           !input.sectionUpdate && !input.quizUpdate ? applyDur(input.durationMs) : 0;
         const deltaDuration = granularDuration + legacyDelta;
         const nextDuration = Math.max(0, Math.floor(Number(current.durationMs || 0)) + deltaDuration);
+        const explicitProgress =
+          typeof input.progress === 'number' && Number.isFinite(input.progress)
+            ? Math.max(0, Math.min(100, Math.round(input.progress)))
+            : Math.max(0, Math.min(100, Math.round(Number(current.progress || 0))));
+        const explicitStatus: 'not_started' | 'in_progress' | 'completed' =
+          input.status === 'completed'
+            ? 'completed'
+            : input.status === 'in_progress'
+              ? 'in_progress'
+              : explicitProgress > 0 || (Array.isArray(current.completedSections) && current.completedSections.length > 0)
+                ? 'in_progress'
+                : 'not_started';
 
         doc.modules.set(mId, {
           ...current,
           moduleId: mOid,
+          progress: explicitProgress,
+          status: explicitStatus,
           completedSections: current.completedSections,
           sectionProgress: current.sectionProgress,
           quizProgress: current.quizProgress,
