@@ -685,15 +685,17 @@ class TrainingJourneyService {
     const moduleTotal = Array.isArray((journey as any)?.modules) ? (journey as any).modules.length : 0;
 
     // Auto-enroll rep when they start/continue a journey from rep-side.
-    // Keeps TrainingJourney.enrolledRepIds consistent with rep_progress activity.
-    try {
-      await TrainingJourney.updateOne(
-        { _id: journeyOid, enrolledRepIds: { $ne: rid } },
-        { $addToSet: { enrolledRepIds: rid } }
-      );
-    } catch {
-      // Non-blocking: progress tracking should still work even if enrollment sync fails.
-    }
+    // Keep this strict (no silent catch) so failures are visible in logs/monitoring.
+    const enrollResult = await TrainingJourney.updateOne(
+      { _id: journeyOid },
+      { $addToSet: { enrolledRepIds: rid } }
+    );
+    console.log('[TrainingJourneyService:upsertRepProgress] auto-enroll result', {
+      journeyId: jid,
+      repId: rid,
+      matchedCount: enrollResult.matchedCount,
+      modifiedCount: enrollResult.modifiedCount
+    });
 
     const doc = await RepProgress.findOneAndUpdate(
       { repId: repOid, journeyId: journeyOid },
