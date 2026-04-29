@@ -18,6 +18,7 @@ router.post('/rep-progress', journeyController.upsertRepProgress);
 router.post('/tracking-events', journeyController.postTrainingTrackingEvent);
 router.get('/tracking-events', journeyController.listTrainingTrackingEvents);
 router.get('/rep/:repId/trainings-progress', journeyController.getTrainingProgressByRep);
+router.get('/rep/:repId/progress-summary', journeyController.getRepProgressSummary);
 router.get('/rep/:repId/slide-progress-summary', journeyController.getRepSlideProgressSummary);
 router.get('/rep/:repId/training-tracking', journeyController.listTrainingTrackingByRep);
 router.get('/journey/:journeyId/reps-progress', journeyController.getRepProgressByTraining);

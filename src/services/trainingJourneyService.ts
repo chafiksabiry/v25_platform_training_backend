@@ -735,9 +735,8 @@ class TrainingJourneyService {
   }
 
   /**
-   * Moyenne des ratios slides / formation.
-   * Si `gigId` est fourni : uniquement les formations **publiées** (active / rehearsal / completed) rattachées à ce gig.
-   * Sinon : union des parcours présents dans le tracking ou rep_progress (comportement historique).
+   * Moyenne des ratios de progression par formation, basée sur:
+   * modules + sections + quizzes complétés.
    */
   async getRepSlideProgressSummary(repId: string, gigId?: string): Promise<RepSlideProgressSummary> {
     const empty = (): RepSlideProgressSummary => ({
@@ -750,20 +749,10 @@ class TrainingJourneyService {
     });
 
     const rid = String(repId || '').trim();
-    if (!rid || !mongoose.Types.ObjectId.isValid(rid)) return empty();
-
-    const repOid = new mongoose.Types.ObjectId(rid);
+    if (!rid) return empty();
     const gid = String(gigId || '').trim();
 
-    const [trackings, progresses] = await Promise.all([
-      RepTrainingTracking.find({ repId: repOid }).lean(),
-      RepProgress.find({ repId: rid }).lean()
-    ]);
-
-    const trackingByJourney = new Map<string, (typeof trackings)[0]>();
-    for (const t of trackings) {
-      if (t?.journeyId) trackingByJourney.set(String(t.journeyId), t);
-    }
+    const progresses = await RepProgress.find({ repId: rid }).lean();
     const progressByJourney = new Map<string, (typeof progresses)[0]>();
     for (const p of progresses) {
       if (p?.journeyId) progressByJourney.set(String(p.journeyId), p);
@@ -792,9 +781,6 @@ class TrainingJourneyService {
       }
     } else {
       const journeyIds = new Set<string>();
-      for (const t of trackings) {
-        if (t?.journeyId) journeyIds.add(String(t.journeyId));
-      }
       for (const p of progresses) {
         if (p?.journeyId) journeyIds.add(String(p.journeyId));
       }
@@ -823,18 +809,6 @@ class TrainingJourneyService {
 
     for (const jid of [...jMap.keys()].sort()) {
       const doc = jMap.get(jid) ?? null;
-      let legacySlidesTotal = countSlidesOnJourney(doc);
-      const tr = trackingByJourney.get(jid);
-      const trLegacy = tr as Record<string, unknown> | undefined;
-      const metaCount =
-        trLegacy?.meta &&
-        typeof trLegacy.meta === 'object' &&
-        trLegacy.meta !== null &&
-        typeof (trLegacy.meta as { slideCount?: unknown }).slideCount === 'number'
-          ? Math.floor(Number((trLegacy.meta as { slideCount: number }).slideCount))
-          : 0;
-      if (legacySlidesTotal <= 0 && metaCount > 0) legacySlidesTotal = metaCount;
-
       const progressRow = progressByJourney.get(jid) as any;
       const progressModules = toProgressModulesLookup(progressRow?.modules);
       const journeyModules = Array.isArray((doc as any)?.modules) ? ((doc as any).modules as any[]) : [];
@@ -886,15 +860,7 @@ class TrainingJourneyService {
       const ratio = totalUnits > 0 ? completedUnits / totalUnits : 0;
       const unitsCompleted = completedUnits;
       const unitsTotal = totalUnits;
-      const currentSlideIndex =
-        legacySlidesTotal > 0
-          ? resolveCurrentSlideIndex(
-              doc,
-              tr as Record<string, unknown> | undefined,
-              progressRow,
-              legacySlidesTotal
-            )
-          : 0;
+      const currentSlideIndex = 0;
       journeys.push({
         journeyId: jid,
         journeyTitle: String(doc?.title || 'Formation'),

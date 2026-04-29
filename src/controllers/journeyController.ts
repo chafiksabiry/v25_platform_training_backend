@@ -465,8 +465,8 @@ export const getTrainingProgressByRep = asyncHandler(async (req: AuthRequest, re
   res.status(200).json({ success: true, data: rows });
 });
 
-/** GET /training_journeys/rep/:repId/slide-progress-summary — moyenne (slides vus / slides total) par formation */
-export const getRepSlideProgressSummary = asyncHandler(async (req: AuthRequest, res: Response) => {
+/** GET /training_journeys/rep/:repId/progress-summary — moyenne modules+sections+quizzes par formation */
+export const getRepProgressSummary = asyncHandler(async (req: AuthRequest, res: Response) => {
   const repId = String(req.params.repId || '').trim();
   if (!repId) {
     res.status(400).json({ success: false, error: 'repId is required' });
@@ -476,6 +476,9 @@ export const getRepSlideProgressSummary = asyncHandler(async (req: AuthRequest, 
   const summary = await trainingJourneyService.getRepSlideProgressSummary(repId, gigId || undefined);
   res.status(200).json({ success: true, data: summary });
 });
+
+// Backward-compatible alias
+export const getRepSlideProgressSummary = getRepProgressSummary;
 
 /** GET /training_journeys/journey/:journeyId/reps-progress */
 export const getRepProgressByTraining = asyncHandler(async (req: AuthRequest, res: Response) => {
