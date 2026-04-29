@@ -4,7 +4,7 @@ import TrainingJourney, { ITrainingJourney } from '../models/TrainingJourney';
 import RepTrainingTracking, {
   REP_TRAINING_TRACKING_EVENTS,
   RepTrainingTrackingEventKind
-} from '../models/rep-training-tracking';
+} from '../models/rep_training_tracking.model';
 import Rep from '../models/Rep';
 import { AppError } from '../middleware/errorHandler';
 import { ImageGenerationService } from './imageGenerationService';
