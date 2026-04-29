@@ -123,6 +123,7 @@ function resolveCurrentSlideIndex(
 export type RepSlideProgressJourneyLine = {
   journeyId: string;
   journeyTitle: string;
+  followedDurationMs: number;
   completedUnits: number;
   totalUnits: number;
   completedModules: number;
@@ -578,7 +579,7 @@ class TrainingJourneyService {
       const rep = repMap.get(repId);
       if (!rep) return null;
 
-      const progress = repProgressList.filter(p => p.repId === repId);
+      const progress = repProgressList.filter((p) => String(p.repId) === repId);
 
       let avgProgress = 0;
       let avgEngagement = 0;
@@ -649,7 +650,11 @@ class TrainingJourneyService {
     const rid = String(repId || '').trim();
     const jid = String(journeyId || '').trim();
     if (!rid || !jid) return null;
-    return await RepProgress.findOne({ repId: rid, journeyId: jid });
+    if (!mongoose.Types.ObjectId.isValid(rid) || !mongoose.Types.ObjectId.isValid(jid)) return null;
+    return await RepProgress.findOne({
+      repId: new mongoose.Types.ObjectId(rid),
+      journeyId: new mongoose.Types.ObjectId(jid)
+    });
   }
 
   async upsertRepProgress(input: {
@@ -660,23 +665,30 @@ class TrainingJourneyService {
     status?: 'not_started' | 'in_progress' | 'completed';
     completedSections?: string[];
     engagementScore?: number;
+    durationMs?: number;
   }) {
     const rid = String(input.repId || '').trim();
     const jid = String(input.journeyId || '').trim();
     if (!rid || !jid) throw new AppError('repId and journeyId are required', 400);
+    if (!mongoose.Types.ObjectId.isValid(rid) || !mongoose.Types.ObjectId.isValid(jid)) {
+      throw new AppError('repId and journeyId must be valid ObjectIds', 400);
+    }
+    const repOid = new mongoose.Types.ObjectId(rid);
+    const journeyOid = new mongoose.Types.ObjectId(jid);
 
-    const journey = await TrainingJourney.findById(jid).select('_id modules');
+    const journey = await TrainingJourney.findById(journeyOid).select('_id modules');
     const moduleTotal = Array.isArray((journey as any)?.modules) ? (journey as any).modules.length : 0;
 
     const doc = await RepProgress.findOneAndUpdate(
-      { repId: rid, journeyId: jid },
+      { repId: repOid, journeyId: journeyOid },
       {
         $setOnInsert: {
-          repId: rid,
-          journeyId: jid,
+          repId: repOid,
+          journeyId: journeyOid,
           moduleTotal,
           moduleFinished: 0,
           moduleInProgress: 0,
+          totalDurationMs: 0,
           modules: new Map()
         }
       },
@@ -686,12 +698,14 @@ class TrainingJourneyService {
     const hasModuleUpdate = !!input.moduleId;
     if (hasModuleUpdate) {
       const mId = String(input.moduleId || '').trim();
-      if (mId) {
+      if (mId && mongoose.Types.ObjectId.isValid(mId)) {
+        const mOid = new mongoose.Types.ObjectId(mId);
         const current = (doc.modules?.get(mId) as any) || {
-          moduleId: mId,
+          moduleId: mOid,
           progress: 0,
           status: 'not_started',
           completedSections: [],
+          durationMs: 0,
           quizScores: []
         };
         const nextProgress = Math.max(0, Math.min(100, Math.round(Number(input.progress ?? current.progress ?? 0))));
@@ -699,21 +713,33 @@ class TrainingJourneyService {
           input.status ||
           (nextProgress >= 100 ? 'completed' : nextProgress > 0 ? 'in_progress' : 'not_started');
         const nextCompletedSections = Array.isArray(input.completedSections)
-          ? input.completedSections.map((s) => String(s))
+          ? input.completedSections
+              .map((s) => String(s || '').trim())
+              .filter((s) => mongoose.Types.ObjectId.isValid(s))
+              .map((s) => new mongoose.Types.ObjectId(s))
           : current.completedSections || [];
+        const deltaDuration =
+          typeof input.durationMs === 'number' && Number.isFinite(input.durationMs) && input.durationMs > 0
+            ? Math.floor(input.durationMs)
+            : 0;
+        const nextDuration = Math.max(0, Math.floor(Number(current.durationMs || 0)) + deltaDuration);
 
         doc.modules.set(mId, {
           ...current,
-          moduleId: mId,
+          moduleId: mOid,
           progress: nextProgress,
           status: nextStatus,
-          completedSections: nextCompletedSections
+          completedSections: nextCompletedSections,
+          durationMs: nextDuration
         });
       }
     }
 
     if (typeof input.engagementScore === 'number' && Number.isFinite(input.engagementScore)) {
       doc.engagementScore = Math.max(0, Math.min(100, Math.round(input.engagementScore)));
+    }
+    if (typeof input.durationMs === 'number' && Number.isFinite(input.durationMs) && input.durationMs > 0) {
+      doc.totalDurationMs = Math.max(0, Math.floor(Number(doc.totalDurationMs || 0)) + Math.floor(input.durationMs));
     }
     doc.lastAccessed = new Date();
 
@@ -731,7 +757,8 @@ class TrainingJourneyService {
   async getTrainingProgressByRep(repId: string) {
     const rid = String(repId || '').trim();
     if (!rid) return [];
-    return await RepProgress.find({ repId: rid }).sort({ updatedAt: -1 });
+    if (!mongoose.Types.ObjectId.isValid(rid)) return [];
+    return await RepProgress.find({ repId: new mongoose.Types.ObjectId(rid) }).sort({ updatedAt: -1 });
   }
 
   /**
@@ -749,10 +776,11 @@ class TrainingJourneyService {
     });
 
     const rid = String(repId || '').trim();
-    if (!rid) return empty();
+    if (!rid || !mongoose.Types.ObjectId.isValid(rid)) return empty();
+    const repOid = new mongoose.Types.ObjectId(rid);
     const gid = String(gigId || '').trim();
 
-    const progresses = await RepProgress.find({ repId: rid }).lean();
+    const progresses = await RepProgress.find({ repId: repOid }).lean();
     const progressByJourney = new Map<string, (typeof progresses)[0]>();
     for (const p of progresses) {
       if (p?.journeyId) progressByJourney.set(String(p.journeyId), p);
@@ -864,6 +892,7 @@ class TrainingJourneyService {
       journeys.push({
         journeyId: jid,
         journeyTitle: String(doc?.title || 'Formation'),
+        followedDurationMs: Math.max(0, Math.floor(Number(progressRow?.totalDurationMs || 0))),
         completedUnits,
         totalUnits,
         completedModules,
@@ -903,7 +932,8 @@ class TrainingJourneyService {
   async getRepProgressByTraining(journeyId: string) {
     const jid = String(journeyId || '').trim();
     if (!jid) return [];
-    return await RepProgress.find({ journeyId: jid }).sort({ updatedAt: -1 });
+    if (!mongoose.Types.ObjectId.isValid(jid)) return [];
+    return await RepProgress.find({ journeyId: new mongoose.Types.ObjectId(jid) }).sort({ updatedAt: -1 });
   }
 
   async recordTrainingTrackingEvent(input: {

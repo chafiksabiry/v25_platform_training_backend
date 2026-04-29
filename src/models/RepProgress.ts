@@ -1,12 +1,13 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IModuleProgress {
-  moduleId: string;
+  moduleId: mongoose.Types.ObjectId;
   progress: number;
   status: string;
-  completedSections: string[];
+  completedSections: mongoose.Types.ObjectId[];
+  durationMs?: number;
   quizScores: Array<{
-    quizId: string;
+    quizId: mongoose.Types.ObjectId;
     score: number;
     attempts: number;
     passed: boolean;
@@ -14,13 +15,14 @@ export interface IModuleProgress {
 }
 
 export interface IRepProgress extends Document {
-  repId: string;
-  journeyId: string;
+  repId: mongoose.Types.ObjectId;
+  journeyId: mongoose.Types.ObjectId;
   moduleTotal: number;
   moduleFinished: number;
   moduleInProgress: number;
   modules: Map<string, IModuleProgress>;
   engagementScore: number;
+  totalDurationMs: number;
   lastAccessed?: Date;
   finalExamScore?: number;
   finalExamPassed?: boolean;
@@ -31,16 +33,17 @@ export interface IRepProgress extends Document {
 
 const moduleProgressSchema = new Schema(
   {
-    moduleId: { type: String, required: true },
+    moduleId: { type: Schema.Types.ObjectId, required: true },
     progress: { type: Number, default: 0, min: 0, max: 100 },
     status: {
       type: String,
       default: 'not_started',
       enum: ['not_started', 'in_progress', 'completed']
     },
-    completedSections: [{ type: String }],
+    completedSections: [{ type: Schema.Types.ObjectId }],
+    durationMs: { type: Number, default: 0, min: 0 },
     quizScores: [{
-      quizId: { type: String, required: true },
+      quizId: { type: Schema.Types.ObjectId, required: true },
       score: { type: Number, default: 0 },
       attempts: { type: Number, default: 0 },
       passed: { type: Boolean, default: false }
@@ -52,12 +55,12 @@ const moduleProgressSchema = new Schema(
 const repProgressSchema = new Schema<IRepProgress>(
   {
     repId: {
-      type: String,
+      type: Schema.Types.ObjectId,
       required: true,
       ref: 'Rep'
     },
     journeyId: {
-      type: String,
+      type: Schema.Types.ObjectId,
       required: true,
       ref: 'TrainingJourney'
     },
@@ -84,6 +87,11 @@ const repProgressSchema = new Schema<IRepProgress>(
       min: 0,
       max: 100
     },
+    totalDurationMs: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
     lastAccessed: {
       type: Date
     },
@@ -102,7 +110,8 @@ const repProgressSchema = new Schema<IRepProgress>(
   },
   {
     timestamps: true,
-    versionKey: false
+    versionKey: false,
+    collection: 'rep_progress'
   }
 );
 

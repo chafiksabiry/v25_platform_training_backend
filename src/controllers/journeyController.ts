@@ -449,7 +449,8 @@ export const upsertRepProgress = asyncHandler(async (req: AuthRequest, res: Resp
     progress: typeof payload.progress === 'number' ? payload.progress : undefined,
     status: payload.status,
     completedSections: Array.isArray(payload.completedSections) ? payload.completedSections : undefined,
-    engagementScore: typeof payload.engagementScore === 'number' ? payload.engagementScore : undefined
+    engagementScore: typeof payload.engagementScore === 'number' ? payload.engagementScore : undefined,
+    durationMs: typeof payload.durationMs === 'number' ? payload.durationMs : undefined
   });
   res.status(200).json({ success: true, data: updated });
 });
