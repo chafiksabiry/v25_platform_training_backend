@@ -573,6 +573,43 @@ function syncAllModuleProgressStatusFromJourney(
   }
 }
 
+function inferCurrentSlideIndexFromRepProgress(doc: any, jModules: any[]): number {
+  if (!Array.isArray(jModules) || jModules.length === 0) return 0;
+  const modulesMap = toProgressModulesLookup(doc?.modules);
+  let idx = 0; // overview slide
+
+  for (let mi = 0; mi < jModules.length; mi++) {
+    const jm = jModules[mi];
+    const moduleId = normalizeAnyId(jm?._id) || normalizeAnyId(jm?.id) || String(mi);
+    const mp = modulesMap[moduleId] || modulesMap[String(mi)] || null;
+
+    // module intro slide
+    idx += 1;
+
+    const sections = Array.isArray(jm?.sections) ? jm.sections : [];
+    const quizzes = Array.isArray(jm?.quizzes) ? jm.quizzes : [];
+    const hasQuizGroup = quizzes.some((q: any) => Array.isArray(q?.questions) && q.questions.length > 0);
+
+    // First unfinished section in this module
+    for (let si = 0; si < sections.length; si++) {
+      const done = isSectionCompleted(sections[si], si, mi, mp?.completedSections || [], mp?.sectionProgress);
+      if (!done) return Math.max(0, idx);
+      idx += 1;
+    }
+
+    // Quiz group slide (1 slide by module if any quiz has questions)
+    if (hasQuizGroup) {
+      const anyPendingQuiz = quizzes.some(
+        (q: any, qi: number) => !isQuizCompleted(q, qi, mi, mp?.quizScores || [], mp?.quizProgress)
+      );
+      if (anyPendingQuiz) return Math.max(0, idx);
+      idx += 1;
+    }
+  }
+
+  return Math.max(0, idx);
+}
+
 class TrainingJourneyService {
   private resolveTrainingLogo(journey: any): { type: 'icon' | 'image'; value: string } {
     const explicitType = String(journey?.trainingLogo?.type || '').trim().toLowerCase();
@@ -1319,6 +1356,8 @@ class TrainingJourneyService {
     }
     if (typeof input.currentSlideIndex === 'number' && Number.isFinite(input.currentSlideIndex)) {
       doc.currentSlideIndex = Math.max(0, Math.floor(input.currentSlideIndex));
+    } else {
+      doc.currentSlideIndex = inferCurrentSlideIndexFromRepProgress(doc, jModules);
     }
     if (input.currentModuleId && mongoose.Types.ObjectId.isValid(input.currentModuleId)) {
       doc.currentModuleId = new mongoose.Types.ObjectId(input.currentModuleId);
