@@ -198,14 +198,15 @@ function toProgressModulesLookup(raw: unknown): Record<string, any> {
   if (!raw) return {};
   if (Array.isArray(raw)) {
     const out: Record<string, any> = {};
-    for (const row of raw) {
-      const moduleId = normalizeAnyId((row as any)?.moduleId);
-      if (!moduleId) continue;
-      const sections = Array.isArray((row as any)?.sections) ? (row as any).sections : [];
-      const quizzes = Array.isArray((row as any)?.quizzes) ? (row as any).quizzes : [];
-      out[moduleId] = {
+    const arr = raw as any[];
+    arr.forEach((row, index) => {
+      const moduleId = normalizeAnyId(row?.moduleId);
+      if (!moduleId) return;
+      const sections = Array.isArray(row?.sections) ? row.sections : [];
+      const quizzes = Array.isArray(row?.quizzes) ? row.quizzes : [];
+      const entry = {
         ...row,
-        progress: Number((row as any)?.progressPercentage || 0),
+        progress: Number(row?.progressPercentage || 0),
         completedSections: sections
           .filter((s: any) => String(s?.status) === 'completed')
           .map((s: any) => s?.sectionId),
@@ -223,7 +224,10 @@ function toProgressModulesLookup(raw: unknown): Record<string, any> {
           passed: !!q?.passed
         }))
       };
-    }
+      out[moduleId] = entry;
+      /** Repère le même module par index si le journey n’expose pas le même id que `moduleId` côté tracking. */
+      out[String(index)] = entry;
+    });
     return out;
   }
   if (raw instanceof Map) {
@@ -261,9 +265,8 @@ function quizProgressPassedKeys(rows: unknown): Set<string> {
   for (const row of rows) {
     if (!row || typeof row !== 'object') continue;
     const r = row as { quizKey?: unknown; status?: unknown; passed?: unknown };
-    const ok =
-      String(r.status || '') === 'passed' ||
-      (r as { passed?: boolean }).passed === true;
+    const st = String(r.status || '');
+    const ok = st === 'passed' || st === 'completed' || (r as { passed?: boolean }).passed === true;
     if (ok && r.quizKey != null) out.add(String(r.quizKey).trim());
   }
   return out;
@@ -718,7 +721,10 @@ function recomputeModuleAndCourseProgress(tracking: any): any {
   });
   const completedModules = modules.filter((m: any) => m.status === 'completed').length;
   tracking.completedModules = completedModules;
-  tracking.progressPercentage = modules.length > 0 ? Math.round((completedModules / modules.length) * 100) : 0;
+  /** Pourcentage formation = moyenne des % modules (sections+quiz), pas seulement « modules entièrement finis ». */
+  const sumModulePct = modules.reduce((acc: number, m: any) => acc + Number(m?.progressPercentage || 0), 0);
+  tracking.progressPercentage =
+    modules.length > 0 ? Math.min(100, Math.round(sumModulePct / modules.length)) : 0;
   tracking.status =
     completedModules >= modules.length && modules.length > 0
       ? 'completed'
@@ -1536,7 +1542,8 @@ class TrainingJourneyService {
         moduleTotal: Number(row.totalModules || moduleRows.length || 0),
         moduleFinished: moduleRows.filter((m: any) => String(m?.status) === 'completed').length,
         moduleInProgress: moduleRows.filter((m: any) => String(m?.status) === 'in_progress').length,
-        engagementScore: Number(row.engagementScore || row.progressPercentage || 0),
+        progressPercentage: Math.min(100, Math.round(Number(row.progressPercentage || 0))),
+        engagementScore: Number(row.engagementScore || 0),
         lastAccessed: row.updatedAt,
         currentSlideIndex: Number(row.slideIndex || 0),
         totalDurationMs: Number(row.durationMs || 0),
