@@ -17,6 +17,12 @@ function requireObjectId(raw: unknown, label: string): mongoose.Types.ObjectId {
   return new mongoose.Types.ObjectId(s);
 }
 
+function optionalObjectId(raw: unknown): mongoose.Types.ObjectId | undefined {
+  const s = String(raw ?? '').trim();
+  if (!s || !mongoose.Types.ObjectId.isValid(s)) return undefined;
+  return new mongoose.Types.ObjectId(s);
+}
+
 function countSlidesOnJourney(j: { presentation?: { slides?: unknown } } | null | undefined): number {
   const slides = j?.presentation?.slides;
   return Array.isArray(slides) ? slides.length : 0;
@@ -1170,9 +1176,10 @@ class TrainingJourneyService {
     });
   }
 
-  async getStructuredProgress(repId: string, courseId: string) {
+  async getStructuredProgress(repId: string, courseId: string, opts?: { repEnrolledId?: string }) {
     const repOid = mustObjectId(repId, 'repId');
     const courseOid = mustObjectId(courseId, 'courseId');
+    const repEnrolledOid = optionalObjectId(opts?.repEnrolledId);
     const journey = await TrainingJourney.findById(courseOid).select('_id modules');
     if (!journey) throw new AppError('Journey not found', 404);
     const journeyModules = Array.isArray((journey as any).modules) ? (journey as any).modules : [];
@@ -1180,6 +1187,7 @@ class TrainingJourneyService {
     if (!tracking) {
       tracking = await RepTrainingTracking.create({
         repId: repOid,
+        ...(repEnrolledOid ? { repEnrolledId: repEnrolledOid } : {}),
         courseId: courseOid,
         journeyId: courseOid,
         status: 'pending',
@@ -1188,6 +1196,8 @@ class TrainingJourneyService {
         completedModules: 0,
         totalModules: journeyModules.length
       });
+    } else if (repEnrolledOid && !(tracking as { repEnrolledId?: mongoose.Types.ObjectId }).repEnrolledId) {
+      (tracking as { repEnrolledId?: mongoose.Types.ObjectId }).repEnrolledId = repEnrolledOid;
     }
     normalizeTrackingWithJourney(tracking, journeyModules);
     if (tracking.modules.length > 0) {
@@ -1204,8 +1214,16 @@ class TrainingJourneyService {
     return tracking;
   }
 
-  async startSection(input: { repId: string; courseId: string; moduleId: string; sectionId: string }) {
-    const tracking = await this.getStructuredProgress(input.repId, input.courseId);
+  async startSection(input: {
+    repId: string;
+    courseId: string;
+    moduleId: string;
+    sectionId: string;
+    repEnrolledId?: string;
+  }) {
+    const tracking = await this.getStructuredProgress(input.repId, input.courseId, {
+      repEnrolledId: input.repEnrolledId
+    });
     const moduleId = String(input.moduleId || '').trim();
     const sectionId = String(input.sectionId || '').trim();
     const module = tracking.modules.find((m: any) => String(m.moduleId) === moduleId);
@@ -1220,8 +1238,16 @@ class TrainingJourneyService {
     return tracking;
   }
 
-  async completeSection(input: { repId: string; courseId: string; moduleId: string; sectionId: string }) {
-    const tracking = await this.getStructuredProgress(input.repId, input.courseId);
+  async completeSection(input: {
+    repId: string;
+    courseId: string;
+    moduleId: string;
+    sectionId: string;
+    repEnrolledId?: string;
+  }) {
+    const tracking = await this.getStructuredProgress(input.repId, input.courseId, {
+      repEnrolledId: input.repEnrolledId
+    });
     const moduleId = String(input.moduleId || '').trim();
     const sectionId = String(input.sectionId || '').trim();
     const module = tracking.modules.find((m: any) => String(m.moduleId) === moduleId);
@@ -1243,8 +1269,11 @@ class TrainingJourneyService {
     moduleId: string;
     quizId: string;
     answers: number[];
+    repEnrolledId?: string;
   }) {
-    const tracking = await this.getStructuredProgress(input.repId, input.courseId);
+    const tracking = await this.getStructuredProgress(input.repId, input.courseId, {
+      repEnrolledId: input.repEnrolledId
+    });
     const moduleId = String(input.moduleId || '').trim();
     const quizId = String(input.quizId || '').trim();
     const module = tracking.modules.find((m: any) => String(m.moduleId) === moduleId);
@@ -1291,6 +1320,7 @@ class TrainingJourneyService {
   async upsertRepProgress(input: {
     repId: string;
     journeyId: string;
+    repEnrolledId?: string;
     moduleId?: string;
     progress?: number;
     status?: 'not_started' | 'in_progress' | 'completed';
@@ -1333,7 +1363,9 @@ class TrainingJourneyService {
     const journeyOid = new mongoose.Types.ObjectId(jid);
     await TrainingJourney.updateOne({ _id: journeyOid }, { $addToSet: { enrolledRepIds: repOid } });
 
-    const tracking = await this.getStructuredProgress(rid, jid);
+    const tracking = await this.getStructuredProgress(rid, jid, {
+      repEnrolledId: input.repEnrolledId
+    });
     const moduleId = String(input.moduleId || '').trim();
     const moduleRow = tracking.modules.find((m: any) => String(m?.moduleId) === moduleId);
     if (moduleRow && moduleRow.status === 'pending') moduleRow.status = 'in_progress';

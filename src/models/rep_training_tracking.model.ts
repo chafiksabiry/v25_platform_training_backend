@@ -51,6 +51,8 @@ export interface IModuleProgress {
 
 export interface IUserProgress extends Document {
   repId: mongoose.Types.ObjectId;
+  /** Optional link to enrollment doc (e.g. gig-agent); progress row is still keyed by repId + courseId. */
+  repEnrolledId?: mongoose.Types.ObjectId;
   courseId: mongoose.Types.ObjectId;
   journeyId?: mongoose.Types.ObjectId;
   event?: RepTrainingTrackingEventKind | string;
@@ -108,6 +110,7 @@ const moduleProgressSchema = new Schema<IModuleProgress>(
 const userProgressSchema = new Schema<IUserProgress>(
   {
     repId: { type: Schema.Types.ObjectId, required: true, index: true },
+    repEnrolledId: { type: Schema.Types.ObjectId, index: true, sparse: true },
     courseId: { type: Schema.Types.ObjectId, required: true, index: true, ref: 'TrainingJourney' },
     journeyId: { type: Schema.Types.ObjectId, index: true, ref: 'TrainingJourney' },
     event: { type: String, enum: REP_TRAINING_TRACKING_EVENTS },
@@ -132,6 +135,5 @@ const userProgressSchema = new Schema<IUserProgress>(
 
 userProgressSchema.index({ repId: 1, courseId: 1 }, { unique: true });
 userProgressSchema.index({ repId: 1, journeyId: 1 }, { unique: true, sparse: true });
-userProgressSchema.index({ journeyId: 1 });
 
 export default mongoose.model<IUserProgress>('RepTrainingTracking', userProgressSchema);

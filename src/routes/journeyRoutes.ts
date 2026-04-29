@@ -14,6 +14,10 @@ router.get('/trainer/companyId/:companyId', journeyController.getTrainerDashboar
 router.get('/status/:status', journeyController.getJourneysByStatus);
 // Must be before /:id so static segments are not parsed as Mongo ids
 router.get('/rep-progress', journeyController.getRepProgress);
+router.get('/progress/:repId/:courseId', journeyController.getStructuredProgress);
+router.post('/section/start', journeyController.startSectionProgress);
+router.post('/section/complete', journeyController.completeSectionProgress);
+router.post('/quiz/submit', journeyController.submitQuizProgress);
 router.post('/rep-progress', journeyController.upsertRepProgress);
 router.post('/tracking-events', journeyController.postTrainingTrackingEvent);
 router.get('/tracking-events', journeyController.listTrainingTrackingEvents);

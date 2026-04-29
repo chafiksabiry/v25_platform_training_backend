@@ -445,15 +445,18 @@ export const getRepProgress = asyncHandler(async (req: AuthRequest, res: Respons
   res.status(200).json({ success: true, data: progress });
 });
 
-/** GET /progress/:repId/:courseId */
+/** GET /progress/:repId/:courseId — query optionnel `repEnrolledId` pour renseigner le lien inscription. */
 export const getStructuredProgress = asyncHandler(async (req: AuthRequest, res: Response) => {
   const repId = String(req.params.repId || '').trim();
   const courseId = String(req.params.courseId || '').trim();
+  const repEnrolledId = String(req.query.repEnrolledId || '').trim();
   if (!repId || !courseId) {
     res.status(400).json({ success: false, error: 'repId and courseId are required' });
     return;
   }
-  const progress = await trainingJourneyService.getStructuredProgress(repId, courseId);
+  const progress = await trainingJourneyService.getStructuredProgress(repId, courseId, {
+    repEnrolledId: repEnrolledId || undefined
+  });
   res.status(200).json({ success: true, data: progress });
 });
 
@@ -464,7 +467,8 @@ export const startSectionProgress = asyncHandler(async (req: AuthRequest, res: R
     repId: String(payload.repId || '').trim(),
     courseId: String(payload.courseId || payload.journeyId || '').trim(),
     moduleId: String(payload.moduleId || '').trim(),
-    sectionId: String(payload.sectionId || '').trim()
+    sectionId: String(payload.sectionId || '').trim(),
+    repEnrolledId: String(payload.repEnrolledId || '').trim() || undefined
   });
   res.status(200).json({ success: true, data: progress });
 });
@@ -476,7 +480,8 @@ export const completeSectionProgress = asyncHandler(async (req: AuthRequest, res
     repId: String(payload.repId || '').trim(),
     courseId: String(payload.courseId || payload.journeyId || '').trim(),
     moduleId: String(payload.moduleId || '').trim(),
-    sectionId: String(payload.sectionId || '').trim()
+    sectionId: String(payload.sectionId || '').trim(),
+    repEnrolledId: String(payload.repEnrolledId || '').trim() || undefined
   });
   res.status(200).json({ success: true, data: progress });
 });
@@ -489,7 +494,8 @@ export const submitQuizProgress = asyncHandler(async (req: AuthRequest, res: Res
     courseId: String(payload.courseId || payload.journeyId || '').trim(),
     moduleId: String(payload.moduleId || '').trim(),
     quizId: String(payload.quizId || '').trim(),
-    answers: Array.isArray(payload.answers) ? payload.answers.map((x: unknown) => Number(x)) : []
+    answers: Array.isArray(payload.answers) ? payload.answers.map((x: unknown) => Number(x)) : [],
+    repEnrolledId: String(payload.repEnrolledId || '').trim() || undefined
   });
   res.status(200).json({ success: true, data: result });
 });
@@ -502,6 +508,7 @@ export const upsertRepProgress = asyncHandler(async (req: AuthRequest, res: Resp
   const updated = await trainingJourneyService.upsertRepProgress({
     repId: String(payload.repId || ''),
     journeyId: String(payload.journeyId || ''),
+    repEnrolledId: String(payload.repEnrolledId || '').trim() || undefined,
     moduleId: payload.moduleId ? String(payload.moduleId) : undefined,
     progress: typeof payload.progress === 'number' ? payload.progress : undefined,
     status: payload.status,
