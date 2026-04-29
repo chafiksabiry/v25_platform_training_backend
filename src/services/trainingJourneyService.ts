@@ -1074,6 +1074,7 @@ class TrainingJourneyService {
   async upsertRepProgress(input: {
     repId: string;
     journeyId: string;
+    startJourney?: boolean;
     moduleId?: string;
     progress?: number;
     status?: 'not_started' | 'in_progress' | 'completed';
@@ -1148,6 +1149,19 @@ class TrainingJourneyService {
     );
 
     bootstrapAllJourneyModulesOnRepProgressDoc(doc, jModules);
+    if (input.startJourney === true) {
+      // User clicked "Commencer": start from first actionable slide (1 = first after overview).
+      if (
+        typeof doc.currentSlideIndex !== 'number' ||
+        !Number.isFinite(doc.currentSlideIndex) ||
+        doc.currentSlideIndex <= 0
+      ) {
+        doc.currentSlideIndex = 1;
+      }
+      if (!doc.lastAccessed) {
+        doc.lastAccessed = new Date();
+      }
+    }
 
     const hasModuleUpdate = !!input.moduleId;
     if (hasModuleUpdate) {

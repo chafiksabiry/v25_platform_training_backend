@@ -453,6 +453,7 @@ export const upsertRepProgress = asyncHandler(async (req: AuthRequest, res: Resp
   const updated = await trainingJourneyService.upsertRepProgress({
     repId: String(payload.repId || ''),
     journeyId: String(payload.journeyId || ''),
+    startJourney: payload.startJourney === true,
     moduleId: payload.moduleId ? String(payload.moduleId) : undefined,
     progress: typeof payload.progress === 'number' ? payload.progress : undefined,
     status: payload.status,
