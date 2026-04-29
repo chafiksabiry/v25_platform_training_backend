@@ -717,12 +717,19 @@ class TrainingJourneyService {
         const nextStatus =
           input.status ||
           (nextProgress >= 100 ? 'completed' : nextProgress > 0 ? 'in_progress' : 'not_started');
-        const nextCompletedSections = Array.isArray(input.completedSections)
+        const currentCompletedSections = Array.isArray(current.completedSections)
+          ? current.completedSections
+              .map((s: unknown) => String(s || '').trim())
+              .filter((s: string) => mongoose.Types.ObjectId.isValid(s))
+          : [];
+        const incomingCompletedSections = Array.isArray(input.completedSections)
           ? input.completedSections
               .map((s) => String(s || '').trim())
               .filter((s) => mongoose.Types.ObjectId.isValid(s))
-              .map((s) => new mongoose.Types.ObjectId(s))
-          : current.completedSections || [];
+          : [];
+        // Important: never overwrite with a shorter/stale list from concurrent requests.
+        const mergedCompletedSections = [...new Set([...currentCompletedSections, ...incomingCompletedSections])];
+        const nextCompletedSections = mergedCompletedSections.map((s) => new mongoose.Types.ObjectId(s));
         const deltaDuration =
           typeof input.durationMs === 'number' && Number.isFinite(input.durationMs) && input.durationMs > 0
             ? Math.floor(input.durationMs)
