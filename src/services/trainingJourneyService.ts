@@ -123,6 +123,14 @@ function resolveCurrentSlideIndex(
 export type RepSlideProgressJourneyLine = {
   journeyId: string;
   journeyTitle: string;
+  completedUnits: number;
+  totalUnits: number;
+  completedModules: number;
+  totalModules: number;
+  completedSections: number;
+  totalSections: number;
+  completedQuizzes: number;
+  totalQuizzes: number;
   slidesSeen: number;
   slidesTotal: number;
   /** slidesSeen / slidesTotal (0 si pas de slides) */
@@ -144,6 +152,65 @@ export type RepSlideProgressSummary = {
   /** Texte explicite pour l’UI */
   formulaHuman: string;
 };
+
+function normalizeAnyId(raw: unknown): string {
+  if (raw == null) return '';
+  if (typeof raw === 'string') return raw.trim();
+  if (typeof raw === 'object' && raw !== null) {
+    if ('$oid' in raw) return String((raw as { $oid?: unknown }).$oid || '').trim();
+    if ('_id' in raw) return normalizeAnyId((raw as { _id?: unknown })._id);
+    if ('id' in raw) return normalizeAnyId((raw as { id?: unknown }).id);
+  }
+  return String(raw).trim();
+}
+
+function toProgressModulesLookup(raw: unknown): Record<string, any> {
+  if (!raw) return {};
+  if (raw instanceof Map) {
+    const out: Record<string, any> = {};
+    for (const [k, v] of raw.entries()) out[String(k)] = v;
+    return out;
+  }
+  if (typeof raw === 'object') return raw as Record<string, any>;
+  return {};
+}
+
+function isSectionCompleted(section: any, sectionIdx: number, completedSectionsRaw: unknown[]): boolean {
+  const done = new Set(
+    (Array.isArray(completedSectionsRaw) ? completedSectionsRaw : [])
+      .map((x) => String(x || '').trim())
+      .filter(Boolean)
+  );
+  if (done.size === 0) return false;
+  const candidates = [
+    normalizeAnyId(section?._id),
+    normalizeAnyId(section?.id),
+    String(section?.title || '').trim(),
+    `section-${sectionIdx}`,
+    String(sectionIdx)
+  ].filter(Boolean);
+  return candidates.some((c) => done.has(c));
+}
+
+function isQuizCompleted(quiz: any, quizIdx: number, quizScoresRaw: unknown[]): boolean {
+  const passed = Array.isArray(quizScoresRaw)
+    ? quizScoresRaw.filter((q) => q && typeof q === 'object' && (q as { passed?: boolean }).passed === true)
+    : [];
+  if (passed.length === 0) return false;
+  const passedIds = new Set(
+    passed
+      .map((q: any) => String(q?.quizId || '').trim())
+      .filter(Boolean)
+  );
+  const candidates = [
+    normalizeAnyId(quiz?._id),
+    normalizeAnyId(quiz?.id),
+    String(quiz?.title || '').trim(),
+    `quiz-${quizIdx}`,
+    String(quizIdx)
+  ].filter(Boolean);
+  return candidates.some((c) => passedIds.has(c));
+}
 
 class TrainingJourneyService {
   private resolveTrainingLogo(journey: any): { type: 'icon' | 'image'; value: string } {
@@ -293,6 +360,9 @@ class TrainingJourneyService {
       }
       if (journeyData.modules) {
         existing.markModified('modules');
+      }
+      if (journeyData.methodologyData !== undefined) {
+        existing.markModified('methodologyData');
       }
 
       await existing.save();
@@ -699,7 +769,12 @@ class TrainingJourneyService {
       if (p?.journeyId) progressByJourney.set(String(p.journeyId), p);
     }
 
-    type JourneyDocLite = { _id: unknown; title?: unknown; presentation?: { slides?: unknown } };
+    type JourneyDocLite = {
+      _id: unknown;
+      title?: unknown;
+      presentation?: { slides?: unknown };
+      modules?: unknown;
+    };
     let journeyDocs: JourneyDocLite[] = [];
 
     if (gid) {
@@ -707,7 +782,8 @@ class TrainingJourneyService {
       journeyDocs = published.map((j: any) => ({
         _id: j._id,
         title: j.title,
-        presentation: j.presentation
+        presentation: j.presentation,
+        modules: j.modules
       }));
       if (journeyDocs.length === 0) {
         const e = empty();
@@ -732,7 +808,9 @@ class TrainingJourneyService {
       const oids = [...journeyIds]
         .filter((id) => mongoose.Types.ObjectId.isValid(id))
         .map((id) => new mongoose.Types.ObjectId(id));
-      const found = await TrainingJourney.find({ _id: { $in: oids } }).select('title presentation').lean();
+      const found = await TrainingJourney.find({ _id: { $in: oids } })
+        .select('title presentation modules')
+        .lean();
       journeyDocs = found as JourneyDocLite[];
     }
 
@@ -745,7 +823,7 @@ class TrainingJourneyService {
 
     for (const jid of [...jMap.keys()].sort()) {
       const doc = jMap.get(jid) ?? null;
-      let slidesTotal = countSlidesOnJourney(doc);
+      let legacySlidesTotal = countSlidesOnJourney(doc);
       const tr = trackingByJourney.get(jid);
       const trLegacy = tr as Record<string, unknown> | undefined;
       const metaCount =
@@ -755,36 +833,81 @@ class TrainingJourneyService {
         typeof (trLegacy.meta as { slideCount?: unknown }).slideCount === 'number'
           ? Math.floor(Number((trLegacy.meta as { slideCount: number }).slideCount))
           : 0;
-      if (slidesTotal <= 0 && metaCount > 0) slidesTotal = metaCount;
+      if (legacySlidesTotal <= 0 && metaCount > 0) legacySlidesTotal = metaCount;
 
-      let slidesSeen = 0;
-      if (slidesTotal > 0) {
-        const completedFromMap = tr ? countCompletedInTrackingSlides(tr as Record<string, unknown>) : 0;
-        if (completedFromMap > 0) {
-          slidesSeen = Math.min(completedFromMap, slidesTotal);
-        } else if (trLegacy && typeof trLegacy.slideIndex === 'number') {
-          const si = trLegacy.slideIndex;
-          if (si >= 0) slidesSeen = Math.min(Math.floor(si) + 1, slidesTotal);
+      const progressRow = progressByJourney.get(jid) as any;
+      const progressModules = toProgressModulesLookup(progressRow?.modules);
+      const journeyModules = Array.isArray((doc as any)?.modules) ? ((doc as any).modules as any[]) : [];
+
+      const totalModules = journeyModules.length;
+      const totalSections = journeyModules.reduce(
+        (acc, m) => acc + (Array.isArray(m?.sections) ? m.sections.length : 0),
+        0
+      );
+      const totalQuizzes = journeyModules.reduce(
+        (acc, m) => acc + (Array.isArray(m?.quizzes) ? m.quizzes.length : 0),
+        0
+      );
+
+      let completedModules = 0;
+      let completedSections = 0;
+      let completedQuizzes = 0;
+
+      journeyModules.forEach((m, mi) => {
+        const moduleId = normalizeAnyId(m?._id) || normalizeAnyId(m?.id) || String(mi);
+        const mp = progressModules[moduleId] || progressModules[String(mi)] || null;
+        const moduleCompleted = !!mp && (mp.status === 'completed' || Number(mp.progress) >= 100);
+        if (moduleCompleted) completedModules += 1;
+
+        const sections = Array.isArray(m?.sections) ? m.sections : [];
+        if (moduleCompleted) {
+          completedSections += sections.length;
         } else {
-          const pr = progressByJourney.get(jid);
-          if (pr && typeof pr.engagementScore === 'number' && Number.isFinite(pr.engagementScore)) {
-            const eng = Math.max(0, Math.min(100, Math.round(pr.engagementScore)));
-            slidesSeen = Math.min(Math.round((eng / 100) * slidesTotal), slidesTotal);
-          }
+          sections.forEach((s: any, si: number) => {
+            if (isSectionCompleted(s, si, mp?.completedSections || [])) completedSections += 1;
+          });
         }
-      }
 
-      const ratio = slidesTotal > 0 ? slidesSeen / slidesTotal : 0;
-      const pr = progressByJourney.get(jid) ?? null;
+        const quizzes = Array.isArray(m?.quizzes) ? m.quizzes : [];
+        if (moduleCompleted) {
+          completedQuizzes += quizzes.length;
+        } else {
+          quizzes.forEach((q: any, qi: number) => {
+            if (isQuizCompleted(q, qi, mp?.quizScores || [])) completedQuizzes += 1;
+          });
+        }
+      });
+
+      const totalUnits = totalModules + totalSections + totalQuizzes;
+      const completedUnits = Math.min(
+        totalUnits,
+        completedModules + completedSections + completedQuizzes
+      );
+      const ratio = totalUnits > 0 ? completedUnits / totalUnits : 0;
+      const unitsCompleted = completedUnits;
+      const unitsTotal = totalUnits;
       const currentSlideIndex =
-        slidesTotal > 0
-          ? resolveCurrentSlideIndex(doc, tr as Record<string, unknown> | undefined, pr, slidesTotal)
+        legacySlidesTotal > 0
+          ? resolveCurrentSlideIndex(
+              doc,
+              tr as Record<string, unknown> | undefined,
+              progressRow,
+              legacySlidesTotal
+            )
           : 0;
       journeys.push({
         journeyId: jid,
         journeyTitle: String(doc?.title || 'Formation'),
-        slidesSeen,
-        slidesTotal,
+        completedUnits,
+        totalUnits,
+        completedModules,
+        totalModules,
+        completedSections,
+        totalSections,
+        completedQuizzes,
+        totalQuizzes,
+        slidesSeen: unitsCompleted,
+        slidesTotal: unitsTotal,
         ratio,
         currentSlideIndex
       });
@@ -795,11 +918,11 @@ class TrainingJourneyService {
     const averageRatio = trainingCount > 0 ? sumOfRatios / trainingCount : 0;
     const overallPercent = Math.min(100, Math.round(averageRatio * 100));
 
-    const parts = journeys.map((j) => (j.slidesTotal > 0 ? `${j.slidesSeen}/${j.slidesTotal}` : '0/0'));
+    const parts = journeys.map((j) => (j.totalUnits > 0 ? `${j.completedUnits}/${j.totalUnits}` : '0/0'));
     const formulaHuman =
       trainingCount === 0
         ? ''
-        : `(${parts.join(' + ')}) ÷ ${trainingCount} ≈ ${overallPercent} % — moyenne des avancements slides par formation`;
+        : `(${parts.join(' + ')}) ÷ ${trainingCount} ≈ ${overallPercent} % — moyenne modules+sections+quizzes par formation`;
 
     return {
       trainingCount,
