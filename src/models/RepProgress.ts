@@ -4,7 +4,8 @@ export type SectionProgressStatus = 'pending' | 'in_progress' | 'completed';
 export type QuizProgressStatus = 'pending' | 'in_progress' | 'passed' | 'failed';
 
 export interface ISectionProgressRow {
-  sectionKey: string;
+  /** Identifiant stable de la section (référence Mongo). */
+  sectionId: mongoose.Types.ObjectId;
   title?: string;
   status: SectionProgressStatus;
   durationMs: number;
@@ -28,7 +29,7 @@ export interface IModuleProgress {
   progress: number;
   status: string;
   completedSections: mongoose.Types.ObjectId[];
-  /** Détail par section (clé stable côté client, pas seulement ObjectId). */
+  /** Détail par section (une ligne par section, identifiée par `sectionId`). */
   sectionProgress?: ISectionProgressRow[];
   /** Détail par quiz. */
   quizProgress?: IQuizProgressRow[];
@@ -60,7 +61,7 @@ export interface IRepProgress extends Document {
 
 const sectionProgressRowSchema = new Schema(
   {
-    sectionKey: { type: String, required: true },
+    sectionId: { type: Schema.Types.ObjectId, required: true },
     title: { type: String },
     status: {
       type: String,

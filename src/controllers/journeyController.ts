@@ -460,9 +460,10 @@ export const upsertRepProgress = asyncHandler(async (req: AuthRequest, res: Resp
     engagementScore: typeof payload.engagementScore === 'number' ? payload.engagementScore : undefined,
     durationMs: typeof payload.durationMs === 'number' ? payload.durationMs : undefined,
     sectionUpdate:
-      su && typeof su === 'object' && String(su.sectionKey || '').trim()
+      su && typeof su === 'object'
         ? {
-            sectionKey: String(su.sectionKey).trim(),
+            sectionId: su.sectionId != null ? String(su.sectionId) : undefined,
+            sectionKey: su.sectionKey != null ? String(su.sectionKey) : undefined,
             sectionMongoId: su.sectionMongoId != null ? String(su.sectionMongoId) : undefined,
             title: su.title != null ? String(su.title) : undefined,
             status: su.status,

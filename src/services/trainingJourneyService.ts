@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import mongoose from 'mongoose';
 import TrainingJourney, { ITrainingJourney } from '../models/TrainingJourney';
 import RepProgress from '../models/RepProgress';
@@ -181,9 +182,16 @@ function sectionProgressDoneKeys(rows: unknown): Set<string> {
   if (!Array.isArray(rows)) return out;
   for (const row of rows) {
     if (!row || typeof row !== 'object') continue;
-    const r = row as { sectionKey?: unknown; status?: unknown };
-    if (String(r.status || '') === 'completed' && r.sectionKey != null) {
-      out.add(String(r.sectionKey).trim());
+    const r = row as { sectionId?: unknown; sectionKey?: unknown; status?: unknown };
+    if (String(r.status || '') !== 'completed') continue;
+    if (r.sectionId != null) {
+      const s = String(r.sectionId).trim();
+      if (mongoose.Types.ObjectId.isValid(s)) out.add(new mongoose.Types.ObjectId(s).toHexString());
+      else if (s) out.add(s);
+    } else if (r.sectionKey != null) {
+      const sk = String(r.sectionKey).trim();
+      if (mongoose.Types.ObjectId.isValid(sk)) out.add(new mongoose.Types.ObjectId(sk).toHexString());
+      else if (sk) out.add(sk);
     }
   }
   return out;
@@ -258,10 +266,23 @@ function isQuizCompleted(
   return candidates.some((c) => passedIds.has(c));
 }
 
-function stableSectionKeyFromJourneyModule(moduleIndex: number, section: any, sectionIdx: number): string {
-  const oid = normalizeAnyId(section?._id) || normalizeAnyId(section?.id);
-  const title = String(section?.title || '').trim();
-  return oid || title || `m${moduleIndex}-s${sectionIdx}`;
+function journeyModuleMapKey(journeyModule: any, moduleIndex: number): string {
+  return normalizeAnyId(journeyModule?._id) || normalizeAnyId(journeyModule?.id) || String(moduleIndex);
+}
+
+/** ObjectId de la section : `_id` du contenu si valide, sinon déterministe (hash) pour sections sans oid. */
+function resolveSectionProgressObjectId(
+  journeyModuleMapKey: string,
+  section: any,
+  sectionIdx: number
+): mongoose.Types.ObjectId {
+  const raw = normalizeAnyId(section?._id) || normalizeAnyId(section?.id);
+  if (raw && mongoose.Types.ObjectId.isValid(raw)) {
+    return new mongoose.Types.ObjectId(raw);
+  }
+  const seed = `${journeyModuleMapKey}:section:${sectionIdx}:${String(section?.title || '')}`;
+  const h = crypto.createHash('md5').update(seed).digest('hex');
+  return new mongoose.Types.ObjectId(h.slice(0, 24));
 }
 
 function stableQuizKeyFromJourneyModule(moduleIndex: number, quiz: any, quizIdx: number): string {
@@ -270,10 +291,26 @@ function stableQuizKeyFromJourneyModule(moduleIndex: number, quiz: any, quizIdx:
   return oid || title || `m${moduleIndex}-q${quizIdx}`;
 }
 
+function progressRowMergeKey(row: any, keyField: 'sectionId' | 'quizKey'): string {
+  if (keyField === 'quizKey') {
+    return String(row?.quizKey || '').trim();
+  }
+  if (row?.sectionId != null) {
+    const s = String(row.sectionId);
+    if (mongoose.Types.ObjectId.isValid(s)) return new mongoose.Types.ObjectId(s).toHexString();
+  }
+  const legacy = String(row?.sectionKey || '').trim();
+  if (legacy && mongoose.Types.ObjectId.isValid(legacy)) {
+    return new mongoose.Types.ObjectId(legacy).toHexString();
+  }
+  return legacy || '';
+}
+
 function buildDefaultSectionProgressRows(journeyModule: any, moduleIndex: number): any[] {
   const sections = Array.isArray(journeyModule?.sections) ? journeyModule.sections : [];
+  const mk = journeyModuleMapKey(journeyModule, moduleIndex);
   return sections.map((s: any, si: number) => ({
-    sectionKey: stableSectionKeyFromJourneyModule(moduleIndex, s, si),
+    sectionId: resolveSectionProgressObjectId(mk, s, si),
     title: String(s?.title || '').trim() || undefined,
     status: 'pending',
     durationMs: 0,
@@ -298,23 +335,41 @@ function buildDefaultQuizProgressRows(journeyModule: any, moduleIndex: number): 
   }));
 }
 
-function mergeProgressRowsByKey<T extends { sectionKey?: string; quizKey?: string }>(
-  existing: T[] | undefined,
-  defaults: T[],
-  keyField: 'sectionKey' | 'quizKey'
-): T[] {
+function mergeProgressRowsByKey<T>(existing: T[] | undefined, defaults: T[], keyField: 'sectionId' | 'quizKey'): T[] {
   const map = new Map<string, T>();
   for (const row of defaults) {
-    const k = String((row as any)[keyField] || '').trim();
+    const k = progressRowMergeKey(row as any, keyField);
     if (k) map.set(k, { ...row });
   }
   for (const row of existing || []) {
-    const k = String((row as any)[keyField] || '').trim();
+    const raw = row as any;
+    let k = progressRowMergeKey(raw, keyField);
+    if (keyField === 'sectionId' && !k && raw?.sectionKey && mongoose.Types.ObjectId.isValid(String(raw.sectionKey))) {
+      k = new mongoose.Types.ObjectId(String(raw.sectionKey)).toHexString();
+    }
     if (!k) continue;
     const cur = map.get(k) || ({} as T);
-    map.set(k, { ...cur, ...row });
+    const merged = { ...cur, ...row } as any;
+    if (keyField === 'sectionId' && merged.sectionId == null && k.length === 24 && mongoose.Types.ObjectId.isValid(k)) {
+      merged.sectionId = new mongoose.Types.ObjectId(k);
+    }
+    map.set(k, merged as T);
   }
   return [...map.values()];
+}
+
+function normalizeSectionUpdateObjectId(su: {
+  sectionId?: string;
+  sectionKey?: string;
+  sectionMongoId?: string;
+}): mongoose.Types.ObjectId | null {
+  const candidates = [su.sectionId, su.sectionMongoId, su.sectionKey]
+    .map((x) => String(x || '').trim())
+    .filter(Boolean);
+  for (const c of candidates) {
+    if (mongoose.Types.ObjectId.isValid(c)) return new mongoose.Types.ObjectId(c);
+  }
+  return null;
 }
 
 function upsertQuizScoresLegacy(
@@ -334,6 +389,169 @@ function upsertQuizScoresLegacy(
   if (idx >= 0) list[idx] = { ...list[idx], ...row };
   else list.push(row);
   return list;
+}
+
+/** progress + status à partir des lignes sectionProgress / quizProgress (et completedSections legacy). */
+function computeModuleProgressAndStatus(
+  current: any,
+  jm: any,
+  jmIdx: number,
+  inputProgressFallback?: number
+): { progress: number; status: 'not_started' | 'in_progress' | 'completed' } {
+  if (!jm) {
+    const nextProgress = Math.max(
+      0,
+      Math.min(100, Math.round(Number(inputProgressFallback ?? current?.progress ?? 0)))
+    );
+    const nextStatus: 'not_started' | 'in_progress' | 'completed' =
+      nextProgress >= 100 ? 'completed' : nextProgress > 0 ? 'in_progress' : 'not_started';
+    return { progress: nextProgress, status: nextStatus };
+  }
+
+  const totalSections = Array.isArray(jm.sections) ? jm.sections.length : 0;
+  const totalQuizzes = Array.isArray(jm.quizzes) ? jm.quizzes.length : 0;
+  const hasWorkUnits = totalSections + totalQuizzes > 0;
+
+  const jmMapKey = journeyModuleMapKey(jm, jmIdx);
+  let allSectionsDone = true;
+  if (totalSections > 0) {
+    for (let si = 0; si < totalSections; si++) {
+      const s = jm.sections[si];
+      const sidHex = resolveSectionProgressObjectId(jmMapKey, s, si).toHexString();
+      const row = (current.sectionProgress || []).find(
+        (r: any) => progressRowMergeKey(r, 'sectionId') === sidHex
+      );
+      if (!row || String(row.status) !== 'completed') {
+        allSectionsDone = false;
+        break;
+      }
+    }
+  } else {
+    allSectionsDone = totalSections === 0;
+  }
+
+  let allQuizzesPassed = true;
+  if (totalQuizzes > 0) {
+    for (let qi = 0; qi < totalQuizzes; qi++) {
+      const q = jm.quizzes[qi];
+      const k = stableQuizKeyFromJourneyModule(jmIdx, q, qi);
+      const row = (current.quizProgress || []).find((r: any) => String(r?.quizKey) === k);
+      if (!row || (String(row.status) !== 'passed' && row.passed !== true)) {
+        allQuizzesPassed = false;
+        break;
+      }
+    }
+  } else {
+    allQuizzesPassed = totalQuizzes === 0;
+  }
+
+  let recomputedProgress = 0;
+  if (totalSections > 0) {
+    const nDone = (current.sectionProgress || []).filter((r: any) => String(r?.status) === 'completed')
+      .length;
+    recomputedProgress = Math.min(100, Math.round((nDone / totalSections) * 100));
+  } else if (totalSections === 0 && totalQuizzes > 0) {
+    recomputedProgress = allQuizzesPassed
+      ? 100
+      : Math.max(
+          0,
+          Math.min(100, Math.round(Number(inputProgressFallback ?? current?.progress ?? 0)))
+        );
+  }
+
+  const nextProgress = hasWorkUnits
+    ? recomputedProgress
+    : Math.max(0, Math.min(100, Math.round(Number(inputProgressFallback ?? current?.progress ?? 0))));
+
+  const oidDone =
+    Array.isArray(current.completedSections) && current.completedSections.length > 0;
+  const hasCompletedWork =
+    oidDone ||
+    (current.sectionProgress || []).some((r: any) => String(r?.status) === 'completed') ||
+    (current.quizProgress || []).some(
+      (r: any) =>
+        String(r?.status) === 'passed' ||
+        String(r?.status) === 'failed' ||
+        (Number(r?.attempts) || 0) > 0
+    );
+
+  let nextStatus: 'not_started' | 'in_progress' | 'completed';
+  if (hasWorkUnits && allSectionsDone && allQuizzesPassed) {
+    nextStatus = 'completed';
+  } else if (hasWorkUnits && (nextProgress > 0 || hasCompletedWork)) {
+    nextStatus = 'in_progress';
+  } else {
+    nextStatus = 'not_started';
+  }
+
+  return { progress: nextProgress, status: nextStatus };
+}
+
+/** Crée ou enrichit chaque entrée module depuis le parcours (toutes sections / quizzes, sans écraser l’avancement). */
+function bootstrapAllJourneyModulesOnRepProgressDoc(doc: any, jModules: any[]): void {
+  if (!doc?.modules || !Array.isArray(jModules) || jModules.length === 0) return;
+
+  for (let jmIdx = 0; jmIdx < jModules.length; jmIdx++) {
+    const jm = jModules[jmIdx];
+    const mIdRaw = normalizeAnyId(jm?._id) || normalizeAnyId(jm?.id) || String(jmIdx);
+    if (!mongoose.Types.ObjectId.isValid(mIdRaw)) continue;
+    const mOid = new mongoose.Types.ObjectId(mIdRaw);
+
+    const existing = doc.modules.get(mIdRaw) as any;
+    const current =
+      existing ||
+      ({
+        moduleId: mOid,
+        progress: 0,
+        status: 'not_started',
+        completedSections: [],
+        sectionProgress: [],
+        quizProgress: [],
+        durationMs: 0,
+        quizScores: []
+      } as any);
+
+    if (!Array.isArray(current.completedSections)) current.completedSections = [];
+    if (!Array.isArray(current.quizScores)) current.quizScores = [];
+    if (!Array.isArray(current.sectionProgress)) current.sectionProgress = [];
+    if (!Array.isArray(current.quizProgress)) current.quizProgress = [];
+
+    const defSec = buildDefaultSectionProgressRows(jm, jmIdx);
+    const defQz = buildDefaultQuizProgressRows(jm, jmIdx);
+    current.sectionProgress = mergeProgressRowsByKey(current.sectionProgress, defSec, 'sectionId');
+    current.quizProgress = mergeProgressRowsByKey(current.quizProgress, defQz, 'quizKey');
+    current.moduleId = mOid;
+
+    doc.modules.set(mIdRaw, current);
+  }
+
+  doc.moduleTotal = jModules.length;
+}
+
+function syncAllModuleProgressStatusFromJourney(
+  doc: any,
+  jModules: any[],
+  input?: { moduleId?: string; progress?: number }
+): void {
+  if (!doc?.modules || !Array.isArray(jModules) || jModules.length === 0) return;
+  const focusMid = String(input?.moduleId || '').trim();
+  for (let jmIdx = 0; jmIdx < jModules.length; jmIdx++) {
+    const jm = jModules[jmIdx];
+    const mIdRaw = normalizeAnyId(jm?._id) || normalizeAnyId(jm?.id) || String(jmIdx);
+    if (!mongoose.Types.ObjectId.isValid(mIdRaw)) continue;
+    const mOid = new mongoose.Types.ObjectId(mIdRaw);
+    const current = doc.modules.get(mIdRaw) as any;
+    if (!current) continue;
+    const fallback =
+      focusMid && mIdRaw === focusMid && typeof input?.progress === 'number' ? input.progress : undefined;
+    const agg = computeModuleProgressAndStatus(current, jm, jmIdx, fallback);
+    doc.modules.set(mIdRaw, {
+      ...current,
+      moduleId: mOid,
+      progress: agg.progress,
+      status: agg.status
+    });
+  }
 }
 
 class TrainingJourneyService {
@@ -807,7 +1025,10 @@ class TrainingJourneyService {
     engagementScore?: number;
     durationMs?: number;
     sectionUpdate?: {
-      sectionKey: string;
+      /** ObjectId hex (prioritaire). */
+      sectionId?: string;
+      /** @deprecated utiliser `sectionId` */
+      sectionKey?: string;
       sectionMongoId?: string;
       title?: string;
       status?: 'pending' | 'in_progress' | 'completed';
@@ -867,15 +1088,13 @@ class TrainingJourneyService {
       { new: true, upsert: true }
     );
 
+    bootstrapAllJourneyModulesOnRepProgressDoc(doc, jModules);
+
     const hasModuleUpdate = !!input.moduleId;
     if (hasModuleUpdate) {
       const mId = String(input.moduleId || '').trim();
       if (mId && mongoose.Types.ObjectId.isValid(mId)) {
         const mOid = new mongoose.Types.ObjectId(mId);
-        const jmIdx = jModules.findIndex(
-          (m: any) => normalizeAnyId(m?._id) === mId || normalizeAnyId(m?.id) === mId
-        );
-        const jm = jmIdx >= 0 ? jModules[jmIdx] : null;
 
         const applyDur = (n: unknown) =>
           typeof n === 'number' && Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
@@ -896,32 +1115,25 @@ class TrainingJourneyService {
         if (!Array.isArray(current.sectionProgress)) current.sectionProgress = [];
         if (!Array.isArray(current.quizProgress)) current.quizProgress = [];
 
-        if (jm) {
-          const defSec = buildDefaultSectionProgressRows(jm, jmIdx);
-          const defQz = buildDefaultQuizProgressRows(jm, jmIdx);
-          current.sectionProgress = mergeProgressRowsByKey(
-            current.sectionProgress,
-            defSec,
-            'sectionKey'
-          );
-          current.quizProgress = mergeProgressRowsByKey(current.quizProgress, defQz, 'quizKey');
-        }
-
-        if (input.sectionUpdate && String(input.sectionUpdate.sectionKey || '').trim()) {
-          const sk = String(input.sectionUpdate.sectionKey).trim();
+        const sectionOid = input.sectionUpdate ? normalizeSectionUpdateObjectId(input.sectionUpdate) : null;
+        if (input.sectionUpdate && sectionOid) {
+          const sidHex = sectionOid.toHexString();
           const st = input.sectionUpdate.status || 'completed';
           const add = applyDur(input.sectionUpdate.durationMs);
-          const idx = current.sectionProgress.findIndex((r: any) => String(r?.sectionKey) === sk);
+          const idx = current.sectionProgress.findIndex(
+            (r: any) => progressRowMergeKey(r, 'sectionId') === sidHex
+          );
           const base =
             idx >= 0
               ? { ...current.sectionProgress[idx] }
               : {
-                  sectionKey: sk,
+                  sectionId: sectionOid,
                   title: input.sectionUpdate.title,
                   status: 'pending',
                   durationMs: 0,
                   updatedAt: new Date()
                 };
+          (base as any).sectionId = sectionOid;
           if (input.sectionUpdate.title) base.title = String(input.sectionUpdate.title).trim();
           base.status = st;
           base.durationMs = Math.max(0, Math.floor(Number(base.durationMs || 0)) + add);
@@ -929,8 +1141,8 @@ class TrainingJourneyService {
           if (idx >= 0) current.sectionProgress[idx] = base;
           else current.sectionProgress.push(base);
 
-          const smid = String(input.sectionUpdate.sectionMongoId || '').trim();
-          if (st === 'completed' && smid && mongoose.Types.ObjectId.isValid(smid)) {
+          if (st === 'completed') {
+            const smid = sectionOid.toHexString();
             const cur = current.completedSections
               .map((x: unknown) => String(x || '').trim())
               .filter((s: string) => mongoose.Types.ObjectId.isValid(s));
@@ -1007,68 +1219,9 @@ class TrainingJourneyService {
         const deltaDuration = granularDuration + legacyDelta;
         const nextDuration = Math.max(0, Math.floor(Number(current.durationMs || 0)) + deltaDuration);
 
-        const totalSections = jm && Array.isArray(jm.sections) ? jm.sections.length : 0;
-        const totalQuizzes = jm && Array.isArray(jm.quizzes) ? jm.quizzes.length : 0;
-        const hasWorkUnits = totalSections + totalQuizzes > 0;
-
-        let allSectionsDone = true;
-        if (jm && totalSections > 0) {
-          for (let si = 0; si < totalSections; si++) {
-            const s = jm.sections[si];
-            const k = stableSectionKeyFromJourneyModule(jmIdx, s, si);
-            const row = current.sectionProgress.find((r: any) => String(r?.sectionKey) === k);
-            if (!row || String(row.status) !== 'completed') {
-              allSectionsDone = false;
-              break;
-            }
-          }
-        } else {
-          allSectionsDone = totalSections === 0;
-        }
-
-        let allQuizzesPassed = true;
-        if (jm && totalQuizzes > 0) {
-          for (let qi = 0; qi < totalQuizzes; qi++) {
-            const q = jm.quizzes[qi];
-            const k = stableQuizKeyFromJourneyModule(jmIdx, q, qi);
-            const row = current.quizProgress.find((r: any) => String(r?.quizKey) === k);
-            if (!row || (String(row.status) !== 'passed' && row.passed !== true)) {
-              allQuizzesPassed = false;
-              break;
-            }
-          }
-        } else {
-          allQuizzesPassed = totalQuizzes === 0;
-        }
-
-        let recomputedProgress = 0;
-        if (totalSections > 0) {
-          const nDone = current.sectionProgress.filter((r: any) => String(r?.status) === 'completed').length;
-          recomputedProgress = Math.min(100, Math.round((nDone / totalSections) * 100));
-        } else if (totalSections === 0 && totalQuizzes > 0) {
-          recomputedProgress = allQuizzesPassed
-            ? 100
-            : Math.max(0, Math.min(100, Math.round(Number(input.progress ?? current.progress ?? 0))));
-        }
-
-        const nextProgress =
-          jm && hasWorkUnits
-            ? recomputedProgress
-            : Math.max(0, Math.min(100, Math.round(Number(input.progress ?? current.progress ?? 0))));
-
-        const nextStatus =
-          jm && hasWorkUnits && allSectionsDone && allQuizzesPassed
-            ? 'completed'
-            : jm && hasWorkUnits
-              ? 'in_progress'
-              : input.status ||
-                (nextProgress >= 100 ? 'completed' : nextProgress > 0 ? 'in_progress' : 'not_started');
-
         doc.modules.set(mId, {
           ...current,
           moduleId: mOid,
-          progress: nextProgress,
-          status: nextStatus,
           completedSections: current.completedSections,
           sectionProgress: current.sectionProgress,
           quizProgress: current.quizProgress,
@@ -1077,6 +1230,11 @@ class TrainingJourneyService {
         });
       }
     }
+
+    syncAllModuleProgressStatusFromJourney(doc, jModules, {
+      moduleId: input.moduleId,
+      progress: input.progress
+    });
 
     if (typeof input.engagementScore === 'number' && Number.isFinite(input.engagementScore)) {
       doc.engagementScore = Math.max(0, Math.min(100, Math.round(input.engagementScore)));
@@ -1104,6 +1262,15 @@ class TrainingJourneyService {
       doc.totalDurationMs = Math.max(0, Math.floor(Number(doc.totalDurationMs || 0)) + addTotal);
     }
     doc.lastAccessed = new Date();
+
+    for (const mod of doc.modules.values()) {
+      const m = mod as any;
+      if (Array.isArray(m?.sectionProgress)) {
+        m.sectionProgress = m.sectionProgress.filter(
+          (r: any) => r?.sectionId != null && mongoose.Types.ObjectId.isValid(String(r.sectionId))
+        );
+      }
+    }
 
     const modules = Array.from(doc.modules.values()) as any[];
     doc.moduleInProgress = modules.filter((m) => m?.status === 'in_progress').length;
