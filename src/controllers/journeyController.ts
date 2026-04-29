@@ -486,6 +486,19 @@ export const completeSectionProgress = asyncHandler(async (req: AuthRequest, res
   res.status(200).json({ success: true, data: progress });
 });
 
+/** POST /quiz/start — marque le quiz `in_progress` à l’ouverture (sans consommer d’essai). */
+export const startQuizProgress = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const payload = req.body || {};
+  const progress = await trainingJourneyService.startQuiz({
+    repId: String(payload.repId || '').trim(),
+    courseId: String(payload.courseId || payload.journeyId || '').trim(),
+    moduleId: String(payload.moduleId || '').trim(),
+    quizId: String(payload.quizId || '').trim(),
+    repEnrolledId: String(payload.repEnrolledId || '').trim() || undefined
+  });
+  res.status(200).json({ success: true, data: progress });
+});
+
 /** POST /quiz/submit */
 export const submitQuizProgress = asyncHandler(async (req: AuthRequest, res: Response) => {
   const payload = req.body || {};

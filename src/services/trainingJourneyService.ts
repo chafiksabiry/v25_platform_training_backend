@@ -23,6 +23,29 @@ function optionalObjectId(raw: unknown): mongoose.Types.ObjectId | undefined {
   return new mongoose.Types.ObjectId(s);
 }
 
+/** Repère la ligne quiz du module (rep-progress envoie parfois seulement quizKey = ObjectId hex). */
+function findQuizRowForUpdate(
+  moduleRow: { quizzes?: unknown[] } | null | undefined,
+  quizUpdate: { quizMongoId?: string; quizKey?: string }
+): Record<string, unknown> | undefined {
+  const quizzes = Array.isArray(moduleRow?.quizzes) ? (moduleRow!.quizzes as Record<string, unknown>[]) : [];
+  const mongo = String(quizUpdate.quizMongoId || '').trim();
+  if (mongo && mongoose.Types.ObjectId.isValid(mongo)) {
+    const hit = quizzes.find((q: any) => String(q?.quizId) === mongo);
+    if (hit) return hit as Record<string, unknown>;
+  }
+  const key = String(quizUpdate.quizKey || '').trim();
+  if (key && mongoose.Types.ObjectId.isValid(key)) {
+    const hit = quizzes.find((q: any) => String(q?.quizId) === key);
+    if (hit) return hit as Record<string, unknown>;
+  }
+  if (key) {
+    const byTitle = quizzes.find((q: any) => String(q?.title || '').trim() === key);
+    if (byTitle) return byTitle as Record<string, unknown>;
+  }
+  return undefined;
+}
+
 function countSlidesOnJourney(j: { presentation?: { slides?: unknown } } | null | undefined): number {
   const slides = j?.presentation?.slides;
   return Array.isArray(slides) ? slides.length : 0;
@@ -1279,6 +1302,39 @@ class TrainingJourneyService {
     return tracking;
   }
 
+  /** Marque le quiz en `in_progress` (ouverture / reprise après échec). */
+  async startQuiz(input: {
+    repId: string;
+    courseId: string;
+    moduleId: string;
+    quizId: string;
+    repEnrolledId?: string;
+  }) {
+    const tracking = await this.getStructuredProgress(input.repId, input.courseId, {
+      repEnrolledId: input.repEnrolledId
+    });
+    const moduleId = String(input.moduleId || '').trim();
+    const quizId = String(input.quizId || '').trim();
+    const module = tracking.modules.find((m: any) => String(m.moduleId) === moduleId);
+    if (!module) throw new AppError('Module not found in course', 404);
+    if (module.status === 'locked') throw new AppError('Module is locked. Complete previous module first.', 409);
+    const quizProgress = (module.quizzes || []).find((q: any) => String(q.quizId) === quizId);
+    if (!quizProgress) throw new AppError('Quiz not found in module', 404);
+    const qs = String((quizProgress as any).status || '');
+    if (qs === 'completed' || qs === 'in_progress') {
+      return tracking;
+    }
+    if (qs === 'failed') {
+      (quizProgress as any).status = 'in_progress';
+    } else if (qs === 'pending') {
+      (quizProgress as any).status = 'in_progress';
+    }
+    if (module.status === 'pending') module.status = 'in_progress';
+    recomputeModuleAndCourseProgress(tracking);
+    await tracking.save();
+    return tracking;
+  }
+
   async submitQuiz(input: {
     repId: string;
     courseId: string;
@@ -1414,8 +1470,7 @@ class TrainingJourneyService {
     }
 
     if (input.quizUpdate && moduleRow) {
-      const quizOid = String(input.quizUpdate.quizMongoId || '').trim();
-      const row = (moduleRow.quizzes || []).find((q: any) => String(q?.quizId) === quizOid);
+      const row = findQuizRowForUpdate(moduleRow, input.quizUpdate);
       if (row) {
         if (typeof input.quizUpdate.score === 'number') row.score = Math.max(0, Math.min(100, Math.round(input.quizUpdate.score)));
         if (typeof input.quizUpdate.attempts === 'number') row.attempts = Math.max(0, Math.floor(input.quizUpdate.attempts));

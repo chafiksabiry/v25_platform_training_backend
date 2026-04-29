@@ -17,6 +17,7 @@ router.get('/rep-progress', journeyController.getRepProgress);
 router.get('/progress/:repId/:courseId', journeyController.getStructuredProgress);
 router.post('/section/start', journeyController.startSectionProgress);
 router.post('/section/complete', journeyController.completeSectionProgress);
+router.post('/quiz/start', journeyController.startQuizProgress);
 router.post('/quiz/submit', journeyController.submitQuizProgress);
 router.post('/rep-progress', journeyController.upsertRepProgress);
 router.post('/tracking-events', journeyController.postTrainingTrackingEvent);
