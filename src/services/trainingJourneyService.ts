@@ -1,11 +1,10 @@
 import crypto from 'crypto';
 import mongoose from 'mongoose';
 import TrainingJourney, { ITrainingJourney } from '../models/TrainingJourney';
-import RepProgress from '../models/RepProgress';
 import RepTrainingTracking, {
   REP_TRAINING_TRACKING_EVENTS,
   RepTrainingTrackingEventKind
-} from '../models/RepTrainingTracking';
+} from '../models/rep-training-tracking';
 import Rep from '../models/Rep';
 import { AppError } from '../middleware/errorHandler';
 import { ImageGenerationService } from './imageGenerationService';
@@ -142,7 +141,7 @@ export type RepSlideProgressJourneyLine = {
 };
 
 export type RepSlideProgressSummary = {
-  /** Nombre de formations prises en compte (union tracking + rep_progress) */
+  /** Nombre de formations prises en compte depuis rep_training_tracking */
   trainingCount: number;
   journeys: RepSlideProgressJourneyLine[];
   /** Somme des ratios : ex. 3/15 + 2/7 */
@@ -168,6 +167,36 @@ function normalizeAnyId(raw: unknown): string {
 
 function toProgressModulesLookup(raw: unknown): Record<string, any> {
   if (!raw) return {};
+  if (Array.isArray(raw)) {
+    const out: Record<string, any> = {};
+    for (const row of raw) {
+      const moduleId = normalizeAnyId((row as any)?.moduleId);
+      if (!moduleId) continue;
+      const sections = Array.isArray((row as any)?.sections) ? (row as any).sections : [];
+      const quizzes = Array.isArray((row as any)?.quizzes) ? (row as any).quizzes : [];
+      out[moduleId] = {
+        ...row,
+        progress: Number((row as any)?.progressPercentage || 0),
+        completedSections: sections
+          .filter((s: any) => String(s?.status) === 'completed')
+          .map((s: any) => s?.sectionId),
+        sectionProgress: sections.map((s: any) => ({
+          sectionId: s?.sectionId,
+          status: s?.status
+        })),
+        quizProgress: quizzes.map((q: any) => ({
+          quizKey: normalizeAnyId(q?.quizId) || String(q?.title || ''),
+          status: q?.passed ? 'passed' : q?.status,
+          passed: !!q?.passed
+        })),
+        quizScores: quizzes.map((q: any) => ({
+          quizId: q?.quizId,
+          passed: !!q?.passed
+        }))
+      };
+    }
+    return out;
+  }
   if (raw instanceof Map) {
     const out: Record<string, any> = {};
     for (const [k, v] of raw.entries()) out[String(k)] = v;
@@ -573,6 +602,106 @@ function syncAllModuleProgressStatusFromJourney(
   }
 }
 
+function mustObjectId(value: string, label: string): mongoose.Types.ObjectId {
+  const raw = String(value || '').trim();
+  if (!mongoose.Types.ObjectId.isValid(raw)) {
+    throw new AppError(`${label} must be a valid ObjectId`, 400);
+  }
+  return new mongoose.Types.ObjectId(raw);
+}
+
+function normalizeTrackingWithJourney(tracking: any, journeyModules: any[]): any {
+  const rows = Array.isArray(tracking.modules) ? tracking.modules : [];
+  const merged = journeyModules.map((jm: any, moduleIndex: number) => {
+    const moduleIdRaw = normalizeAnyId(jm?._id) || normalizeAnyId(jm?.id);
+    const existing =
+      rows.find((m: any) => String(m?.moduleId || '') === moduleIdRaw) ||
+      rows.find((m: any, idx: number) => idx === moduleIndex) ||
+      null;
+    const sections = Array.isArray(jm?.sections) ? jm.sections : [];
+    const quizzes = Array.isArray(jm?.quizzes) ? jm.quizzes : [];
+    const sectionRows = sections.map((section: any) => {
+      const sectionIdRaw = normalizeAnyId(section?._id) || normalizeAnyId(section?.id);
+      const prev =
+        Array.isArray(existing?.sections) &&
+        existing.sections.find((s: any) => String(s?.sectionId || '') === sectionIdRaw);
+      return {
+        sectionId: mustObjectId(sectionIdRaw, 'sectionId'),
+        title: String(section?.title || '').trim() || undefined,
+        status: prev?.status || 'pending',
+        completedAt: prev?.completedAt
+      };
+    });
+    const quizRows = quizzes.map((quiz: any, quizIndex: number) => {
+      const quizIdRaw = normalizeAnyId(quiz?._id) || normalizeAnyId(quiz?.id);
+      const quizKey = quizIdRaw || stableQuizKeyFromJourneyModule(moduleIndex, quiz, quizIndex);
+      const prev =
+        Array.isArray(existing?.quizzes) &&
+        existing.quizzes.find((q: any) => String(q?.quizId || '') === quizKey || String(q?.quizId || '') === quizIdRaw);
+      return {
+        quizId: mustObjectId(quizIdRaw, 'quizId'),
+        title: String(quiz?.title || '').trim() || undefined,
+        status: prev?.status || 'pending',
+        score: Number(prev?.score || 0),
+        attempts: Number(prev?.attempts || 0),
+        passed: !!prev?.passed,
+        lastSubmittedAt: prev?.lastSubmittedAt
+      };
+    });
+    return {
+      moduleId: mustObjectId(moduleIdRaw, 'moduleId'),
+      title: String(jm?.title || '').trim() || undefined,
+      status: existing?.status || (moduleIndex === 0 ? 'in_progress' : 'locked'),
+      sections: sectionRows,
+      quizzes: quizRows,
+      progressPercentage: Number(existing?.progressPercentage || 0),
+      completedAt: existing?.completedAt
+    };
+  });
+  tracking.modules = merged;
+  tracking.totalModules = merged.length;
+  return tracking;
+}
+
+function recomputeModuleAndCourseProgress(tracking: any): any {
+  const modules = Array.isArray(tracking.modules) ? tracking.modules : [];
+  modules.forEach((module: any, idx: number) => {
+    const sections = Array.isArray(module.sections) ? module.sections : [];
+    const quizzes = Array.isArray(module.quizzes) ? module.quizzes : [];
+    const totalUnits = sections.length + quizzes.length;
+    const completedSections = sections.filter((s: any) => s.status === 'completed').length;
+    const passedQuizzes = quizzes.filter((q: any) => q.passed === true || q.status === 'completed').length;
+    module.progressPercentage = totalUnits > 0 ? Math.round(((completedSections + passedQuizzes) / totalUnits) * 100) : 0;
+    const allSectionsDone = sections.every((s: any) => s.status === 'completed');
+    const allQuizzesPassed = quizzes.every((q: any) => q.passed === true || q.status === 'completed');
+    if (totalUnits > 0 && allSectionsDone && allQuizzesPassed) {
+      module.status = 'completed';
+      module.completedAt = module.completedAt || new Date();
+      if (modules[idx + 1] && modules[idx + 1].status === 'locked') {
+        modules[idx + 1].status = 'pending';
+      }
+    } else if (module.status !== 'locked') {
+      const started =
+        sections.some((s: any) => s.status !== 'pending') ||
+        quizzes.some((q: any) => Number(q.attempts || 0) > 0 || q.status !== 'pending');
+      module.status = started ? 'in_progress' : 'pending';
+    }
+  });
+  const completedModules = modules.filter((m: any) => m.status === 'completed').length;
+  tracking.completedModules = completedModules;
+  tracking.progressPercentage = modules.length > 0 ? Math.round((completedModules / modules.length) * 100) : 0;
+  tracking.status =
+    completedModules >= modules.length && modules.length > 0
+      ? 'completed'
+      : modules.some((m: any) => m.status === 'in_progress' || m.status === 'completed')
+        ? 'in_progress'
+        : 'pending';
+  if (tracking.status === 'completed') {
+    tracking.completedAt = tracking.completedAt || new Date();
+  }
+  return tracking;
+}
+
 class TrainingJourneyService {
   private resolveTrainingLogo(journey: any): { type: 'icon' | 'image'; value: string } {
     const explicitType = String(journey?.trainingLogo?.type || '').trim().toLowerCase();
@@ -934,7 +1063,7 @@ class TrainingJourneyService {
       };
     }
 
-    const repProgressList = await RepProgress.find({
+    const repProgressList = await RepTrainingTracking.find({
       journeyId: { $in: journeys.map(j => j._id) }
     });
 
@@ -956,7 +1085,7 @@ class TrainingJourneyService {
       const rep = repMap.get(repId);
       if (!rep) return null;
 
-      const progress = repProgressList.filter((p) => String(p.repId) === repId);
+      const progress = repProgressList.filter((p: any) => String(p.repId) === repId);
 
       let avgProgress = 0;
       let avgEngagement = 0;
@@ -965,16 +1094,23 @@ class TrainingJourneyService {
         const allProgresses: number[] = [];
         const allEngagements: number[] = [];
 
-        progress.forEach(p => {
-          if (p.modules) {
-            p.modules.forEach(module => {
-              allProgresses.push(module.progress);
+        progress.forEach((p: any) => {
+          if (Array.isArray((p as any).modules)) {
+            (p as any).modules.forEach((module: any) => {
+              allProgresses.push(Number(module.progressPercentage || 0));
             });
           }
-          allEngagements.push(p.engagementScore);
+          allEngagements.push(Number((p as any).engagementScore || 0));
 
-          if (p.moduleInProgress > 0) activeCount++;
-          if (p.moduleTotal > 0 && p.moduleFinished === p.moduleTotal) completedCount++;
+          const inProgress = Array.isArray((p as any).modules)
+            ? (p as any).modules.filter((m: any) => String(m?.status) === 'in_progress').length
+            : 0;
+          const finished = Array.isArray((p as any).modules)
+            ? (p as any).modules.filter((m: any) => String(m?.status) === 'completed').length
+            : 0;
+          const total = Number((p as any).totalModules || ((p as any).modules?.length || 0));
+          if (inProgress > 0) activeCount++;
+          if (total > 0 && finished >= total) completedCount++;
         });
 
         avgProgress = allProgresses.length > 0
@@ -1028,10 +1164,128 @@ class TrainingJourneyService {
     const jid = String(journeyId || '').trim();
     if (!rid || !jid) return null;
     if (!mongoose.Types.ObjectId.isValid(rid) || !mongoose.Types.ObjectId.isValid(jid)) return null;
-    return await RepProgress.findOne({
+    return await RepTrainingTracking.findOne({
       repId: new mongoose.Types.ObjectId(rid),
-      journeyId: new mongoose.Types.ObjectId(jid)
+      $or: [{ journeyId: new mongoose.Types.ObjectId(jid) }, { courseId: new mongoose.Types.ObjectId(jid) }]
     });
+  }
+
+  async getStructuredProgress(repId: string, courseId: string) {
+    const repOid = mustObjectId(repId, 'repId');
+    const courseOid = mustObjectId(courseId, 'courseId');
+    const journey = await TrainingJourney.findById(courseOid).select('_id modules');
+    if (!journey) throw new AppError('Journey not found', 404);
+    const journeyModules = Array.isArray((journey as any).modules) ? (journey as any).modules : [];
+    let tracking = await RepTrainingTracking.findOne({ repId: repOid, courseId: courseOid });
+    if (!tracking) {
+      tracking = await RepTrainingTracking.create({
+        repId: repOid,
+        courseId: courseOid,
+        journeyId: courseOid,
+        status: 'pending',
+        modules: [],
+        progressPercentage: 0,
+        completedModules: 0,
+        totalModules: journeyModules.length
+      });
+    }
+    normalizeTrackingWithJourney(tracking, journeyModules);
+    if (tracking.modules.length > 0) {
+      const first = tracking.modules[0];
+      if (first.status === 'pending') first.status = 'in_progress';
+      for (let i = 1; i < tracking.modules.length; i++) {
+        if (tracking.modules[i - 1].status !== 'completed' && tracking.modules[i].status === 'pending') {
+          tracking.modules[i].status = 'locked';
+        }
+      }
+    }
+    recomputeModuleAndCourseProgress(tracking);
+    await tracking.save();
+    return tracking;
+  }
+
+  async startSection(input: { repId: string; courseId: string; moduleId: string; sectionId: string }) {
+    const tracking = await this.getStructuredProgress(input.repId, input.courseId);
+    const moduleId = String(input.moduleId || '').trim();
+    const sectionId = String(input.sectionId || '').trim();
+    const module = tracking.modules.find((m: any) => String(m.moduleId) === moduleId);
+    if (!module) throw new AppError('Module not found in course', 404);
+    if (module.status === 'locked') throw new AppError('Module is locked. Complete previous module first.', 409);
+    const section = (module.sections || []).find((s: any) => String(s.sectionId) === sectionId);
+    if (!section) throw new AppError('Section not found in module', 404);
+    if (module.status === 'pending') module.status = 'in_progress';
+    if (section.status === 'pending') section.status = 'in_progress';
+    recomputeModuleAndCourseProgress(tracking);
+    await tracking.save();
+    return tracking;
+  }
+
+  async completeSection(input: { repId: string; courseId: string; moduleId: string; sectionId: string }) {
+    const tracking = await this.getStructuredProgress(input.repId, input.courseId);
+    const moduleId = String(input.moduleId || '').trim();
+    const sectionId = String(input.sectionId || '').trim();
+    const module = tracking.modules.find((m: any) => String(m.moduleId) === moduleId);
+    if (!module) throw new AppError('Module not found in course', 404);
+    if (module.status === 'locked') throw new AppError('Module is locked. Complete previous module first.', 409);
+    const section = (module.sections || []).find((s: any) => String(s.sectionId) === sectionId);
+    if (!section) throw new AppError('Section not found in module', 404);
+    section.status = 'completed';
+    section.completedAt = new Date();
+    if (module.status === 'pending') module.status = 'in_progress';
+    recomputeModuleAndCourseProgress(tracking);
+    await tracking.save();
+    return tracking;
+  }
+
+  async submitQuiz(input: {
+    repId: string;
+    courseId: string;
+    moduleId: string;
+    quizId: string;
+    answers: number[];
+  }) {
+    const tracking = await this.getStructuredProgress(input.repId, input.courseId);
+    const moduleId = String(input.moduleId || '').trim();
+    const quizId = String(input.quizId || '').trim();
+    const module = tracking.modules.find((m: any) => String(m.moduleId) === moduleId);
+    if (!module) throw new AppError('Module not found in course', 404);
+    if (module.status === 'locked') throw new AppError('Module is locked. Complete previous module first.', 409);
+    const quizProgress = (module.quizzes || []).find((q: any) => String(q.quizId) === quizId);
+    if (!quizProgress) throw new AppError('Quiz not found in module', 404);
+
+    const journey = await TrainingJourney.findById(mustObjectId(input.courseId, 'courseId')).select('modules');
+    const journeyModules = Array.isArray((journey as any)?.modules) ? (journey as any).modules : [];
+    const jm = journeyModules.find((m: any) => String(m?._id) === moduleId || String(m?.id) === moduleId);
+    const jq = Array.isArray(jm?.quizzes)
+      ? jm.quizzes.find((q: any) => String(q?._id) === quizId || String(q?.id) === quizId)
+      : null;
+    const questions = Array.isArray(jq?.questions) ? jq.questions : [];
+    const total = questions.length;
+    let correct = 0;
+    for (let i = 0; i < total; i++) {
+      const expected = Number((questions[i] as any)?.correctAnswer);
+      const given = Number((input.answers || [])[i]);
+      if (Number.isFinite(expected) && given === expected) correct += 1;
+    }
+    const score = total > 0 ? Math.round((correct / total) * 100) : 0;
+    const passed = score >= 70;
+
+    quizProgress.score = score;
+    quizProgress.attempts = Math.max(0, Number(quizProgress.attempts || 0) + 1);
+    quizProgress.lastSubmittedAt = new Date();
+    quizProgress.passed = passed;
+    quizProgress.status = passed ? 'completed' : 'failed';
+
+    if (module.status === 'pending') module.status = 'in_progress';
+    recomputeModuleAndCourseProgress(tracking);
+    await tracking.save();
+    return {
+      score,
+      passed,
+      attempts: quizProgress.attempts,
+      requiredScore: 70,
+      progress: tracking
+    };
   }
 
   async upsertRepProgress(input: {
@@ -1074,329 +1328,102 @@ class TrainingJourneyService {
     if (!mongoose.Types.ObjectId.isValid(rid) || !mongoose.Types.ObjectId.isValid(jid)) {
       throw new AppError('repId and journeyId must be valid ObjectIds', 400);
     }
+
     const repOid = new mongoose.Types.ObjectId(rid);
     const journeyOid = new mongoose.Types.ObjectId(jid);
+    await TrainingJourney.updateOne({ _id: journeyOid }, { $addToSet: { enrolledRepIds: repOid } });
 
-    const journey = await TrainingJourney.findById(journeyOid).select('_id modules');
-    const moduleTotal = Array.isArray((journey as any)?.modules) ? (journey as any).modules.length : 0;
-    const jModules = Array.isArray((journey as any)?.modules) ? ((journey as any).modules as any[]) : [];
+    const tracking = await this.getStructuredProgress(rid, jid);
+    const moduleId = String(input.moduleId || '').trim();
+    const moduleRow = tracking.modules.find((m: any) => String(m?.moduleId) === moduleId);
+    if (moduleRow && moduleRow.status === 'pending') moduleRow.status = 'in_progress';
 
-    // Auto-enroll rep when they start/continue a journey from rep-side.
-    // Keep this strict (no silent catch) so failures are visible in logs/monitoring.
-    const enrollResult = await TrainingJourney.updateOne(
-      { _id: journeyOid },
-      { $addToSet: { enrolledRepIds: repOid } }
-    );
-    console.log('[TrainingJourneyService:upsertRepProgress] auto-enroll result', {
-      journeyId: jid,
-      repId: rid,
-      matchedCount: enrollResult.matchedCount,
-      modifiedCount: enrollResult.modifiedCount
-    });
-
-    const doc = await RepProgress.findOneAndUpdate(
-      { repId: repOid, journeyId: journeyOid },
-      {
-        $setOnInsert: {
-          repId: repOid,
-          journeyId: journeyOid,
-          moduleTotal,
-          moduleFinished: 0,
-          moduleInProgress: 0,
-          totalDurationMs: 0,
-          modules: new Map()
+    if (input.sectionUpdate) {
+      const sectionOid = normalizeSectionUpdateObjectId(input.sectionUpdate);
+      if (moduleRow && sectionOid) {
+        const row = (moduleRow.sections || []).find((s: any) => String(s?.sectionId) === String(sectionOid));
+        if (row) {
+          row.status = input.sectionUpdate.status || 'completed';
+          if (row.status === 'completed') row.completedAt = new Date();
         }
-      },
-      { new: true, upsert: true }
-    );
+      }
+    }
 
-    bootstrapAllJourneyModulesOnRepProgressDoc(doc, jModules);
-
-    const hasModuleUpdate = !!input.moduleId;
-    if (hasModuleUpdate) {
-      const mId = String(input.moduleId || '').trim();
-      if (mId && mongoose.Types.ObjectId.isValid(mId)) {
-        const mOid = new mongoose.Types.ObjectId(mId);
-
-        const applyDur = (n: unknown) =>
-          typeof n === 'number' && Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
-        const moduleCooldownMs = (() => {
-          const jm = jModules.find(
-            (m: any, idx: number) =>
-              String(normalizeAnyId(m?._id) || normalizeAnyId(m?.id) || String(idx)) === mId
-          );
-          const moduleMinutesRaw = Number((jm as any)?.duration);
-          if (Number.isFinite(moduleMinutesRaw) && moduleMinutesRaw > 0) {
-            return Math.floor(moduleMinutesRaw * 60 * 1000);
-          }
-          const sectionMinutes = Array.isArray((jm as any)?.sections)
-            ? (jm as any).sections.reduce((acc: number, s: any) => {
-                const n = Number(s?.duration);
-                return acc + (Number.isFinite(n) && n > 0 ? n : 0);
-              }, 0)
-            : 0;
-          if (sectionMinutes > 0) return Math.floor(sectionMinutes * 60 * 1000);
-          return 30 * 60 * 1000;
-        })();
-
-        const current = (doc.modules?.get(mId) as any) || {
-          moduleId: mOid,
-          progress: 0,
-          status: 'not_started',
-          completedSections: [],
-          sectionProgress: [],
-          quizProgress: [],
-          durationMs: 0,
-          quizScores: []
-        };
-
-        if (!Array.isArray(current.completedSections)) current.completedSections = [];
-        if (!Array.isArray(current.quizScores)) current.quizScores = [];
-        if (!Array.isArray(current.sectionProgress)) current.sectionProgress = [];
-        if (!Array.isArray(current.quizProgress)) current.quizProgress = [];
-
-        const sectionOid = input.sectionUpdate ? normalizeSectionUpdateObjectId(input.sectionUpdate) : null;
-        if (input.sectionUpdate && sectionOid) {
-          const sidHex = sectionOid.toHexString();
-          const st = input.sectionUpdate.status || 'completed';
-          const add = applyDur(input.sectionUpdate.durationMs);
-          const idx = current.sectionProgress.findIndex(
-            (r: any) => progressRowMergeKey(r, 'sectionId') === sidHex
-          );
-          const base =
-            idx >= 0
-              ? { ...current.sectionProgress[idx] }
-              : {
-                  sectionId: sectionOid,
-                  title: input.sectionUpdate.title,
-                  status: 'pending',
-                  durationMs: 0,
-                  updatedAt: new Date()
-                };
-          (base as any).sectionId = sectionOid;
-          if (input.sectionUpdate.title) base.title = String(input.sectionUpdate.title).trim();
-          base.status = st;
-          base.durationMs = Math.max(0, Math.floor(Number(base.durationMs || 0)) + add);
-          base.updatedAt = new Date();
-          if (idx >= 0) current.sectionProgress[idx] = base;
-          else current.sectionProgress.push(base);
-
-          if (st === 'completed') {
-            const smid = sectionOid.toHexString();
-            const cur = current.completedSections
-              .map((x: unknown) => String(x || '').trim())
-              .filter((s: string) => mongoose.Types.ObjectId.isValid(s));
-            const merged = [...new Set([...cur, smid])];
-            current.completedSections = merged.map((s) => new mongoose.Types.ObjectId(s));
-          }
+    if (input.quizUpdate && moduleRow) {
+      const quizOid = String(input.quizUpdate.quizMongoId || '').trim();
+      const row = (moduleRow.quizzes || []).find((q: any) => String(q?.quizId) === quizOid);
+      if (row) {
+        if (typeof input.quizUpdate.score === 'number') row.score = Math.max(0, Math.min(100, Math.round(input.quizUpdate.score)));
+        if (typeof input.quizUpdate.attempts === 'number') row.attempts = Math.max(0, Math.floor(input.quizUpdate.attempts));
+        if (typeof input.quizUpdate.attemptsDelta === 'number') {
+          row.attempts = Math.max(0, Math.floor(Number(row.attempts || 0) + input.quizUpdate.attemptsDelta));
         }
-
-        if (input.quizUpdate && String(input.quizUpdate.quizKey || '').trim()) {
-          const qk = String(input.quizUpdate.quizKey).trim();
-          const add = applyDur(input.quizUpdate.durationMs);
-          const idx = current.quizProgress.findIndex((r: any) => String(r?.quizKey) === qk);
-          const base =
-            idx >= 0
-              ? { ...current.quizProgress[idx] }
-              : {
-                  quizKey: qk,
-                  title: input.quizUpdate.title,
-                  status: 'pending',
-                  score: 0,
-                  attempts: 0,
-                  passed: false,
-                  durationMs: 0,
-                  updatedAt: new Date()
-                };
-          if (input.quizUpdate.title) base.title = String(input.quizUpdate.title).trim();
-          if (input.quizUpdate.status) base.status = input.quizUpdate.status;
-          if (typeof input.quizUpdate.score === 'number' && Number.isFinite(input.quizUpdate.score)) {
-            base.score = Math.max(0, Math.min(100, Math.round(input.quizUpdate.score)));
-          }
-          if (typeof input.quizUpdate.passed === 'boolean') base.passed = input.quizUpdate.passed;
-          const prevAttempts = Math.max(0, Math.floor(Number(base.attempts || 0)));
-          if (typeof input.quizUpdate.attempts === 'number' && Number.isFinite(input.quizUpdate.attempts)) {
-            base.attempts = Math.max(0, Math.floor(input.quizUpdate.attempts));
-          } else if (
-            typeof input.quizUpdate.attemptsDelta === 'number' &&
-            Number.isFinite(input.quizUpdate.attemptsDelta)
-          ) {
-            base.attempts = Math.max(0, prevAttempts + Math.floor(input.quizUpdate.attemptsDelta));
-          }
-          if (base.passed || base.status === 'passed') {
-            (base as any).lockedUntil = undefined;
-          } else if (Number(base.attempts || 0) >= 3) {
-            (base as any).lockedUntil = new Date(Date.now() + moduleCooldownMs);
-          }
-          base.durationMs = Math.max(0, Math.floor(Number(base.durationMs || 0)) + add);
-          base.updatedAt = new Date();
-
-          const qmid = String(input.quizUpdate.quizMongoId || '').trim();
-          if (qmid && mongoose.Types.ObjectId.isValid(qmid)) {
-            (base as any).quizId = new mongoose.Types.ObjectId(qmid);
-            current.quizScores = upsertQuizScoresLegacy(current.quizScores, qmid, {
-              score: Number(base.score || 0),
-              attempts: Number(base.attempts || 0),
-              passed: !!base.passed
-            });
-          }
-
-          if (idx >= 0) current.quizProgress[idx] = base;
-          else current.quizProgress.push(base);
-        }
-
-        const currentCompletedSections = Array.isArray(current.completedSections)
-          ? current.completedSections
-              .map((s: unknown) => String(s || '').trim())
-              .filter((s: string) => mongoose.Types.ObjectId.isValid(s))
-          : [];
-        const incomingCompletedSections = Array.isArray(input.completedSections)
-          ? input.completedSections
-              .map((s) => String(s || '').trim())
-              .filter((s: string) => mongoose.Types.ObjectId.isValid(s))
-          : [];
-        const mergedCompletedSections = [...new Set([...currentCompletedSections, ...incomingCompletedSections])];
-        current.completedSections = mergedCompletedSections.map((s) => new mongoose.Types.ObjectId(s));
-        // Self-heal legacy inconsistencies:
-        // if a section id is in completedSections, keep sectionProgress aligned as completed.
-        const completedHex = new Set(
-          current.completedSections
-            .map((s: unknown) => String(s || '').trim())
-            .filter((s: string) => mongoose.Types.ObjectId.isValid(s))
-            .map((s: string) => new mongoose.Types.ObjectId(s).toHexString())
-        );
-        if (Array.isArray(current.sectionProgress)) {
-          current.sectionProgress = current.sectionProgress.map((row: any) => {
-            const sid = progressRowMergeKey(row, 'sectionId');
-            if (!sid || !completedHex.has(sid)) return row;
-            return {
-              ...row,
-              status: 'completed',
-              updatedAt: new Date()
-            };
-          });
-        }
-
-        const granularDuration = applyDur(input.sectionUpdate?.durationMs) + applyDur(input.quizUpdate?.durationMs);
-        const legacyDelta =
-          !input.sectionUpdate && !input.quizUpdate ? applyDur(input.durationMs) : 0;
-        const deltaDuration = granularDuration + legacyDelta;
-        const nextDuration = Math.max(0, Math.floor(Number(current.durationMs || 0)) + deltaDuration);
-        const explicitProgress =
-          typeof input.progress === 'number' && Number.isFinite(input.progress)
-            ? Math.max(0, Math.min(100, Math.round(input.progress)))
-            : Math.max(0, Math.min(100, Math.round(Number(current.progress || 0))));
-        const explicitStatus: 'not_started' | 'in_progress' | 'completed' =
-          input.status === 'completed'
+        if (typeof input.quizUpdate.passed === 'boolean') row.passed = input.quizUpdate.passed;
+        row.status =
+          input.quizUpdate.status === 'passed' || row.passed
             ? 'completed'
-            : input.status === 'in_progress'
-              ? 'in_progress'
-              : explicitProgress > 0 || (Array.isArray(current.completedSections) && current.completedSections.length > 0)
-                ? 'in_progress'
-                : 'not_started';
-
-        doc.modules.set(mId, {
-          ...current,
-          moduleId: mOid,
-          progress: explicitProgress,
-          status: explicitStatus,
-          completedSections: current.completedSections,
-          sectionProgress: current.sectionProgress,
-          quizProgress: current.quizProgress,
-          quizScores: current.quizScores,
-          durationMs: nextDuration
-        });
+            : input.quizUpdate.status === 'failed'
+              ? 'failed'
+              : 'in_progress';
+        row.lastSubmittedAt = new Date();
       }
     }
 
-    syncAllModuleProgressStatusFromJourney(doc, jModules, {
-      moduleId: input.moduleId,
-      progress: input.progress
-    });
-
-    if (typeof input.engagementScore === 'number' && Number.isFinite(input.engagementScore)) {
-      doc.engagementScore = Math.max(0, Math.min(100, Math.round(input.engagementScore)));
-    }
     if (typeof input.currentSlideIndex === 'number' && Number.isFinite(input.currentSlideIndex)) {
-      doc.currentSlideIndex = Math.max(0, Math.floor(input.currentSlideIndex));
+      (tracking as any).slideIndex = Math.max(0, Math.floor(input.currentSlideIndex));
     }
-    if (input.currentModuleId && mongoose.Types.ObjectId.isValid(input.currentModuleId)) {
-      doc.currentModuleId = new mongoose.Types.ObjectId(input.currentModuleId);
+    if (typeof input.durationMs === 'number' && Number.isFinite(input.durationMs) && input.durationMs > 0) {
+      (tracking as any).durationMs = Math.max(0, Number((tracking as any).durationMs || 0) + Math.floor(input.durationMs));
     }
-    if (input.currentQuizPageBySlide && typeof input.currentQuizPageBySlide === 'object') {
-      const cleaned: Record<string, number> = {};
-      Object.entries(input.currentQuizPageBySlide).forEach(([k, v]) => {
-        const key = String(k || '').trim();
-        const num = Number(v);
-        if (!key || !Number.isFinite(num) || num < 0) return;
-        cleaned[key] = Math.floor(num);
-      });
-      doc.currentQuizPageBySlide = new Map(Object.entries(cleaned));
-    }
-    const addTotal =
-      (input.sectionUpdate &&
-      typeof input.sectionUpdate.durationMs === 'number' &&
-      Number.isFinite(input.sectionUpdate.durationMs) &&
-      input.sectionUpdate.durationMs > 0
-        ? Math.floor(input.sectionUpdate.durationMs)
-        : 0) +
-      (input.quizUpdate &&
-      typeof input.quizUpdate.durationMs === 'number' &&
-      Number.isFinite(input.quizUpdate.durationMs) &&
-      input.quizUpdate.durationMs > 0
-        ? Math.floor(input.quizUpdate.durationMs)
-        : 0) +
-      (!input.sectionUpdate && !input.quizUpdate &&
-      typeof input.durationMs === 'number' &&
-      Number.isFinite(input.durationMs) &&
-      input.durationMs > 0
-        ? Math.floor(input.durationMs)
-        : 0);
-    if (addTotal > 0) {
-      doc.totalDurationMs = Math.max(0, Math.floor(Number(doc.totalDurationMs || 0)) + addTotal);
-    }
-    doc.lastAccessed = new Date();
-
-    for (const mod of doc.modules.values()) {
-      const m = mod as any;
-      if (Array.isArray(m?.sectionProgress)) {
-        m.sectionProgress = m.sectionProgress.filter(
-          (r: any) => r?.sectionId != null && mongoose.Types.ObjectId.isValid(String(r.sectionId))
-        );
-      }
-      // Last-resort consistency guard:
-      // never keep a module as not_started when we already have completed sections.
-      const doneSectionCount = Array.isArray(m?.completedSections) ? m.completedSections.length : 0;
-      if (doneSectionCount > 0) {
-        const totalSections = Array.isArray(m?.sectionProgress) ? m.sectionProgress.length : 0;
-        const inferredProgress =
-          totalSections > 0 ? Math.min(100, Math.round((doneSectionCount / totalSections) * 100)) : 1;
-        const currentProgress = Number(m?.progress || 0);
-        if (!Number.isFinite(currentProgress) || currentProgress <= 0) {
-          m.progress = inferredProgress;
-        }
-        if (String(m?.status || '') === 'not_started') {
-          m.status = 'in_progress';
-        }
-      }
-    }
-
-    const modules = Array.from(doc.modules.values()) as any[];
-    doc.moduleInProgress = modules.filter((m) => m?.status === 'in_progress').length;
-    doc.moduleFinished = modules.filter((m) => m?.status === 'completed' || Number(m?.progress) >= 100).length;
-    if (doc.moduleTotal > 0 && doc.moduleFinished >= doc.moduleTotal) {
-      doc.completedAt = new Date();
-    }
-
-    await doc.save();
-    return doc;
+    recomputeModuleAndCourseProgress(tracking);
+    await tracking.save();
+    return tracking;
   }
 
   async getTrainingProgressByRep(repId: string) {
     const rid = String(repId || '').trim();
     if (!rid) return [];
     if (!mongoose.Types.ObjectId.isValid(rid)) return [];
-    return await RepProgress.find({ repId: new mongoose.Types.ObjectId(rid) }).sort({ updatedAt: -1 });
+    const rows = await RepTrainingTracking.find({ repId: new mongoose.Types.ObjectId(rid) }).sort({ updatedAt: -1 }).lean();
+    return rows.map((row: any) => {
+      const moduleRows = Array.isArray(row.modules) ? row.modules : [];
+      const modulesObject: Record<string, any> = {};
+      moduleRows.forEach((m: any) => {
+        const mid = normalizeAnyId(m?.moduleId);
+        if (!mid) return;
+        modulesObject[mid] = {
+          status: m?.status,
+          progress: Number(m?.progressPercentage || 0),
+          completedSections: (Array.isArray(m?.sections) ? m.sections : [])
+            .filter((s: any) => String(s?.status) === 'completed')
+            .map((s: any) => s?.sectionId),
+          sectionProgress: (Array.isArray(m?.sections) ? m.sections : []).map((s: any) => ({
+            sectionId: s?.sectionId,
+            status: s?.status
+          })),
+          quizProgress: (Array.isArray(m?.quizzes) ? m.quizzes : []).map((q: any) => ({
+            quizKey: normalizeAnyId(q?.quizId) || String(q?.title || ''),
+            status: q?.passed ? 'passed' : q?.status,
+            passed: !!q?.passed
+          })),
+          quizScores: (Array.isArray(m?.quizzes) ? m.quizzes : []).map((q: any) => ({
+            quizId: q?.quizId,
+            passed: !!q?.passed
+          }))
+        };
+      });
+      return {
+        journeyId: normalizeAnyId(row.journeyId || row.courseId),
+        moduleTotal: Number(row.totalModules || moduleRows.length || 0),
+        moduleFinished: moduleRows.filter((m: any) => String(m?.status) === 'completed').length,
+        moduleInProgress: moduleRows.filter((m: any) => String(m?.status) === 'in_progress').length,
+        engagementScore: Number(row.engagementScore || row.progressPercentage || 0),
+        lastAccessed: row.updatedAt,
+        currentSlideIndex: Number(row.slideIndex || 0),
+        totalDurationMs: Number(row.durationMs || 0),
+        modules: modulesObject
+      };
+    });
   }
 
   /**
@@ -1418,10 +1445,11 @@ class TrainingJourneyService {
     const repOid = new mongoose.Types.ObjectId(rid);
     const gid = String(gigId || '').trim();
 
-    const progresses = await RepProgress.find({ repId: repOid }).lean();
+    const progresses = await RepTrainingTracking.find({ repId: repOid }).lean();
     const progressByJourney = new Map<string, (typeof progresses)[0]>();
-    for (const p of progresses) {
-      if (p?.journeyId) progressByJourney.set(String(p.journeyId), p);
+    for (const p of progresses as any[]) {
+      const jid = normalizeAnyId((p as any)?.journeyId || (p as any)?.courseId);
+      if (jid) progressByJourney.set(jid, p as any);
     }
 
     type JourneyDocLite = {
@@ -1447,8 +1475,9 @@ class TrainingJourneyService {
       }
     } else {
       const journeyIds = new Set<string>();
-      for (const p of progresses) {
-        if (p?.journeyId) journeyIds.add(String(p.journeyId));
+      for (const p of progresses as any[]) {
+        const jid = normalizeAnyId((p as any)?.journeyId || (p as any)?.courseId);
+        if (jid) journeyIds.add(jid);
       }
 
       if (journeyIds.size === 0) {
@@ -1581,7 +1610,9 @@ class TrainingJourneyService {
     const jid = String(journeyId || '').trim();
     if (!jid) return [];
     if (!mongoose.Types.ObjectId.isValid(jid)) return [];
-    return await RepProgress.find({ journeyId: new mongoose.Types.ObjectId(jid) }).sort({ updatedAt: -1 });
+    return await RepTrainingTracking.find({
+      $or: [{ journeyId: new mongoose.Types.ObjectId(jid) }, { courseId: new mongoose.Types.ObjectId(jid) }]
+    }).sort({ updatedAt: -1 });
   }
 
   async recordTrainingTrackingEvent(input: {
@@ -1631,6 +1662,7 @@ class TrainingJourneyService {
     const completed = input.completed !== false;
     const $set: Record<string, unknown> = {
       repId: repOid,
+      courseId: journeyOid,
       journeyId: journeyOid,
       event: ev,
       [`slides.${slideKey}`]: { completed }

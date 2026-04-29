@@ -445,6 +445,55 @@ export const getRepProgress = asyncHandler(async (req: AuthRequest, res: Respons
   res.status(200).json({ success: true, data: progress });
 });
 
+/** GET /progress/:repId/:courseId */
+export const getStructuredProgress = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const repId = String(req.params.repId || '').trim();
+  const courseId = String(req.params.courseId || '').trim();
+  if (!repId || !courseId) {
+    res.status(400).json({ success: false, error: 'repId and courseId are required' });
+    return;
+  }
+  const progress = await trainingJourneyService.getStructuredProgress(repId, courseId);
+  res.status(200).json({ success: true, data: progress });
+});
+
+/** POST /section/start */
+export const startSectionProgress = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const payload = req.body || {};
+  const progress = await trainingJourneyService.startSection({
+    repId: String(payload.repId || '').trim(),
+    courseId: String(payload.courseId || payload.journeyId || '').trim(),
+    moduleId: String(payload.moduleId || '').trim(),
+    sectionId: String(payload.sectionId || '').trim()
+  });
+  res.status(200).json({ success: true, data: progress });
+});
+
+/** POST /section/complete */
+export const completeSectionProgress = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const payload = req.body || {};
+  const progress = await trainingJourneyService.completeSection({
+    repId: String(payload.repId || '').trim(),
+    courseId: String(payload.courseId || payload.journeyId || '').trim(),
+    moduleId: String(payload.moduleId || '').trim(),
+    sectionId: String(payload.sectionId || '').trim()
+  });
+  res.status(200).json({ success: true, data: progress });
+});
+
+/** POST /quiz/submit */
+export const submitQuizProgress = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const payload = req.body || {};
+  const result = await trainingJourneyService.submitQuiz({
+    repId: String(payload.repId || '').trim(),
+    courseId: String(payload.courseId || payload.journeyId || '').trim(),
+    moduleId: String(payload.moduleId || '').trim(),
+    quizId: String(payload.quizId || '').trim(),
+    answers: Array.isArray(payload.answers) ? payload.answers.map((x: unknown) => Number(x)) : []
+  });
+  res.status(200).json({ success: true, data: result });
+});
+
 /** POST /training_journeys/rep-progress */
 export const upsertRepProgress = asyncHandler(async (req: AuthRequest, res: Response) => {
   const payload = req.body || {};

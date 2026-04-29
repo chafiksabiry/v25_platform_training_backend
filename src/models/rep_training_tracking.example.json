@@ -1,0 +1,58 @@
+{
+  "repId": "665f2f24a8e4f6d4c0a2b111",
+  "courseId": "665f2f24a8e4f6d4c0a2b222",
+  "repId": "665f2f24a8e4f6d4c0a2b111",
+  "journeyId": "665f2f24a8e4f6d4c0a2b222",
+  "status": "in_progress",
+  "progressPercentage": 50,
+  "completedModules": 1,
+  "totalModules": 2,
+  "modules": [
+    {
+      "moduleId": "665f2f24a8e4f6d4c0a2b301",
+      "title": "Module 1",
+      "status": "completed",
+      "progressPercentage": 100,
+      "sections": [
+        {
+          "sectionId": "665f2f24a8e4f6d4c0a2b311",
+          "title": "Section 1",
+          "status": "completed"
+        }
+      ],
+      "quizzes": [
+        {
+          "quizId": "665f2f24a8e4f6d4c0a2b321",
+          "title": "Quiz 1",
+          "status": "completed",
+          "score": 80,
+          "attempts": 1,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "moduleId": "665f2f24a8e4f6d4c0a2b302",
+      "title": "Module 2",
+      "status": "locked",
+      "progressPercentage": 0,
+      "sections": [
+        {
+          "sectionId": "665f2f24a8e4f6d4c0a2b312",
+          "title": "Section 1",
+          "status": "pending"
+        }
+      ],
+      "quizzes": [
+        {
+          "quizId": "665f2f24a8e4f6d4c0a2b322",
+          "title": "Quiz 1",
+          "status": "pending",
+          "score": 0,
+          "attempts": 0,
+          "passed": false
+        }
+      ]
+    }
+  ]
+}
