@@ -1,10 +1,37 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+export type SectionProgressStatus = 'pending' | 'in_progress' | 'completed';
+export type QuizProgressStatus = 'pending' | 'in_progress' | 'passed' | 'failed';
+
+export interface ISectionProgressRow {
+  sectionKey: string;
+  title?: string;
+  status: SectionProgressStatus;
+  durationMs: number;
+  updatedAt?: Date;
+}
+
+export interface IQuizProgressRow {
+  quizKey: string;
+  quizId?: mongoose.Types.ObjectId;
+  title?: string;
+  status: QuizProgressStatus;
+  score: number;
+  attempts: number;
+  passed: boolean;
+  durationMs: number;
+  updatedAt?: Date;
+}
+
 export interface IModuleProgress {
   moduleId: mongoose.Types.ObjectId;
   progress: number;
   status: string;
   completedSections: mongoose.Types.ObjectId[];
+  /** Détail par section (clé stable côté client, pas seulement ObjectId). */
+  sectionProgress?: ISectionProgressRow[];
+  /** Détail par quiz. */
+  quizProgress?: IQuizProgressRow[];
   durationMs?: number;
   quizScores: Array<{
     quizId: mongoose.Types.ObjectId;
@@ -31,6 +58,40 @@ export interface IRepProgress extends Document {
   updatedAt: Date;
 }
 
+const sectionProgressRowSchema = new Schema(
+  {
+    sectionKey: { type: String, required: true },
+    title: { type: String },
+    status: {
+      type: String,
+      default: 'pending',
+      enum: ['pending', 'in_progress', 'completed']
+    },
+    durationMs: { type: Number, default: 0, min: 0 },
+    updatedAt: { type: Date }
+  },
+  { _id: false }
+);
+
+const quizProgressRowSchema = new Schema(
+  {
+    quizKey: { type: String, required: true },
+    quizId: { type: Schema.Types.ObjectId },
+    title: { type: String },
+    status: {
+      type: String,
+      default: 'pending',
+      enum: ['pending', 'in_progress', 'passed', 'failed']
+    },
+    score: { type: Number, default: 0, min: 0, max: 100 },
+    attempts: { type: Number, default: 0, min: 0 },
+    passed: { type: Boolean, default: false },
+    durationMs: { type: Number, default: 0, min: 0 },
+    updatedAt: { type: Date }
+  },
+  { _id: false }
+);
+
 const moduleProgressSchema = new Schema(
   {
     moduleId: { type: Schema.Types.ObjectId, required: true },
@@ -41,6 +102,8 @@ const moduleProgressSchema = new Schema(
       enum: ['not_started', 'in_progress', 'completed']
     },
     completedSections: [{ type: Schema.Types.ObjectId }],
+    sectionProgress: { type: [sectionProgressRowSchema], default: undefined },
+    quizProgress: { type: [quizProgressRowSchema], default: undefined },
     durationMs: { type: Number, default: 0, min: 0 },
     quizScores: [{
       quizId: { type: Schema.Types.ObjectId, required: true },

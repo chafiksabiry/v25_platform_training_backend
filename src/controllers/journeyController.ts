@@ -448,6 +448,8 @@ export const getRepProgress = asyncHandler(async (req: AuthRequest, res: Respons
 /** POST /training_journeys/rep-progress */
 export const upsertRepProgress = asyncHandler(async (req: AuthRequest, res: Response) => {
   const payload = req.body || {};
+  const su = payload.sectionUpdate;
+  const qu = payload.quizUpdate;
   const updated = await trainingJourneyService.upsertRepProgress({
     repId: String(payload.repId || ''),
     journeyId: String(payload.journeyId || ''),
@@ -456,7 +458,31 @@ export const upsertRepProgress = asyncHandler(async (req: AuthRequest, res: Resp
     status: payload.status,
     completedSections: Array.isArray(payload.completedSections) ? payload.completedSections : undefined,
     engagementScore: typeof payload.engagementScore === 'number' ? payload.engagementScore : undefined,
-    durationMs: typeof payload.durationMs === 'number' ? payload.durationMs : undefined
+    durationMs: typeof payload.durationMs === 'number' ? payload.durationMs : undefined,
+    sectionUpdate:
+      su && typeof su === 'object' && String(su.sectionKey || '').trim()
+        ? {
+            sectionKey: String(su.sectionKey).trim(),
+            sectionMongoId: su.sectionMongoId != null ? String(su.sectionMongoId) : undefined,
+            title: su.title != null ? String(su.title) : undefined,
+            status: su.status,
+            durationMs: typeof su.durationMs === 'number' ? su.durationMs : undefined
+          }
+        : undefined,
+    quizUpdate:
+      qu && typeof qu === 'object' && String(qu.quizKey || '').trim()
+        ? {
+            quizKey: String(qu.quizKey).trim(),
+            quizMongoId: qu.quizMongoId != null ? String(qu.quizMongoId) : undefined,
+            title: qu.title != null ? String(qu.title) : undefined,
+            status: qu.status,
+            score: typeof qu.score === 'number' ? qu.score : undefined,
+            attempts: typeof qu.attempts === 'number' ? qu.attempts : undefined,
+            attemptsDelta: typeof qu.attemptsDelta === 'number' ? qu.attemptsDelta : undefined,
+            passed: typeof qu.passed === 'boolean' ? qu.passed : undefined,
+            durationMs: typeof qu.durationMs === 'number' ? qu.durationMs : undefined
+          }
+        : undefined
   });
   res.status(200).json({ success: true, data: updated });
 });

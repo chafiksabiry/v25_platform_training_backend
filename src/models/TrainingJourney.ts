@@ -155,7 +155,7 @@ export interface ITrainingJourney extends Document {
   modulePlan?: IModulePlanItem[];
   modules: ITrainingModule[];
   finalExam?: IFinalExam;
-  enrolledRepIds?: string[];
+  enrolledRepIds?: mongoose.Types.ObjectId[];
   launchDate?: Date;
   visualTheme?: {
     primaryColor?: string;
@@ -333,7 +333,7 @@ const trainingJourneySchema = new Schema<ITrainingJourney>(
     modules: [trainingModuleSchema],
     finalExam: finalExamSchema,
     enrolledRepIds: [{
-      type: String,
+      type: Schema.Types.ObjectId,
       ref: 'Rep'
     }],
     launchDate: {
