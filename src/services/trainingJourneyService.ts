@@ -1678,7 +1678,7 @@ class TrainingJourneyService {
     }
 
     return await RepTrainingTracking.findOneAndUpdate(
-      { repId: repOid, journeyId: journeyOid },
+      { repId: repOid, courseId: journeyOid },
       { $set },
       { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
     );
@@ -1687,7 +1687,10 @@ class TrainingJourneyService {
   async listTrainingTrackingEvents(opts: { repId: string; journeyId: string; limit?: number; skip?: number }) {
     const repOid = requireObjectId(opts.repId, 'repId');
     const journeyOid = requireObjectId(opts.journeyId, 'journeyId');
-    const doc = await RepTrainingTracking.findOne({ repId: repOid, journeyId: journeyOid }).lean();
+    const doc = await RepTrainingTracking.findOne({
+      repId: repOid,
+      $or: [{ courseId: journeyOid }, { journeyId: journeyOid }]
+    }).lean();
     return doc ? [doc] : [];
   }
 
