@@ -1231,6 +1231,9 @@ class TrainingJourneyService {
     if (module.status === 'locked') throw new AppError('Module is locked. Complete previous module first.', 409);
     const section = (module.sections || []).find((s: any) => String(s.sectionId) === sectionId);
     if (!section) throw new AppError('Section not found in module', 404);
+    if (String(section.status) === 'completed') {
+      return tracking;
+    }
     if (module.status === 'pending') module.status = 'in_progress';
     if (section.status === 'pending') section.status = 'in_progress';
     recomputeModuleAndCourseProgress(tracking);
@@ -1255,6 +1258,19 @@ class TrainingJourneyService {
     if (module.status === 'locked') throw new AppError('Module is locked. Complete previous module first.', 409);
     const section = (module.sections || []).find((s: any) => String(s.sectionId) === sectionId);
     if (!section) throw new AppError('Section not found in module', 404);
+    const secSt = String(section.status);
+    if (secSt === 'completed') {
+      return tracking;
+    }
+    if (secSt !== 'in_progress') {
+      if (secSt === 'pending') {
+        throw new AppError(
+          'Section must be started before it can be completed. Call POST /training_journeys/section/start first.',
+          409
+        );
+      }
+      throw new AppError('Section must be in progress before it can be completed.', 409);
+    }
     section.status = 'completed';
     section.completedAt = new Date();
     if (module.status === 'pending') module.status = 'in_progress';
@@ -1375,7 +1391,23 @@ class TrainingJourneyService {
       if (moduleRow && sectionOid) {
         const row = (moduleRow.sections || []).find((s: any) => String(s?.sectionId) === String(sectionOid));
         if (row) {
-          row.status = input.sectionUpdate.status || 'completed';
+          const requested = (input.sectionUpdate.status || 'completed') as
+            | 'pending'
+            | 'in_progress'
+            | 'completed';
+          if (requested === 'completed') {
+            const rs = String(row.status);
+            if (rs === 'pending') {
+              throw new AppError(
+                'Section must be started before it can be completed. Call POST /training_journeys/section/start first.',
+                409
+              );
+            }
+            if (rs !== 'in_progress' && rs !== 'completed') {
+              throw new AppError('Section must be in progress before it can be completed.', 409);
+            }
+          }
+          row.status = requested;
           if (row.status === 'completed') row.completedAt = new Date();
         }
       }
