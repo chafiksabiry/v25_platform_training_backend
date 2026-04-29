@@ -23,6 +23,9 @@ export const createJourney = asyncHandler(async (req: AuthRequest, res: Response
   if (journeyData.podcast !== undefined && !isValidObjectId(journeyData.podcast)) {
     delete journeyData.podcast;
   }
+  if (journeyData.repId !== undefined && !isValidObjectId(journeyData.repId)) {
+    delete journeyData.repId;
+  }
 
   if (presentationData) {
     console.log('📊 [createJourney] presentationData found, slides count:', presentationData.slides?.length);
@@ -62,6 +65,9 @@ export const updateJourney = asyncHandler(async (req: AuthRequest, res: Response
   }
   if (journeyData.podcast !== undefined && !isValidObjectId(journeyData.podcast)) {
     delete journeyData.podcast;
+  }
+  if (journeyData.repId !== undefined && !isValidObjectId(journeyData.repId)) {
+    delete journeyData.repId;
   }
 
   if (presentationData) {

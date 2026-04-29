@@ -286,7 +286,7 @@ class TrainingJourneyService {
 
     // New: Ensure relational IDs are valid ObjectIds if they look like ones
     // This helps Mongoose cast them correctly
-    ['companyId', 'gigId', 'industry'].forEach(field => {
+    ['companyId', 'gigId', 'repId', 'industry'].forEach(field => {
       if (journey[field] && typeof journey[field] === 'string' && mongoose.Types.ObjectId.isValid(journey[field])) {
         // Mongoose will handle the actual casting, but we ensure it's a valid hex string
       }
@@ -416,11 +416,16 @@ class TrainingJourneyService {
   async getJourneysForRep(repId: string): Promise<ITrainingJourney[]> {
     const id = String(repId || '').trim();
     if (!id) return [];
-    const variants = [id];
+    const variants: (string | mongoose.Types.ObjectId)[] = [id];
     if (mongoose.Types.ObjectId.isValid(id)) {
-      variants.push(new mongoose.Types.ObjectId(id).toString());
+      variants.push(new mongoose.Types.ObjectId(id));
     }
-    return await TrainingJourney.find({ enrolledRepIds: { $in: [...new Set(variants)] } })
+    return await TrainingJourney.find({
+      $or: [
+        { enrolledRepIds: { $in: variants.map((v) => String(v)) } },
+        { repId: { $in: variants } }
+      ]
+    })
       .populate('gigId', '_id title status companyId')
       .sort({ updatedAt: -1 });
   }

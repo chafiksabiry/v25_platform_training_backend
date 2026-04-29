@@ -135,6 +135,7 @@ export interface IPresentation {
 export interface ITrainingJourney extends Document {
   companyId?: string | mongoose.Types.ObjectId;
   gigId?: string | mongoose.Types.ObjectId;
+  repId?: string | mongoose.Types.ObjectId;
   industry?: string | mongoose.Types.ObjectId;
   /** Référence Mongo vers le dernier jeu de slides images (training_image_sets) */
   images?: string | mongoose.Types.ObjectId;
@@ -270,6 +271,10 @@ const trainingJourneySchema = new Schema<ITrainingJourney>(
       type: Schema.Types.ObjectId,
       ref: 'Gig'
     },
+    repId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Rep'
+    },
     industry: {
       type: Schema.Types.ObjectId,
       ref: 'Industry'
@@ -366,6 +371,7 @@ const trainingJourneySchema = new Schema<ITrainingJourney>(
 
 trainingJourneySchema.index({ companyId: 1 });
 trainingJourneySchema.index({ gigId: 1 });
+trainingJourneySchema.index({ repId: 1 });
 trainingJourneySchema.index({ status: 1 });
 trainingJourneySchema.index({ industry: 1 });
 
