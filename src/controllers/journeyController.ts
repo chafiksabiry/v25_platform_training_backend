@@ -459,6 +459,13 @@ export const upsertRepProgress = asyncHandler(async (req: AuthRequest, res: Resp
     completedSections: Array.isArray(payload.completedSections) ? payload.completedSections : undefined,
     engagementScore: typeof payload.engagementScore === 'number' ? payload.engagementScore : undefined,
     durationMs: typeof payload.durationMs === 'number' ? payload.durationMs : undefined,
+    currentModuleId: payload.currentModuleId != null ? String(payload.currentModuleId) : undefined,
+    currentSlideIndex:
+      typeof payload.currentSlideIndex === 'number' ? payload.currentSlideIndex : undefined,
+    currentQuizPageBySlide:
+      payload.currentQuizPageBySlide && typeof payload.currentQuizPageBySlide === 'object'
+        ? payload.currentQuizPageBySlide
+        : undefined,
     sectionUpdate:
       su && typeof su === 'object'
         ? {

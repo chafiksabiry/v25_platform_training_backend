@@ -399,12 +399,23 @@ function computeModuleProgressAndStatus(
   inputProgressFallback?: number
 ): { progress: number; status: 'not_started' | 'in_progress' | 'completed' } {
   if (!jm) {
+    const hasCompletedWork =
+      (Array.isArray(current?.completedSections) && current.completedSections.length > 0) ||
+      (Array.isArray(current?.sectionProgress) &&
+        current.sectionProgress.some((r: any) => String(r?.status) === 'completed')) ||
+      (Array.isArray(current?.quizProgress) &&
+        current.quizProgress.some(
+          (r: any) =>
+            String(r?.status) === 'passed' ||
+            String(r?.status) === 'failed' ||
+            (Number(r?.attempts) || 0) > 0
+        ));
     const nextProgress = Math.max(
       0,
       Math.min(100, Math.round(Number(inputProgressFallback ?? current?.progress ?? 0)))
     );
     const nextStatus: 'not_started' | 'in_progress' | 'completed' =
-      nextProgress >= 100 ? 'completed' : nextProgress > 0 ? 'in_progress' : 'not_started';
+      nextProgress >= 100 ? 'completed' : nextProgress > 0 || hasCompletedWork ? 'in_progress' : 'not_started';
     return { progress: nextProgress, status: nextStatus };
   }
 
@@ -1024,6 +1035,9 @@ class TrainingJourneyService {
     completedSections?: string[];
     engagementScore?: number;
     durationMs?: number;
+    currentModuleId?: string;
+    currentSlideIndex?: number;
+    currentQuizPageBySlide?: Record<string, unknown>;
     sectionUpdate?: {
       /** ObjectId hex (prioritaire). */
       sectionId?: string;
@@ -1098,6 +1112,24 @@ class TrainingJourneyService {
 
         const applyDur = (n: unknown) =>
           typeof n === 'number' && Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+        const moduleCooldownMs = (() => {
+          const jm = jModules.find(
+            (m: any, idx: number) =>
+              String(normalizeAnyId(m?._id) || normalizeAnyId(m?.id) || String(idx)) === mId
+          );
+          const moduleMinutesRaw = Number((jm as any)?.duration);
+          if (Number.isFinite(moduleMinutesRaw) && moduleMinutesRaw > 0) {
+            return Math.floor(moduleMinutesRaw * 60 * 1000);
+          }
+          const sectionMinutes = Array.isArray((jm as any)?.sections)
+            ? (jm as any).sections.reduce((acc: number, s: any) => {
+                const n = Number(s?.duration);
+                return acc + (Number.isFinite(n) && n > 0 ? n : 0);
+              }, 0)
+            : 0;
+          if (sectionMinutes > 0) return Math.floor(sectionMinutes * 60 * 1000);
+          return 30 * 60 * 1000;
+        })();
 
         const current = (doc.modules?.get(mId) as any) || {
           moduleId: mOid,
@@ -1183,6 +1215,11 @@ class TrainingJourneyService {
           ) {
             base.attempts = Math.max(0, prevAttempts + Math.floor(input.quizUpdate.attemptsDelta));
           }
+          if (base.passed || base.status === 'passed') {
+            (base as any).lockedUntil = undefined;
+          } else if (Number(base.attempts || 0) >= 3) {
+            (base as any).lockedUntil = new Date(Date.now() + moduleCooldownMs);
+          }
           base.durationMs = Math.max(0, Math.floor(Number(base.durationMs || 0)) + add);
           base.updatedAt = new Date();
 
@@ -1238,6 +1275,22 @@ class TrainingJourneyService {
 
     if (typeof input.engagementScore === 'number' && Number.isFinite(input.engagementScore)) {
       doc.engagementScore = Math.max(0, Math.min(100, Math.round(input.engagementScore)));
+    }
+    if (typeof input.currentSlideIndex === 'number' && Number.isFinite(input.currentSlideIndex)) {
+      doc.currentSlideIndex = Math.max(0, Math.floor(input.currentSlideIndex));
+    }
+    if (input.currentModuleId && mongoose.Types.ObjectId.isValid(input.currentModuleId)) {
+      doc.currentModuleId = new mongoose.Types.ObjectId(input.currentModuleId);
+    }
+    if (input.currentQuizPageBySlide && typeof input.currentQuizPageBySlide === 'object') {
+      const cleaned: Record<string, number> = {};
+      Object.entries(input.currentQuizPageBySlide).forEach(([k, v]) => {
+        const key = String(k || '').trim();
+        const num = Number(v);
+        if (!key || !Number.isFinite(num) || num < 0) return;
+        cleaned[key] = Math.floor(num);
+      });
+      doc.currentQuizPageBySlide = new Map(Object.entries(cleaned));
     }
     const addTotal =
       (input.sectionUpdate &&

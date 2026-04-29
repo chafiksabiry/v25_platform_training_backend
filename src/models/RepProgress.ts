@@ -20,6 +20,7 @@ export interface IQuizProgressRow {
   score: number;
   attempts: number;
   passed: boolean;
+  lockedUntil?: Date;
   durationMs: number;
   updatedAt?: Date;
 }
@@ -49,6 +50,9 @@ export interface IRepProgress extends Document {
   moduleFinished: number;
   moduleInProgress: number;
   modules: Map<string, IModuleProgress>;
+  currentModuleId?: mongoose.Types.ObjectId;
+  currentSlideIndex?: number;
+  currentQuizPageBySlide?: Map<string, number>;
   engagementScore: number;
   totalDurationMs: number;
   lastAccessed?: Date;
@@ -87,6 +91,7 @@ const quizProgressRowSchema = new Schema(
     score: { type: Number, default: 0, min: 0, max: 100 },
     attempts: { type: Number, default: 0, min: 0 },
     passed: { type: Boolean, default: false },
+    lockedUntil: { type: Date },
     durationMs: { type: Number, default: 0, min: 0 },
     updatedAt: { type: Date }
   },
@@ -143,6 +148,19 @@ const repProgressSchema = new Schema<IRepProgress>(
     modules: {
       type: Map,
       of: moduleProgressSchema,
+      default: new Map()
+    },
+    currentModuleId: {
+      type: Schema.Types.ObjectId
+    },
+    currentSlideIndex: {
+      type: Number,
+      min: 0,
+      default: 0
+    },
+    currentQuizPageBySlide: {
+      type: Map,
+      of: Number,
       default: new Map()
     },
     engagementScore: {
