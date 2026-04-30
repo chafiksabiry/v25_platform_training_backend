@@ -1731,10 +1731,18 @@ class TrainingJourneyService {
       const ratio = totalUnits > 0 ? completedUnits / totalUnits : 0;
       const unitsCompleted = completedUnits;
       const unitsTotal = totalUnits;
+      /** Reprendre la slide du viewer : champ persisté `slideIndex` (POST rep-progress), pas `completedUnits` (échelle modules+sections+quizzes). */
       const currentSlideIndex = (() => {
-        const raw = Number(progressRow?.currentSlideIndex);
+        const raw = Number(
+          progressRow?.slideIndex ?? (progressRow as { currentSlideIndex?: unknown })?.currentSlideIndex
+        );
         if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw);
-        return Math.max(0, unitsCompleted);
+        const slidesArr = (doc as { presentation?: { slides?: unknown } })?.presentation?.slides;
+        const nSlides = Array.isArray(slidesArr) ? slidesArr.length : 0;
+        if (nSlides > 0 && progressRow) {
+          return resolveCurrentSlideIndex(doc as any, progressRow as any, progressRow as any, nSlides);
+        }
+        return 0;
       })();
       journeys.push({
         journeyId: jid,
