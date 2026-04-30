@@ -2172,13 +2172,13 @@ class TrainingJourneyService {
 
     // Return structured certification info
     const journey = await TrainingJourney.findById(jid).select('title certifications');
-    const rep = await Rep.findById(rid).select('basicInfo');
+    const rep = await Rep.findById(rid).select('name');
 
     return {
       success: true,
       certification: {
         repId: rid,
-        traineeName: rep?.basicInfo ? `${rep.basicInfo.firstName} ${rep.basicInfo.lastName}` : 'Trainee',
+        traineeName: rep?.name || 'Trainee',
         trainingTitle: journey?.title || 'Training',
         issuedAt: tracking.certificationIssuedAt,
         status: 'certified'
