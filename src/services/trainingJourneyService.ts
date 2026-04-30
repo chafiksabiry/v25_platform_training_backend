@@ -186,12 +186,29 @@ export type RepSlideProgressSummary = {
 function normalizeAnyId(raw: unknown): string {
   if (raw == null) return '';
   if (typeof raw === 'string') return raw.trim();
+  if (raw instanceof mongoose.Types.ObjectId) return raw.toHexString();
   if (typeof raw === 'object' && raw !== null) {
     if ('$oid' in raw) return String((raw as { $oid?: unknown }).$oid || '').trim();
-    if ('_id' in raw) return normalizeAnyId((raw as { _id?: unknown })._id);
-    if ('id' in raw) return normalizeAnyId((raw as { id?: unknown }).id);
+    const maybeHex = (raw as { toHexString?: () => string }).toHexString;
+    if (typeof maybeHex === 'function') {
+      try {
+        const h = String(maybeHex.call(raw) || '').trim();
+        if (/^[a-f\d]{24}$/i.test(h)) return h.toLowerCase();
+      } catch {
+        /* ignore */
+      }
+    }
+    if ('_id' in raw) {
+      const nested = (raw as { _id?: unknown })._id;
+      if (nested !== undefined && nested !== raw) return normalizeAnyId(nested);
+    }
+    if ('id' in raw) {
+      const nestedId = (raw as { id?: unknown }).id;
+      if (nestedId !== undefined && nestedId !== raw) return normalizeAnyId(nestedId);
+    }
   }
-  return String(raw).trim();
+  const s = String(raw).trim();
+  return s;
 }
 
 function toProgressModulesLookup(raw: unknown): Record<string, any> {
