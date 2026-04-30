@@ -734,6 +734,8 @@ function recomputeModuleAndCourseProgress(tracking: any): any {
   if (tracking.status === 'completed') {
     tracking.completedAt = tracking.completedAt || new Date();
   }
+  /** Même valeur que la progression formation : utile pour les agrégats / anciennes lectures `engagementScore`. */
+  tracking.engagementScore = Math.min(100, Math.max(0, Math.round(Number(tracking.progressPercentage || 0))));
   return tracking;
 }
 
@@ -1405,8 +1407,10 @@ class TrainingJourneyService {
     completedSections?: string[];
     engagementScore?: number;
     durationMs?: number;
+    /** Module courant (viewer) — persisté sur le doc `rep_training_tracking.moduleId`. */
     currentModuleId?: string;
     currentSlideIndex?: number;
+    /** Pages quiz par clé de slide — persisté (Mixed). */
     currentQuizPageBySlide?: Record<string, unknown>;
     sectionUpdate?: {
       /** ObjectId hex (prioritaire). */
@@ -1500,7 +1504,25 @@ class TrainingJourneyService {
     if (typeof input.durationMs === 'number' && Number.isFinite(input.durationMs) && input.durationMs > 0) {
       (tracking as any).durationMs = Math.max(0, Number((tracking as any).durationMs || 0) + Math.floor(input.durationMs));
     }
+    const cmid = String(input.currentModuleId || '').trim();
+    if (cmid && mongoose.Types.ObjectId.isValid(cmid)) {
+      (tracking as any).moduleId = new mongoose.Types.ObjectId(cmid);
+    }
+    if (input.currentQuizPageBySlide && typeof input.currentQuizPageBySlide === 'object') {
+      const prev = (tracking as any).currentQuizPageBySlide;
+      const prevObj =
+        prev && typeof prev === 'object' && !Array.isArray(prev) && !(prev instanceof Map)
+          ? { ...(prev as Record<string, unknown>) }
+          : {};
+      (tracking as any).currentQuizPageBySlide = {
+        ...prevObj,
+        ...(input.currentQuizPageBySlide as Record<string, unknown>)
+      };
+    }
     recomputeModuleAndCourseProgress(tracking);
+    if (typeof input.engagementScore === 'number' && Number.isFinite(input.engagementScore)) {
+      (tracking as any).engagementScore = Math.max(0, Math.min(100, Math.round(input.engagementScore)));
+    }
     await tracking.save();
     return tracking;
   }
@@ -1546,6 +1568,11 @@ class TrainingJourneyService {
         engagementScore: Number(row.engagementScore || 0),
         lastAccessed: row.updatedAt,
         currentSlideIndex: Number(row.slideIndex || 0),
+        currentModuleId: normalizeAnyId(row.moduleId) || undefined,
+        currentQuizPageBySlide:
+          row.currentQuizPageBySlide && typeof row.currentQuizPageBySlide === 'object'
+            ? row.currentQuizPageBySlide
+            : undefined,
         totalDurationMs: Number(row.durationMs || 0),
         modules: modulesObject
       };

@@ -58,6 +58,8 @@ export interface IUserProgress extends Document {
   event?: RepTrainingTrackingEventKind | string;
   moduleId?: mongoose.Types.ObjectId;
   slideIndex?: number;
+  /** Pages courantes des blocs quiz (clé slide → index question), persisté depuis rep-progress. */
+  currentQuizPageBySlide?: Record<string, unknown>;
   slides?: Map<string, { completed?: boolean }>;
   durationMs?: number;
   engagementScore?: number;
@@ -116,6 +118,7 @@ const userProgressSchema = new Schema<IUserProgress>(
     event: { type: String, enum: REP_TRAINING_TRACKING_EVENTS },
     moduleId: { type: Schema.Types.ObjectId },
     slideIndex: { type: Number, min: 0 },
+    currentQuizPageBySlide: { type: Schema.Types.Mixed },
     slides: { type: Map, of: new Schema({ completed: { type: Boolean, default: false } }, { _id: false }) },
     durationMs: { type: Number, min: 0, default: 0 },
     engagementScore: { type: Number, min: 0, max: 100, default: 0 },
