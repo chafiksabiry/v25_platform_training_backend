@@ -30,6 +30,8 @@ export interface IQuizProgress {
   attempts: number;
   passed: boolean;
   lastSubmittedAt?: Date;
+  /** Après épuisement des tentatives (échec) : fin du blocage temporaire sur le module / quiz. */
+  lockedUntil?: Date;
 }
 
 export interface ISectionProgress {
@@ -91,7 +93,8 @@ const quizProgressSchema = new Schema<IQuizProgress>(
     score: { type: Number, min: 0, max: 100, default: 0 },
     attempts: { type: Number, min: 0, default: 0 },
     passed: { type: Boolean, default: false },
-    lastSubmittedAt: { type: Date }
+    lastSubmittedAt: { type: Date },
+    lockedUntil: { type: Date }
   },
   { _id: false }
 );

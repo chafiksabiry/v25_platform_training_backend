@@ -234,7 +234,10 @@ function toProgressModulesLookup(raw: unknown): Record<string, any> {
         quizProgress: quizzes.map((q: any) => ({
           quizKey: normalizeAnyId(q?.quizId) || String(q?.title || ''),
           status: q?.passed ? 'passed' : q?.status,
-          passed: !!q?.passed
+          passed: !!q?.passed,
+          attempts: Number(q?.attempts || 0),
+          score: Number(q?.score || 0),
+          lockedUntil: q?.lockedUntil
         })),
         quizScores: quizzes.map((q: any) => ({
           quizId: q?.quizId,
@@ -502,6 +505,29 @@ function stableQuizKeyFromJourneyModule(moduleIndex: number, quiz: any, quizIdx:
   const oid = normalizeAnyId(quiz?._id) || normalizeAnyId(quiz?.id);
   const title = String(quiz?.title || '').trim();
   return oid || title || `m${moduleIndex}-q${quizIdx}`;
+}
+
+/** Nombre max de soumissions complètes du quiz (défaut 3 si absent du journey). */
+function resolveQuizMaxAttempts(quizDoc: any): number {
+  const raw = Number(
+    quizDoc?.maxAttempts ?? quizDoc?.max_attempts ?? quizDoc?.attemptLimit ?? quizDoc?.attemptsAllowed
+  );
+  if (Number.isFinite(raw) && raw >= 1) return Math.min(100, Math.floor(raw));
+  return 3;
+}
+
+/** Durée de blocage après épuisement des tentatives = durée « module » du journey (plafonnée). */
+function resolveModuleLockDurationMs(journeyModule: any): number {
+  const cap = 7 * 24 * 60 * 60 * 1000;
+  const fromMinutes = Number(journeyModule?.durationMinutes);
+  if (Number.isFinite(fromMinutes) && fromMinutes > 0) {
+    return Math.min(cap, Math.floor(fromMinutes * 60 * 1000));
+  }
+  const fromDuration = Number(journeyModule?.duration);
+  if (Number.isFinite(fromDuration) && fromDuration > 0) {
+    return Math.min(cap, Math.floor(fromDuration * 60 * 1000));
+  }
+  return 30 * 60 * 1000;
 }
 
 function progressRowMergeKey(row: any, keyField: 'sectionId' | 'quizKey'): string {
@@ -829,7 +855,8 @@ function normalizeTrackingWithJourney(tracking: any, journeyModules: any[]): any
         score: Number(prev?.score || 0),
         attempts: Number(prev?.attempts || 0),
         passed: !!prev?.passed,
-        lastSubmittedAt: prev?.lastSubmittedAt
+        lastSubmittedAt: prev?.lastSubmittedAt,
+        lockedUntil: prev?.lockedUntil
       };
     });
     return {
@@ -1480,6 +1507,27 @@ class TrainingJourneyService {
     if (module.status === 'locked') throw new AppError('Module is locked. Complete previous module first.', 409);
     const quizProgress = (module.quizzes || []).find((q: any) => String(q.quizId) === quizId);
     if (!quizProgress) throw new AppError('Quiz not found in module', 404);
+
+    const journey = await TrainingJourney.findById(mustObjectId(input.courseId, 'courseId')).select('modules');
+    const journeyModules = Array.isArray((journey as any)?.modules) ? (journey as any).modules : [];
+    const jm = journeyModules.find((m: any) => String(m?._id) === moduleId || String(m?.id) === moduleId);
+    const jq = Array.isArray(jm?.quizzes)
+      ? jm.quizzes.find((q: any) => String(q?._id) === quizId || String(q?.id) === quizId)
+      : null;
+    const maxAttempts = resolveQuizMaxAttempts(jq);
+    const attempts = Number((quizProgress as any).attempts || 0);
+    const passed = !!(quizProgress as any).passed;
+    const lockTs = (quizProgress as any).lockedUntil ? new Date((quizProgress as any).lockedUntil).getTime() : 0;
+    if (lockTs > Date.now()) {
+      throw new AppError(
+        'Quiz temporairement bloqué pour la durée du module. Réessayez après la fin du délai.',
+        403
+      );
+    }
+    if (!passed && attempts >= maxAttempts) {
+      throw new AppError('Nombre maximum de tentatives pour ce quiz est atteint.', 403);
+    }
+
     const qs = String((quizProgress as any).status || '');
     if (qs === 'completed' || qs === 'in_progress') {
       return tracking;
@@ -1520,6 +1568,32 @@ class TrainingJourneyService {
     const jq = Array.isArray(jm?.quizzes)
       ? jm.quizzes.find((q: any) => String(q?._id) === quizId || String(q?.id) === quizId)
       : null;
+    const maxAttempts = resolveQuizMaxAttempts(jq);
+    const passedAlready =
+      !!(quizProgress as any).passed || String((quizProgress as any).status || '') === 'completed';
+    if (passedAlready) {
+      return {
+        score: Number((quizProgress as any).score || 0),
+        passed: true,
+        attempts: Number((quizProgress as any).attempts || 0),
+        maxAttempts,
+        requiredScore: 70,
+        progress: tracking
+      };
+    }
+
+    const lockTs = (quizProgress as any).lockedUntil ? new Date((quizProgress as any).lockedUntil).getTime() : 0;
+    if (lockTs > Date.now()) {
+      throw new AppError(
+        'Quiz temporairement bloqué pour la durée du module. Réessayez après la fin du délai.',
+        403
+      );
+    }
+    const currentAttempts = Number((quizProgress as any).attempts || 0);
+    if (currentAttempts >= maxAttempts) {
+      throw new AppError('Nombre maximum de tentatives pour ce quiz est atteint.', 403);
+    }
+
     const questions = Array.isArray(jq?.questions) ? jq.questions : [];
     const total = questions.length;
     let correct = 0;
@@ -1532,10 +1606,16 @@ class TrainingJourneyService {
     const passed = score >= 70;
 
     quizProgress.score = score;
-    quizProgress.attempts = Math.max(0, Number(quizProgress.attempts || 0) + 1);
+    (quizProgress as any).attempts = currentAttempts + 1;
     quizProgress.lastSubmittedAt = new Date();
     quizProgress.passed = passed;
     quizProgress.status = passed ? 'completed' : 'failed';
+
+    if (!passed && (quizProgress as any).attempts >= maxAttempts) {
+      (quizProgress as any).lockedUntil = new Date(Date.now() + resolveModuleLockDurationMs(jm));
+    } else if (passed) {
+      (quizProgress as any).lockedUntil = undefined;
+    }
 
     if (module.status === 'pending') module.status = 'in_progress';
     recomputeModuleAndCourseProgress(tracking);
@@ -1543,7 +1623,9 @@ class TrainingJourneyService {
     return {
       score,
       passed,
-      attempts: quizProgress.attempts,
+      attempts: (quizProgress as any).attempts,
+      maxAttempts,
+      lockedUntil: (quizProgress as any).lockedUntil,
       requiredScore: 70,
       progress: tracking
     };
@@ -1721,11 +1803,26 @@ class TrainingJourneyService {
             sectionId: s?.sectionId,
             status: s?.status
           })),
-          quizProgress: (Array.isArray(m?.quizzes) ? m.quizzes : []).map((q: any) => ({
-            quizKey: normalizeAnyId(q?.quizId) || String(q?.title || ''),
-            status: q?.passed ? 'passed' : q?.status,
-            passed: !!q?.passed
-          })),
+          quizProgress: (Array.isArray(m?.quizzes) ? m.quizzes : []).map((q: any) => {
+            const qid = normalizeAnyId(q?.quizId);
+            const jmRow = journeyModules.find(
+              (x: any) => normalizeAnyId(x?._id) === mid || normalizeAnyId(x?.id) === mid
+            );
+            const jqDef = Array.isArray(jmRow?.quizzes)
+              ? jmRow.quizzes.find(
+                  (qz: any) => normalizeAnyId(qz?._id) === qid || normalizeAnyId(qz?.id) === qid
+                )
+              : null;
+            return {
+              quizKey: normalizeAnyId(q?.quizId) || String(q?.title || ''),
+              attempts: Number(q?.attempts || 0),
+              score: Number(q?.score || 0),
+              status: q?.passed ? 'passed' : q?.status,
+              passed: !!q?.passed,
+              lockedUntil: q?.lockedUntil,
+              maxAttempts: resolveQuizMaxAttempts(jqDef)
+            };
+          }),
           quizScores: (Array.isArray(m?.quizzes) ? m.quizzes : []).map((q: any) => ({
             quizId: q?.quizId,
             passed: !!q?.passed

@@ -4594,14 +4594,50 @@ export const generatePodcastScript = async (
   next: NextFunction
 ) => {
   try {
-    const { trainingDigest, trainingTitle, language } = req.body || {};
-    const digest = String(trainingDigest || '').trim();
-    if (!digest) {
-      return res.status(400).json({ success: false, error: 'trainingDigest is required' });
-    }
+    const { trainingDigest, trainingTitle, language, journeyId } = req.body || {};
+    let digest = String(trainingDigest || '').trim();
     const title = String(trainingTitle || '').trim() || 'Formation';
     const lang = String(language || 'fr').toLowerCase();
     const anthropicKey = req.headers['x-anthropic-key'] as string | undefined;
+
+    if (journeyId) {
+      const journey = await TrainingJourney.findById(journeyId).lean();
+      if (journey) {
+        if (!journey.planIsValid && journey.status !== 'completed' && journey.status !== 'active') {
+          return res.status(403).json({ success: false, error: "La formation doit être validée avant de générer l'audio." });
+        }
+        
+        const parts: string[] = [];
+        parts.push(`Titre de la formation: ${journey.title || journey.name || 'Formation'}`);
+        if (journey.description) {
+          parts.push(`Description: ${journey.description.slice(0, 1500)}`);
+        }
+        const modulesToUse = Array.isArray(journey.modules) && journey.modules.length > 0 
+          ? journey.modules 
+          : journey.modulePlan;
+          
+        if (Array.isArray(modulesToUse)) {
+          modulesToUse.slice(0, 24).forEach((m: any, i: number) => {
+            const mTitle = m?.title || `Module ${i + 1}`;
+            const desc = String(m?.description || '').slice(0, 700);
+            const objectives = Array.isArray(m?.learningObjectives) ? m.learningObjectives.slice(0, 8).join(' · ') : '';
+            const sections = Array.isArray(m?.sections) ? m.sections : [];
+            const secBits = sections.slice(0, 5).map((s: any) => {
+              const st = String(s?.title || '').slice(0, 120);
+              const sc = String(s?.content || s?.text || s?.body || '').slice(0, 450);
+              return st ? `${st}: ${sc}` : sc;
+            }).filter(Boolean).join('\n');
+            parts.push(`\n--- Module ${i + 1}: ${mTitle} ---\n${desc}${objectives ? `\nObjectifs: ${objectives}` : ''}${secBits ? `\n${secBits}` : ''}`);
+          });
+        }
+        const journeyDigest = parts.join('\n\n').trim();
+        if (journeyDigest) digest = journeyDigest;
+      }
+    }
+
+    if (!digest) {
+      return res.status(400).json({ success: false, error: 'trainingDigest is required' });
+    }
 
     const digestForModel =
       digest.length > 20000 ? `${digest.slice(0, 20000)}\n\n[… contenu tronqué pour limite technique]` : digest;
