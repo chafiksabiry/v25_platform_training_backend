@@ -641,3 +641,10 @@ export const listTrainingTrackingByRep = asyncHandler(async (req: AuthRequest, r
   const rows = await trainingJourneyService.listTrainingTrackingByRep(repId);
   res.status(200).json({ success: true, data: rows });
 });
+
+/** GET /training_journeys/certification/verify/:repId/:journeyId */
+export const verifyCertification = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { repId, journeyId } = req.params;
+  const result = await trainingJourneyService.verifyCertification(repId, journeyId);
+  res.status(200).json({ success: true, ...result });
+});

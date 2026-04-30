@@ -32,6 +32,7 @@ router.post('/generate-thumbnail', journeyController.generateTrainingThumbnail);
 router.post('/suggest-vision', journeyController.suggestTrainingVision);
 router.post('/suggest-target-roles', journeyController.suggestTargetRoles);
 router.get('/rep/:repId', journeyController.getJourneysForRep);
+router.get('/certification/verify/:repId/:journeyId', journeyController.verifyCertification);
 router.get('/:id', journeyController.getJourneyById);
 router.put('/:id', journeyController.updateJourney);
 router.post('/:id/edit-with-prompt', journeyController.editJourneyWithPrompt);

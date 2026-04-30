@@ -2138,6 +2138,38 @@ class TrainingJourneyService {
     const repOid = requireObjectId(repId, 'repId');
     return await RepTrainingTracking.find({ repId: repOid }).sort({ updatedAt: -1 }).lean();
   }
+
+  async verifyCertification(repId: string, journeyId: string) {
+    const rid = String(repId || '').trim();
+    const jid = String(journeyId || '').trim();
+    if (!rid || !jid) throw new AppError('repId and journeyId are required', 400);
+
+    const tracking = await this.getRepProgress(rid, jid);
+    if (!tracking) {
+      return { certified: false, reason: 'No progress found' };
+    }
+
+    const isCompleted = tracking.status === 'completed' || tracking.progressPercentage >= 100;
+
+    if (isCompleted) {
+      const journey = await TrainingJourney.findById(jid).select('title name');
+      const rep = await Rep.findById(rid).select('name email');
+
+      return {
+        certified: true,
+        completionDate: tracking.completedAt || (tracking as any).updatedAt,
+        journeyName: journey?.name || journey?.title,
+        traineeName: rep?.name,
+        progress: tracking.progressPercentage
+      };
+    }
+
+    return {
+      certified: false,
+      progress: tracking.progressPercentage,
+      reason: 'Training not completed'
+    };
+  }
 }
 
 export default new TrainingJourneyService();
