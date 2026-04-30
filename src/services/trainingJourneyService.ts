@@ -314,6 +314,141 @@ function isSectionCompleted(
   return candidates.some((c) => done.has(c));
 }
 
+/** Viewer formation (rep dashboard) : une slide quiz si le module a au moins une question. */
+function journeyModuleHasQuizViewerSlot(mod: any): boolean {
+  const quizzes = Array.isArray(mod?.quizzes) ? mod.quizzes : [];
+  for (const qz of quizzes) {
+    const questions = Array.isArray((qz as any)?.questions) ? (qz as any).questions : [];
+    if (questions.length > 0) return true;
+  }
+  return false;
+}
+
+function formationViewerSlideCountFromModules(journeyModules: any[]): number {
+  if (!Array.isArray(journeyModules) || journeyModules.length === 0) return 0;
+  let count = 1;
+  for (const mod of journeyModules) {
+    count += 1;
+    count += Array.isArray(mod?.sections) ? mod.sections.length : 0;
+    if (journeyModuleHasQuizViewerSlot(mod)) count += 1;
+  }
+  return count;
+}
+
+function formationViewerLinearIndexForSection(journeyModules: any[], mi: number, si: number): number {
+  let idx = 1;
+  for (let m = 0; m < mi; m++) {
+    const mod = journeyModules[m];
+    const secLen = Array.isArray(mod?.sections) ? mod.sections.length : 0;
+    idx += 1 + secLen + (journeyModuleHasQuizViewerSlot(mod) ? 1 : 0);
+  }
+  return idx + 1 + si;
+}
+
+function formationViewerLinearIndexForQuiz(journeyModules: any[], mi: number): number {
+  let idx = 1;
+  for (let m = 0; m < mi; m++) {
+    const mod = journeyModules[m];
+    const secLen = Array.isArray(mod?.sections) ? mod.sections.length : 0;
+    idx += 1 + secLen + (journeyModuleHasQuizViewerSlot(mod) ? 1 : 0);
+  }
+  const mod = journeyModules[mi];
+  const secLen = Array.isArray(mod?.sections) ? mod.sections.length : 0;
+  return idx + 1 + secLen;
+}
+
+/**
+ * Index 0-based du viewer formation (overview + intros + sections + quiz slots),
+ * première unité non terminée d’après le suivi structuré — indépendant de `slideIndex` (souvent en retard).
+ */
+function resumeFormationViewerIndexFromStructured(
+  journeyModules: any[],
+  progressModules: Record<string, any>
+): number | null {
+  if (!Array.isArray(journeyModules) || journeyModules.length === 0) return null;
+  for (let mi = 0; mi < journeyModules.length; mi++) {
+    const key = journeyModuleMapKey(journeyModules[mi], mi);
+    const mp = progressModules[key] || progressModules[String(mi)];
+    const modStatus = String(mp?.status || 'pending');
+    if (modStatus === 'locked') continue;
+
+    const m = journeyModules[mi];
+    const sections = Array.isArray(m?.sections) ? m.sections : [];
+
+    for (let si = 0; si < sections.length; si++) {
+      if (
+        !isSectionCompleted(sections[si], si, mi, mp?.completedSections || [], mp?.sectionProgress)
+      ) {
+        return formationViewerLinearIndexForSection(journeyModules, mi, si);
+      }
+    }
+
+    if (journeyModuleHasQuizViewerSlot(m)) {
+      const quizzes = Array.isArray(m?.quizzes) ? m.quizzes : [];
+      let qxi = 0;
+      for (const qz of quizzes) {
+        const questions = Array.isArray((qz as any)?.questions) ? (qz as any).questions : [];
+        if (questions.length === 0) continue;
+        if (!isQuizCompleted(qz, qxi, mi, mp?.quizScores || [], mp?.quizProgress)) {
+          return formationViewerLinearIndexForQuiz(journeyModules, mi);
+        }
+        qxi += 1;
+      }
+    }
+
+    if (modStatus === 'completed') continue;
+  }
+  return null;
+}
+
+function hasStructuredResumeMergeEvidence(progressModules: Record<string, any>): boolean {
+  for (const mp of Object.values(progressModules)) {
+    const row = mp as Record<string, unknown>;
+    const st = String(row?.status || '');
+    if (st === 'in_progress' || st === 'completed') return true;
+    const cs = row.completedSections;
+    if (Array.isArray(cs) && cs.length > 0) return true;
+    const sp = row.sectionProgress;
+    if (Array.isArray(sp)) {
+      for (const it of sp) {
+        const sst = String((it as { status?: unknown })?.status || '');
+        if (sst === 'completed' || sst === 'in_progress') return true;
+      }
+    }
+    const qp = row.quizProgress;
+    if (Array.isArray(qp)) {
+      for (const it of qp) {
+        const qst = String((it as { status?: unknown })?.status || '');
+        if (qst && qst !== 'pending') return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** Index viewer formation : max(slideIndex, reprise structurée) si le suivi prouve une avance réelle. */
+function mergedFormationCurrentSlideIndex(
+  journeyModules: any[],
+  progressRow: any,
+  progressModules: Record<string, any>
+): number {
+  const formationCount = formationViewerSlideCountFromModules(journeyModules);
+  const raw = Number(progressRow?.slideIndex ?? progressRow?.currentSlideIndex);
+  const slidePersisted = Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 0;
+  if (formationCount <= 0) return slidePersisted;
+  const cappedSlide = Math.min(formationCount - 1, Math.max(0, slidePersisted));
+  if (!progressRow) return cappedSlide;
+  const structuredResume = resumeFormationViewerIndexFromStructured(journeyModules, progressModules);
+  if (
+    structuredResume != null &&
+    hasStructuredResumeMergeEvidence(progressModules) &&
+    structuredResume > cappedSlide
+  ) {
+    return Math.min(formationCount - 1, Math.max(0, structuredResume));
+  }
+  return cappedSlide;
+}
+
 function isQuizCompleted(
   quiz: any,
   quizIdx: number,
@@ -1549,6 +1684,27 @@ class TrainingJourneyService {
     if (!rid) return [];
     if (!mongoose.Types.ObjectId.isValid(rid)) return [];
     const rows = await RepTrainingTracking.find({ repId: new mongoose.Types.ObjectId(rid) }).sort({ updatedAt: -1 }).lean();
+    const jids = [
+      ...new Set(
+        rows
+          .map((row: any) => normalizeAnyId(row?.journeyId || row?.courseId))
+          .filter((id) => id && mongoose.Types.ObjectId.isValid(id))
+      )
+    ];
+    const journeyDocs =
+      jids.length > 0
+        ? await TrainingJourney.find({
+            _id: { $in: jids.map((id) => new mongoose.Types.ObjectId(id)) }
+          })
+            .select('modules')
+            .lean()
+        : [];
+    const journeyModulesByJid = new Map<string, any[]>();
+    for (const d of journeyDocs as any[]) {
+      const id = normalizeAnyId(d?._id);
+      if (id) journeyModulesByJid.set(id, Array.isArray(d?.modules) ? d.modules : []);
+    }
+
     return rows.map((row: any) => {
       const moduleRows = Array.isArray(row.modules) ? row.modules : [];
       const modulesObject: Record<string, any> = {};
@@ -1576,15 +1732,19 @@ class TrainingJourneyService {
           }))
         };
       });
+      const jid = normalizeAnyId(row.journeyId || row.courseId);
+      const journeyModules = journeyModulesByJid.get(jid) || [];
+      const progressModules = toProgressModulesLookup(row.modules);
+      const currentSlideIndex = mergedFormationCurrentSlideIndex(journeyModules, row, progressModules);
       return {
-        journeyId: normalizeAnyId(row.journeyId || row.courseId),
+        journeyId: jid,
         moduleTotal: Number(row.totalModules || moduleRows.length || 0),
         moduleFinished: moduleRows.filter((m: any) => String(m?.status) === 'completed').length,
         moduleInProgress: moduleRows.filter((m: any) => String(m?.status) === 'in_progress').length,
         progressPercentage: Math.min(100, Math.round(Number(row.progressPercentage || 0))),
         engagementScore: Number(row.engagementScore || 0),
         lastAccessed: row.updatedAt,
-        currentSlideIndex: Number(row.slideIndex || 0),
+        currentSlideIndex,
         currentModuleId: normalizeAnyId(row.moduleId) || undefined,
         currentQuizPageBySlide:
           row.currentQuizPageBySlide && typeof row.currentQuizPageBySlide === 'object'
@@ -1731,8 +1891,12 @@ class TrainingJourneyService {
       const ratio = totalUnits > 0 ? completedUnits / totalUnits : 0;
       const unitsCompleted = completedUnits;
       const unitsTotal = totalUnits;
-      /** Reprendre la slide du viewer : champ persisté `slideIndex` (POST rep-progress), pas `completedUnits` (échelle modules+sections+quizzes). */
+      /** Viewer formation : slideIndex + correction si sections/quiz du tracking sont en avance (slideIndex en retard). */
       const currentSlideIndex = (() => {
+        const formationCount = formationViewerSlideCountFromModules(journeyModules);
+        if (formationCount > 0) {
+          return mergedFormationCurrentSlideIndex(journeyModules, progressRow, progressModules);
+        }
         const raw = Number(
           progressRow?.slideIndex ?? (progressRow as { currentSlideIndex?: unknown })?.currentSlideIndex
         );
