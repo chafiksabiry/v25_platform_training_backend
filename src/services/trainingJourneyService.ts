@@ -2139,35 +2139,50 @@ class TrainingJourneyService {
     return await RepTrainingTracking.find({ repId: repOid }).sort({ updatedAt: -1 }).lean();
   }
 
-  async verifyCertification(repId: string, journeyId: string) {
-    const rid = String(repId || '').trim();
-    const jid = String(journeyId || '').trim();
-    if (!rid || !jid) throw new AppError('repId and journeyId are required', 400);
+  async getCertification(repId: string, journeyId: string) {
+    const rid = requireObjectId(repId, 'repId');
+    const jid = requireObjectId(journeyId, 'journeyId');
 
-    const tracking = await this.getRepProgress(rid, jid);
-    if (!tracking) {
-      return { certified: false, reason: 'No progress found' };
+    const tracking = await RepTrainingTracking.findOne({ 
+      repId: rid, 
+      $or: [{ journeyId: jid }, { courseId: jid }] 
+    });
+    
+    if (!tracking) throw new AppError('No tracking found for this training', 404);
+
+    if (tracking.status !== 'completed') {
+      throw new AppError('Training is not completed yet', 400);
     }
 
-    const isCompleted = tracking.status === 'completed' || tracking.progressPercentage >= 100;
+    // Check if certification was already issued
+    if (!tracking.certificationIssuedAt) {
+      tracking.certificationIssuedAt = new Date();
+      await tracking.save();
 
-    if (isCompleted) {
-      const journey = await TrainingJourney.findById(jid).select('title name');
-      const rep = await Rep.findById(rid).select('name email');
-
-      return {
-        certified: true,
-        completionDate: tracking.completedAt || (tracking as any).updatedAt,
-        journeyName: journey?.name || journey?.title,
-        traineeName: rep?.name,
-        progress: tracking.progressPercentage
-      };
+      // Also update TrainingJourney to track all certified reps
+      await TrainingJourney.updateOne(
+        { _id: jid },
+        { 
+          $addToSet: { 
+            certifications: { repId: rid, issuedAt: tracking.certificationIssuedAt } 
+          } 
+        }
+      );
     }
+
+    // Return structured certification info
+    const journey = await TrainingJourney.findById(jid).select('title certifications');
+    const rep = await Rep.findById(rid).select('basicInfo');
 
     return {
-      certified: false,
-      progress: tracking.progressPercentage,
-      reason: 'Training not completed'
+      success: true,
+      certification: {
+        repId: rid,
+        traineeName: rep?.basicInfo ? `${rep.basicInfo.firstName} ${rep.basicInfo.lastName}` : 'Trainee',
+        trainingTitle: journey?.title || 'Training',
+        issuedAt: tracking.certificationIssuedAt,
+        status: 'certified'
+      }
     };
   }
 }

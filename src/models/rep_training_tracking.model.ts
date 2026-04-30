@@ -71,6 +71,7 @@ export interface IUserProgress extends Document {
   completedModules: number;
   totalModules: number;
   completedAt?: Date;
+  certificationIssuedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -130,7 +131,8 @@ const userProgressSchema = new Schema<IUserProgress>(
     progressPercentage: { type: Number, min: 0, max: 100, default: 0 },
     completedModules: { type: Number, min: 0, default: 0 },
     totalModules: { type: Number, min: 0, default: 0 },
-    completedAt: { type: Date }
+    completedAt: { type: Date },
+    certificationIssuedAt: { type: Date }
   },
   {
     timestamps: true,

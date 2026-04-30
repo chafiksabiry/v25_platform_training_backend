@@ -642,9 +642,14 @@ export const listTrainingTrackingByRep = asyncHandler(async (req: AuthRequest, r
   res.status(200).json({ success: true, data: rows });
 });
 
-/** GET /training_journeys/certification/verify/:repId/:journeyId */
-export const verifyCertification = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { repId, journeyId } = req.params;
-  const result = await trainingJourneyService.verifyCertification(repId, journeyId);
-  res.status(200).json({ success: true, ...result });
+/** GET /training_journeys/certification/:repId/:journeyId — vérifie et retourne la certification */
+export const getCertification = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const repId = String(req.params.repId || '').trim();
+  const journeyId = String(req.params.journeyId || '').trim();
+  if (!repId || !journeyId) {
+    res.status(400).json({ success: false, error: 'repId and journeyId are required' });
+    return;
+  }
+  const result = await trainingJourneyService.getCertification(repId, journeyId);
+  res.status(200).json(result);
 });

@@ -26,13 +26,13 @@ router.get('/rep/:repId/trainings-progress', journeyController.getTrainingProgre
 router.get('/rep/:repId/progress-summary', journeyController.getRepProgressSummary);
 router.get('/rep/:repId/slide-progress-summary', journeyController.getRepSlideProgressSummary);
 router.get('/rep/:repId/training-tracking', journeyController.listTrainingTrackingByRep);
+router.get('/certification/:repId/:journeyId', journeyController.getCertification);
 router.get('/journey/:journeyId/reps-progress', journeyController.getRepProgressByTraining);
 router.get('/gig/:gigId', journeyController.listJourneysByGig);
 router.post('/generate-thumbnail', journeyController.generateTrainingThumbnail);
 router.post('/suggest-vision', journeyController.suggestTrainingVision);
 router.post('/suggest-target-roles', journeyController.suggestTargetRoles);
 router.get('/rep/:repId', journeyController.getJourneysForRep);
-router.get('/certification/verify/:repId/:journeyId', journeyController.verifyCertification);
 router.get('/:id', journeyController.getJourneyById);
 router.put('/:id', journeyController.updateJourney);
 router.post('/:id/edit-with-prompt', journeyController.editJourneyWithPrompt);
