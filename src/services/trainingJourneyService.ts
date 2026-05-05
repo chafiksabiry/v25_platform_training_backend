@@ -167,6 +167,8 @@ export type RepSlideProgressJourneyLine = {
   ratio: number;
   /** Index 0-based dans `presentation.slides` pour reprendre le parcours */
   currentSlideIndex: number;
+  /** Statut global de la formation pour ce rep (pending, in_progress, completed) */
+  status: string;
 };
 
 export type RepSlideProgressSummary = {
@@ -880,13 +882,16 @@ function recomputeModuleAndCourseProgress(tracking: any): any {
     const sections = Array.isArray(module.sections) ? module.sections : [];
     const quizzes = Array.isArray(module.quizzes) ? module.quizzes : [];
     const totalUnits = sections.length + quizzes.length;
-    const completedSections = sections.filter((s: any) => s.status === 'completed').length;
-    const passedQuizzes = quizzes.filter((q: any) => q.passed === true || q.status === 'completed').length;
-    module.progressPercentage = totalUnits > 0 ? Math.round(((completedSections + passedQuizzes) / totalUnits) * 100) : 0;
+    const completedSectionsCount = sections.filter((s: any) => s.status === 'completed').length;
+    const passedQuizzesCount = quizzes.filter((q: any) => q.passed === true && Number(q.score || 0) > 70).length;
+
+    // Strict validation for module completion: all sections completed AND all quizzes score > 70
     const allSectionsDone = sections.every((s: any) => s.status === 'completed');
-    const allQuizzesPassed = quizzes.every((q: any) => q.passed === true || q.status === 'completed');
+    const allQuizzesPassed = quizzes.every((q: any) => q.passed === true && Number(q.score || 0) > 70);
+
     if (totalUnits > 0 && allSectionsDone && allQuizzesPassed) {
       module.status = 'completed';
+      module.progressPercentage = 100;
       module.completedAt = module.completedAt || new Date();
       if (modules[idx + 1] && modules[idx + 1].status === 'locked') {
         modules[idx + 1].status = 'pending';
@@ -895,25 +900,33 @@ function recomputeModuleAndCourseProgress(tracking: any): any {
       const started =
         sections.some((s: any) => s.status !== 'pending') ||
         quizzes.some((q: any) => Number(q.attempts || 0) > 0 || q.status !== 'pending');
+      
       module.status = started ? 'in_progress' : 'pending';
+      
+      // Calculate progress but cap it at 99% if not all conditions are met
+      const rawPct = totalUnits > 0 ? Math.floor(((completedSectionsCount + passedQuizzesCount) / totalUnits) * 100) : 0;
+      module.progressPercentage = Math.min(99, rawPct);
     }
   });
-  const completedModules = modules.filter((m: any) => m.status === 'completed').length;
-  tracking.completedModules = completedModules;
-  /** Pourcentage formation = moyenne des % modules (sections+quiz), pas seulement « modules entièrement finis ». */
+
+  const completedModulesCount = modules.filter((m: any) => m.status === 'completed').length;
+  const allModulesCompleted = completedModulesCount >= modules.length && modules.length > 0;
+  
+  tracking.completedModules = completedModulesCount;
+  
+  /** Pourcentage formation = moyenne des % modules, plafonné à 99% si non terminé. */
   const sumModulePct = modules.reduce((acc: number, m: any) => acc + Number(m?.progressPercentage || 0), 0);
-  tracking.progressPercentage =
-    modules.length > 0 ? Math.min(100, Math.round(sumModulePct / modules.length)) : 0;
-  tracking.status =
-    completedModules >= modules.length && modules.length > 0
-      ? 'completed'
-      : modules.some((m: any) => m.status === 'in_progress' || m.status === 'completed')
-        ? 'in_progress'
-        : 'pending';
+  const avgPct = modules.length > 0 ? Math.floor(sumModulePct / modules.length) : 0;
+  
+  tracking.progressPercentage = allModulesCompleted ? 100 : Math.min(99, avgPct);
+  
+  tracking.status = allModulesCompleted ? 'completed' : 
+    modules.some((m: any) => m.status === 'in_progress' || m.status === 'completed') ? 'in_progress' : 'pending';
+
   if (tracking.status === 'completed') {
     tracking.completedAt = tracking.completedAt || new Date();
   }
-  /** Même valeur que la progression formation : utile pour les agrégats / anciennes lectures `engagementScore`. */
+  
   tracking.engagementScore = Math.min(100, Math.max(0, Math.round(Number(tracking.progressPercentage || 0))));
   return tracking;
 }
@@ -1603,7 +1616,7 @@ class TrainingJourneyService {
       if (Number.isFinite(expected) && given === expected) correct += 1;
     }
     const score = total > 0 ? Math.round((correct / total) * 100) : 0;
-    const passed = score >= 70;
+    const passed = score > 70;
 
     quizProgress.score = score;
     (quizProgress as any).attempts = currentAttempts + 1;
@@ -1788,6 +1801,8 @@ class TrainingJourneyService {
     }
 
     return rows.map((row: any) => {
+      const jid = normalizeAnyId(row.journeyId || row.courseId);
+      const journeyModules = journeyModulesByJid.get(jid) || [];
       const moduleRows = Array.isArray(row.modules) ? row.modules : [];
       const modulesObject: Record<string, any> = {};
       moduleRows.forEach((m: any) => {
@@ -1829,8 +1844,6 @@ class TrainingJourneyService {
           }))
         };
       });
-      const jid = normalizeAnyId(row.journeyId || row.courseId);
-      const journeyModules = journeyModulesByJid.get(jid) || [];
       const progressModules = toProgressModulesLookup(row.modules);
       const currentSlideIndex = mergedFormationCurrentSlideIndex(journeyModules, row, progressModules);
       return {
@@ -2020,7 +2033,8 @@ class TrainingJourneyService {
         slidesSeen: unitsCompleted,
         slidesTotal: unitsTotal,
         ratio,
-        currentSlideIndex
+        currentSlideIndex,
+        status: String(progressRow?.status || 'pending')
       });
     }
 
