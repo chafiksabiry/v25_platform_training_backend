@@ -215,6 +215,28 @@ export const getTrainerDashboard = asyncHandler(async (req: AuthRequest, res: Re
   });
 });
 
+export const getJourneysByCompanyAndGig = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { companyId, gigId } = req.params;
+  
+  if (!companyId) {
+    return res.status(400).json({
+      success: false,
+      error: 'companyId is required'
+    });
+  }
+
+  const journeys = await trainingJourneyService.getJourneysByCompanyAndGig(
+    companyId,
+    gigId
+  );
+
+  return res.status(200).json({
+    success: true,
+    data: journeys
+  });
+});
+
+
 export const generateTrainingThumbnail = asyncHandler(async (req: AuthRequest, res: Response) => {
   const body = req.body || {};
   const prompt = String(body.prompt || '').trim();

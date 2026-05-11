@@ -11,6 +11,7 @@ router.post('/', createJourneyValidation, journeyController.createJourney);
 router.get('/', journeyController.getAllJourneys);
 router.get('/dashboard', journeyController.getTrainerDashboard);
 router.get('/trainer/companyId/:companyId', journeyController.getTrainerDashboard); // Legacy compatibility route
+router.get('/trainer/companyId/:companyId/gigId/:gigId', journeyController.getJourneysByCompanyAndGig);
 router.get('/status/:status', journeyController.getJourneysByStatus);
 // Must be before /:id so static segments are not parsed as Mongo ids
 router.get('/rep-progress', journeyController.getRepProgress);
