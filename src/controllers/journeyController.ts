@@ -14,6 +14,12 @@ export const createJourney = asyncHandler(async (req: AuthRequest, res: Response
   const { presentationData, filetraining, ...journeyData } = req.body;
 
   // Strip fields that expect ObjectId but receive a plain string (e.g. industry label)
+  if (journeyData.companyId !== undefined && !isValidObjectId(journeyData.companyId)) {
+    delete journeyData.companyId;
+  }
+  if (journeyData.gigId !== undefined && !isValidObjectId(journeyData.gigId)) {
+    delete journeyData.gigId;
+  }
   if (journeyData.industry !== undefined && !isValidObjectId(journeyData.industry)) {
     delete journeyData.industry;
   }
@@ -57,6 +63,12 @@ export const updateJourney = asyncHandler(async (req: AuthRequest, res: Response
   console.log('📦 [updateJourney] Received body keys:', Object.keys(req.body));
   const { presentationData, filetraining, ...journeyData } = req.body;
 
+  if (journeyData.companyId !== undefined && !isValidObjectId(journeyData.companyId)) {
+    delete journeyData.companyId;
+  }
+  if (journeyData.gigId !== undefined && !isValidObjectId(journeyData.gigId)) {
+    delete journeyData.gigId;
+  }
   if (journeyData.industry !== undefined && !isValidObjectId(journeyData.industry)) {
     delete journeyData.industry;
   }
