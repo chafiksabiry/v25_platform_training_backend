@@ -105,6 +105,29 @@ const cannedValidatePlanFirstMessage = (locale: 'fr' | 'en'): string =>
     ? 'Validation denied: you must validate and save the training plan first.'
     : "Validation refusée : vous devez d'abord valider et enregistrer le plan.";
 
+/** User explicitly asks for a training *plan* (not full module content). */
+const isExplicitTrainingPlanRequest = (message: string): boolean => {
+  const t = String(message || '').trim();
+  if (!t) return false;
+  if (/\b(plan\s+de\s+formation|training\s+plan|plan\s+d[ée]taill[ée])\b/i.test(t)) return true;
+  if (/\b(g[ée]n[ée]r\w*|cr[ée]e\w*|fais|donne|propose|construi\w*|b[âa]ti\w*|[ée]labor\w*|[ée]cri\w*)\b[\s\S]{0,40}\bplan\b/i.test(t)) {
+    return true;
+  }
+  if (/\b(refais|recommen[ce\w]+|red[ée]marre)\b[\s\S]{0,30}\bplan\b/i.test(t)) return true;
+  return false;
+};
+
+/** Short greetings / small talk — always allow normal chat (no plan lock). */
+const isCasualGreetingMessage = (message: string): boolean => {
+  const t = String(message || '').trim();
+  if (!t || t.length > 120) return false;
+  if (isExplicitTrainingPlanRequest(t)) return false;
+  if (/\b(plan\s+de\s+formation|module\s+\d+|contenu\s+du\s+module|formation\s+compl[eè]te)\b/i.test(t)) return false;
+  return /^(bonjour|bonsoir|salut|hello|hi|hey|coucou|bonne\s+(journ[ée]e|soir[ée]e|nuit)|good\s+(morning|afternoon|evening|night)|comment\s+[çc]a\s+va|ça\s+va\s*[?.!]*)\b/i.test(
+    t
+  );
+};
+
 const HIDDEN_CHAT_CMD_PREFIX = /^__(?:VALIDATE|GENERATE)/i;
 
 const lastNaturalUserChatText = (session: any, fallback: string): string => {
@@ -2795,6 +2818,30 @@ export const chat = async (
         (parsedContext as any).requestedOutput = 'training_plan';
       }
     }
+    /** Misclassified client intent: "donne moi un plan de formation" must stay plan mode. */
+    if (
+      isJourneyBuilderApp(parsedContext) &&
+      !isPlanFrozen &&
+      isExplicitTrainingPlanRequest(trimmedMessage) &&
+      requestedOutput !== 'training_plan'
+    ) {
+      requestedOutput = 'training_plan';
+      if (parsedContext && typeof parsedContext === 'object') {
+        (parsedContext as any).requestedOutput = 'training_plan';
+      }
+    }
+    /** Greetings / small talk → free chat, never block with "no validated plan". */
+    if (
+      isJourneyBuilderApp(parsedContext) &&
+      !isPlanFrozen &&
+      isCasualGreetingMessage(trimmedMessage) &&
+      requestedOutput !== 'general_chat'
+    ) {
+      requestedOutput = 'general_chat';
+      if (parsedContext && typeof parsedContext === 'object') {
+        (parsedContext as any).requestedOutput = 'general_chat';
+      }
+    }
     if (isJourneyBuilderApp(parsedContext) && trimmedMessage === CHAT_VALIDATE_PLAN_CMD) {
       const priorMessages = Array.isArray(activeSession.messages) ? activeSession.messages : [];
       const lastAssistantEntry = [...priorMessages]
@@ -3357,9 +3404,13 @@ export const chat = async (
     if (
       isJourneyBuilderApp(parsedContext) &&
       !isPlanFrozen &&
-      (requestedOutput === 'module_content' || requestedOutput === 'full_training_content')
+      (requestedOutput === 'module_content' || requestedOutput === 'full_training_content') &&
+      !isExplicitTrainingPlanRequest(trimmedMessage) &&
+      !isCasualGreetingMessage(trimmedMessage)
     ) {
-      const lockMsg = cannedNoValidatedPlanMessage('fr');
+      const lockMsg = cannedNoValidatedPlanMessage(
+        inferJourneyChatLocale(userTextForLocaleInference(activeSession, trimmedMessage))
+      );
       activeSession.messages.push(
         { role: 'user', text: trimmedMessage, createdAt: new Date() } as any,
         { role: 'assistant', text: lockMsg, createdAt: new Date() } as any
