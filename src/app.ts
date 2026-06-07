@@ -7,6 +7,7 @@ import { errorHandler } from './middleware/errorHandler';
 
 import authRoutes from './routes/authRoutes';
 import journeyRoutes from './routes/journeyRoutes';
+import certificationRoutes from './routes/certificationRoutes';
 import healthRoutes from './routes/healthRoutes';
 import aiRoutes from './routes/aiRoutes';
 import uploadRoutes from './routes/uploadRoutes';
@@ -67,6 +68,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/journeys', journeyRoutes);
 app.use('/training_journeys', journeyRoutes); // Legacy route alias
 app.use('/api/training_journeys', journeyRoutes); // New consistency alias
+app.use('/api/certifications', certificationRoutes);
+app.use('/certifications', certificationRoutes); // alias sans préfixe /api
 app.use('/api/ai', aiRoutes);
 app.use('/api/upload', uploadRoutes);
 

@@ -2256,6 +2256,22 @@ class TrainingJourneyService {
       }
     };
   }
+
+  /** Liste tous les certificats émis pour un rep. */
+  async listCertificationsByRep(repId: string) {
+    const rid = requireObjectId(repId, 'repId');
+    const certifications = await Certification.find({ repId: rid }).sort({ issuedAt: -1 }).lean();
+    return { success: true, count: certifications.length, certifications };
+  }
+
+  /** Récupère/vérifie un certificat via son identifiant public (ex: CERT-1A2B3C4). */
+  async getCertificationByPublicId(certificateId: string) {
+    const id = String(certificateId || '').trim().toUpperCase();
+    if (!id) throw new AppError('certificateId is required', 400);
+    const certification = await Certification.findOne({ certificateId: id }).lean();
+    if (!certification) throw new AppError('Certificate not found', 404);
+    return { success: true, certification };
+  }
 }
 
 export default new TrainingJourneyService();
