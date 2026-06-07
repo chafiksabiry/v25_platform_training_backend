@@ -6,8 +6,24 @@ import RepTrainingTracking, {
   RepTrainingTrackingEventKind
 } from '../models/rep_training_tracking.model';
 import Rep from '../models/Rep';
+import Certification from '../models/Certification';
 import { AppError } from '../middleware/errorHandler';
 import { ImageGenerationService } from './imageGenerationService';
+
+/** Identifiant public stable d'un certificat, déterministe pour un couple (rep, formation). */
+function buildCertificateId(repId: string, journeyId: string): string {
+  const hash = crypto
+    .createHash('sha1')
+    .update(`${repId}|${journeyId}`)
+    .digest('hex');
+  // 7 caractères base36 → court et lisible (ex: CERT-1A2B3C4).
+  const code = parseInt(hash.slice(0, 12), 16)
+    .toString(36)
+    .toUpperCase()
+    .padStart(7, '0')
+    .slice(0, 7);
+  return `CERT-${code}`;
+}
 
 function requireObjectId(raw: unknown, label: string): mongoose.Types.ObjectId {
   const s = String(raw ?? '').trim();
@@ -2184,18 +2200,59 @@ class TrainingJourneyService {
       );
     }
 
-    // Return structured certification info
-    const journey = await TrainingJourney.findById(jid).select('title certifications');
-    const rep = await Rep.findById(rid).select('name');
+    const journey = await TrainingJourney.findById(jid).select('title certifications companyId gigId');
+    const rep = await Rep.findById(rid).select('name companyId gigId');
+
+    // Score final : moyenne des quiz réussis, à défaut le score d'engagement.
+    const quizScores: number[] = [];
+    for (const mod of (tracking.modules || [])) {
+      for (const quiz of (mod.quizzes || [])) {
+        if (typeof quiz.score === 'number' && quiz.passed) quizScores.push(quiz.score);
+      }
+    }
+    const finalScore = quizScores.length
+      ? Math.round(quizScores.reduce((a, b) => a + b, 0) / quizScores.length)
+      : (typeof tracking.engagementScore === 'number' ? Math.round(tracking.engagementScore) : undefined);
+
+    const companyId = optionalObjectId(journey?.companyId) || optionalObjectId(rep?.companyId);
+    const gigId = optionalObjectId(journey?.gigId) || optionalObjectId(rep?.gigId);
+
+    // Persister / mettre à jour le certificat dans sa collection dédiée (idempotent).
+    const certificateId = buildCertificateId(String(rid), String(jid));
+    const certification = await Certification.findOneAndUpdate(
+      { repId: rid, journeyId: jid },
+      {
+        $setOnInsert: {
+          certificateId,
+          repId: rid,
+          journeyId: jid,
+          issuedAt: tracking.certificationIssuedAt
+        },
+        $set: {
+          traineeName: rep?.name || 'Trainee',
+          trainingTitle: journey?.title || 'Training',
+          level: 'Expert',
+          status: 'certified',
+          ...(finalScore !== undefined ? { finalScore } : {}),
+          ...(companyId ? { companyId } : {}),
+          ...(gigId ? { gigId } : {})
+        }
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
 
     return {
       success: true,
       certification: {
+        certificateId: certification.certificateId,
         repId: rid,
-        traineeName: rep?.name || 'Trainee',
-        trainingTitle: journey?.title || 'Training',
-        issuedAt: tracking.certificationIssuedAt,
-        status: 'certified'
+        journeyId: jid,
+        traineeName: certification.traineeName,
+        trainingTitle: certification.trainingTitle,
+        level: certification.level,
+        finalScore: certification.finalScore,
+        issuedAt: certification.issuedAt,
+        status: certification.status
       }
     };
   }
