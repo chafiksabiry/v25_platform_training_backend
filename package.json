@@ -9,6 +9,7 @@
     "prestart": "npm run build",
     "start": "node dist/server.js",
     "lint": "eslint src --ext .ts",
+    "seed:certifications": "ts-node-dev --transpile-only src/scripts/seedCertifications.ts",
     "test": "jest"
   },
   "keywords": [
