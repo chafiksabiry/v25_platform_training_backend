@@ -15,6 +15,7 @@ import Certification from '../models/Certification';
 import RepTrainingTracking from '../models/rep_training_tracking.model';
 import TrainingJourney from '../models/TrainingJourney';
 import Rep from '../models/Rep';
+import Agent from '../models/Agent';
 
 /** Identifiant public stable, identique à celui du service (déterministe par (rep, formation)). */
 function buildCertificateId(repId: string, journeyId: string): string {
@@ -79,10 +80,12 @@ async function main(): Promise<void> {
 
       const journey = await TrainingJourney.findById(journeyId).select('title companyId gigId');
       const rep = await Rep.findById(repId).select('name companyId gigId');
+      const agent = await Agent.findById(repId).select('personalInfo.name companyId');
+      const traineeName = (agent?.personalInfo?.name || rep?.name || 'Trainee').trim();
 
       const issuedAt = tracking.certificationIssuedAt || tracking.completedAt || tracking.updatedAt || new Date();
       const finalScore = computeFinalScore(tracking);
-      const companyId = optionalObjectId(journey?.companyId) || optionalObjectId((rep as any)?.companyId);
+      const companyId = optionalObjectId(journey?.companyId) || optionalObjectId((agent as any)?.companyId) || optionalObjectId((rep as any)?.companyId);
       const gigId = optionalObjectId(journey?.gigId) || optionalObjectId((rep as any)?.gigId);
 
       await Certification.create({
@@ -91,7 +94,7 @@ async function main(): Promise<void> {
         journeyId,
         ...(companyId ? { companyId } : {}),
         ...(gigId ? { gigId } : {}),
-        traineeName: rep?.name || 'Trainee',
+        traineeName,
         trainingTitle: journey?.title || 'Training',
         level: 'Expert',
         ...(finalScore !== undefined ? { finalScore } : {}),

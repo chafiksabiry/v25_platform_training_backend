@@ -6,6 +6,7 @@ import RepTrainingTracking, {
   RepTrainingTrackingEventKind
 } from '../models/rep_training_tracking.model';
 import Rep from '../models/Rep';
+import Agent from '../models/Agent';
 import Certification from '../models/Certification';
 import { AppError } from '../middleware/errorHandler';
 import { ImageGenerationService } from './imageGenerationService';
@@ -2202,6 +2203,9 @@ class TrainingJourneyService {
 
     const journey = await TrainingJourney.findById(jid).select('title certifications companyId gigId');
     const rep = await Rep.findById(rid).select('name companyId gigId');
+    // `repId` est en réalité l'_id de l'Agent (profil rep du service matching).
+    const agent = await Agent.findById(rid).select('personalInfo.name companyId');
+    const traineeName = (agent?.personalInfo?.name || rep?.name || 'Trainee').trim();
 
     // Score final : moyenne des quiz réussis, à défaut le score d'engagement.
     const quizScores: number[] = [];
@@ -2214,7 +2218,7 @@ class TrainingJourneyService {
       ? Math.round(quizScores.reduce((a, b) => a + b, 0) / quizScores.length)
       : (typeof tracking.engagementScore === 'number' ? Math.round(tracking.engagementScore) : undefined);
 
-    const companyId = optionalObjectId(journey?.companyId) || optionalObjectId(rep?.companyId);
+    const companyId = optionalObjectId(journey?.companyId) || optionalObjectId(agent?.companyId) || optionalObjectId(rep?.companyId);
     const gigId = optionalObjectId(journey?.gigId) || optionalObjectId(rep?.gigId);
 
     // Persister / mettre à jour le certificat dans sa collection dédiée (idempotent).
@@ -2229,7 +2233,7 @@ class TrainingJourneyService {
           issuedAt: tracking.certificationIssuedAt
         },
         $set: {
-          traineeName: rep?.name || 'Trainee',
+          traineeName,
           trainingTitle: journey?.title || 'Training',
           level: 'Expert',
           status: 'certified',
