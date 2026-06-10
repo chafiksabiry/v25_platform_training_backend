@@ -1502,13 +1502,10 @@ class TrainingJourneyService {
     if (secSt === 'completed') {
       return tracking;
     }
-    if (secSt !== 'in_progress') {
-      if (secSt === 'pending') {
-        throw new AppError(
-          'Section must be started before it can be completed. Call POST /training_journeys/section/start first.',
-          409
-        );
-      }
+    if (secSt === 'pending') {
+      // Auto-start when complete arrives before start (race between frontend calls).
+      section.status = 'in_progress';
+    } else if (secSt !== 'in_progress') {
       throw new AppError('Section must be in progress before it can be completed.', 409);
     }
     section.status = 'completed';
@@ -1727,13 +1724,7 @@ class TrainingJourneyService {
             | 'completed';
           if (requested === 'completed') {
             const rs = String(row.status);
-            if (rs === 'pending') {
-              throw new AppError(
-                'Section must be started before it can be completed. Call POST /training_journeys/section/start first.',
-                409
-              );
-            }
-            if (rs !== 'in_progress' && rs !== 'completed') {
+            if (rs !== 'pending' && rs !== 'in_progress' && rs !== 'completed') {
               throw new AppError('Section must be in progress before it can be completed.', 409);
             }
           }
