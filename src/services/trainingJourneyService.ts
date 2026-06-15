@@ -1511,6 +1511,16 @@ class TrainingJourneyService {
     section.status = 'completed';
     section.completedAt = new Date();
     if (module.status === 'pending') module.status = 'in_progress';
+
+    const sectionRows = Array.isArray(module.sections) ? module.sections : [];
+    const completedIdx = sectionRows.findIndex((s: any) => String(s?.sectionId) === sectionId);
+    if (completedIdx >= 0 && completedIdx < sectionRows.length - 1) {
+      const nextSection = sectionRows[completedIdx + 1];
+      if (nextSection && String(nextSection.status) === 'pending') {
+        nextSection.status = 'in_progress';
+      }
+    }
+
     recomputeModuleAndCourseProgress(tracking);
     await tracking.save();
     return tracking;
