@@ -1149,6 +1149,11 @@ class TrainingJourneyService {
     if (!journey) {
       throw new AppError('Journey not found', 404);
     }
+    try {
+      await syncScriptRequirementOnJourney(journey);
+    } catch (error) {
+      console.warn('[TrainingJourneyService] script requirement sync failed for journey', journey._id, error);
+    }
     return journey;
   }
 
@@ -1172,7 +1177,7 @@ class TrainingJourneyService {
       variants.push(new mongoose.Types.ObjectId(id));
     }
     const enrolledMatch: (string | mongoose.Types.ObjectId)[] = [...variants];
-    return await TrainingJourney.find({
+    const journeys = await TrainingJourney.find({
       $or: [
         { enrolledRepIds: { $in: enrolledMatch } },
         { repId: { $in: variants } }
@@ -1180,6 +1185,16 @@ class TrainingJourneyService {
     })
       .populate('gigId', '_id title status companyId')
       .sort({ updatedAt: -1 });
+
+    for (const journey of journeys) {
+      try {
+        await syncScriptRequirementOnJourney(journey);
+      } catch (error) {
+        console.warn('[TrainingJourneyService] script requirement sync failed for journey', journey._id, error);
+      }
+    }
+
+    return journeys;
   }
 
   async getAllAvailableJourneysForTrainees(): Promise<ITrainingJourney[]> {
