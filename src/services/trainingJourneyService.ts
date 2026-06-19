@@ -10,6 +10,7 @@ import Agent from '../models/Agent';
 import Certification from '../models/Certification';
 import { AppError } from '../middleware/errorHandler';
 import { ImageGenerationService } from './imageGenerationService';
+import { mergeScriptRequirementIntoJourneyModules, syncScriptRequirementOnJourney } from './scriptModuleService';
 
 /** Identifiant public stable d'un certificat, déterministe pour un couple (rep, formation). */
 function buildCertificateId(repId: string, journeyId: string): string {
@@ -1079,6 +1080,13 @@ class TrainingJourneyService {
       ensurePresentationSlideIdsOnSlides(pres.slides);
     }
 
+    if (journeyData.gigId) {
+      journeyData.modules = (await mergeScriptRequirementIntoJourneyModules(
+        journeyData.modules as unknown[],
+        journeyData.gigId
+      )) as ITrainingJourney['modules'];
+    }
+
     // Automatically populate images if descriptions are present
     await this.populateImages(journeyData);
 
@@ -1269,6 +1277,15 @@ class TrainingJourneyService {
         gigId: String((j as any)?.gigId?._id || (j as any)?.gigId || '')
       }))
     });
+
+    for (const journey of journeys) {
+      try {
+        await syncScriptRequirementOnJourney(journey);
+      } catch (error) {
+        console.warn('[TrainingJourneyService] script requirement sync failed for journey', journey._id, error);
+      }
+    }
+
     return journeys;
   }
 

@@ -4,6 +4,7 @@ import Document from '../models/Document';
 import TrainingJourney, { ITrainingJourney } from '../models/TrainingJourney';
 import aiService from './aiService';
 import { AppError } from '../middleware/errorHandler';
+import { mergeScriptRequirementIntoJourneyModules } from './scriptModuleService';
 
 export type GenerateFromGigOptions = {
   /** When false, programme + présentation sont basés uniquement sur le Gig (titre, description…), sans documents KB. */
@@ -407,9 +408,14 @@ class GigTrainingGeneratorService {
       }));
 
       // ── Final Assembly & Persistence ────────────────────────────────────
+      const modulesWithScript = await mergeScriptRequirementIntoJourneyModules(
+        sessionsData.modules || [],
+        gig._id
+      );
+
       const journeyData: Partial<ITrainingJourney> = {
         ...meta,
-        modules: sessionsData.modules || [],
+        modules: modulesWithScript as ITrainingJourney['modules'],
         companyId: gig.companyId,
         gigId: gig._id,
         industry: gig.industry,
