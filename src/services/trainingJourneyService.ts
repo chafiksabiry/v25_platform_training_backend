@@ -11,6 +11,7 @@ import Certification from '../models/Certification';
 import { AppError } from '../middleware/errorHandler';
 import { ImageGenerationService } from './imageGenerationService';
 import { mergeScriptRequirementIntoJourneyModules, syncScriptRequirementOnJourney } from './scriptModuleService';
+import repNotificationSyncService from './repNotificationSyncService';
 
 /** Identifiant public stable d'un certificat, déterministe pour un couple (rep, formation). */
 function buildCertificateId(repId: string, journeyId: string): string {
@@ -1540,6 +1541,7 @@ class TrainingJourneyService {
 
     recomputeModuleAndCourseProgress(tracking);
     await tracking.save();
+    repNotificationSyncService.scheduleSyncForRep(input.repId);
     return tracking;
   }
 
@@ -1674,6 +1676,7 @@ class TrainingJourneyService {
     if (module.status === 'pending') module.status = 'in_progress';
     recomputeModuleAndCourseProgress(tracking);
     await tracking.save();
+    repNotificationSyncService.scheduleSyncForRep(input.repId);
     return {
       score,
       passed,
