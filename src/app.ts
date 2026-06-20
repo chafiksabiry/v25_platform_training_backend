@@ -19,7 +19,7 @@ const app: Application = express();
 const allowedOrigins = [
   'https://v25.harx.ai',
   'https://v25-preprod.harx.ai',
-  'https://harx25pageslinks.netlify.app',
+  'https://harx.ai',
   'https://harxv25dashboardfrontend.netlify.app',
   'https://v25-platform-training-frontend.vercel.app',
   'http://localhost:3000',
