@@ -42,6 +42,38 @@ function optionalObjectId(raw: unknown): mongoose.Types.ObjectId | undefined {
   return new mongoose.Types.ObjectId(s);
 }
 
+function mapProgressToTrainingStatus(
+  progress: number,
+  trackingStatus?: unknown
+): 'not_started' | 'in_progress' | 'completed' {
+  const normalized = String(trackingStatus || '').toLowerCase().replace(/_/g, '-');
+  if (progress >= 100 || normalized === 'completed') return 'completed';
+  if (progress > 0 || normalized === 'in-progress' || normalized === 'active') return 'in_progress';
+  return 'not_started';
+}
+
+function computeJourneyDurationMinutes(journey: Record<string, unknown>): number {
+  const modules = Array.isArray(journey.modules) ? journey.modules : [];
+  if (modules.length > 0) {
+    return modules.reduce((acc: number, module: Record<string, unknown>) => {
+      return acc + Number(module.duration ?? module.durationMinutes ?? module.estimatedDuration ?? 0);
+    }, 0);
+  }
+  const modulePlan = Array.isArray(journey.modulePlan) ? journey.modulePlan : [];
+  return modulePlan.reduce((acc: number, module: Record<string, unknown>) => {
+    return acc + Number(module.durationMinutes ?? module.duration ?? 0);
+  }, 0);
+}
+
+function resolveJourneyModulesCount(journey: Record<string, unknown>): number {
+  const modules = Array.isArray(journey.modules) ? journey.modules : [];
+  if (modules.length > 0) return modules.length;
+  const modulePlan = Array.isArray(journey.modulePlan) ? journey.modulePlan : [];
+  if (modulePlan.length > 0) return modulePlan.length;
+  const moduleCount = Number(journey.moduleCount ?? journey.modulesCount ?? 0);
+  return Number.isFinite(moduleCount) && moduleCount > 0 ? moduleCount : 0;
+}
+
 /** Repère la ligne quiz du module (rep-progress envoie parfois seulement quizKey = ObjectId hex). */
 function findQuizRowForUpdate(
   moduleRow: { quizzes?: unknown[] } | null | undefined,
@@ -2119,6 +2151,240 @@ class TrainingJourneyService {
     return await RepTrainingTracking.find({
       $or: [{ journeyId: new mongoose.Types.ObjectId(jid) }, { courseId: new mongoose.Types.ObjectId(jid) }]
     }).sort({ updatedAt: -1 });
+  }
+
+  /** GET /training_journeys/rep/:repId/progress/gig/:gigId — progression d'un rep sur les formations d'un gig. */
+  async getRepProgressByGig(repId: string, gigId: string) {
+    const rid = String(repId || '').trim();
+    const gid = String(gigId || '').trim();
+    if (!rid || !gid) return null;
+    if (!mongoose.Types.ObjectId.isValid(rid) || !mongoose.Types.ObjectId.isValid(gid)) return null;
+
+    const [summary, publishedJourneys, progressRows] = await Promise.all([
+      this.getRepSlideProgressSummary(rid, gid),
+      this.getPublishedJourneysByGigId(gid),
+      this.getTrainingProgressByRep(rid)
+    ]);
+
+    const progressByJourney = new Map<string, (typeof progressRows)[number]>();
+    progressRows.forEach((row) => {
+      const jid = normalizeAnyId(row?.journeyId);
+      if (jid) progressByJourney.set(jid, row);
+    });
+
+    const summaryByJourney = new Map(summary.journeys.map((line) => [line.journeyId, line]));
+
+    const trainings = (publishedJourneys as any[]).map((journey) => {
+      const journeyId = normalizeAnyId(journey?._id || journey?.id);
+      const summaryLine = summaryByJourney.get(journeyId);
+      const progressRow = progressByJourney.get(journeyId);
+      const progress = summaryLine
+        ? Math.min(100, Math.round(summaryLine.ratio * 100))
+        : Math.min(100, Math.round(Number(progressRow?.progressPercentage || 0)));
+      const moduleTotal = Number(progressRow?.moduleTotal || resolveJourneyModulesCount(journey));
+      const moduleFinished = Number(progressRow?.moduleFinished || 0);
+      const trackingStatus =
+        moduleTotal > 0 && moduleFinished >= moduleTotal
+          ? 'completed'
+          : progress > 0
+            ? 'in_progress'
+            : 'pending';
+      const status = mapProgressToTrainingStatus(progress, trackingStatus);
+      const timeSpentMs = Math.max(
+        0,
+        Number(progressRow?.totalDurationMs || summaryLine?.followedDurationMs || 0)
+      );
+
+      return {
+        journeyId,
+        journeyTitle: String(journey?.title || journey?.name || 'Formation'),
+        description: journey?.description ? String(journey.description) : undefined,
+        status,
+        progress,
+        timeSpent: Math.round(timeSpentMs / 60000),
+        modulesProgress:
+          progressRow?.modules &&
+          typeof progressRow.modules === 'object' &&
+          !Array.isArray(progressRow.modules)
+            ? Object.entries(progressRow.modules as Record<string, unknown>).map(([moduleId, moduleState]) => ({
+                moduleId,
+                progress: Number((moduleState as { progress?: unknown })?.progress || 0),
+                status: String((moduleState as { status?: unknown })?.status || 'pending'),
+                timeSpent: 0
+              }))
+            : []
+      };
+    });
+
+    const completedTrainings = trainings.filter((item) => item.status === 'completed').length;
+    const inProgressTrainings = trainings.filter((item) => item.status === 'in_progress').length;
+    const notStartedTrainings = trainings.filter((item) => item.status === 'not_started').length;
+
+    return {
+      repId: rid,
+      gigId: gid,
+      totalTrainings: trainings.length,
+      completedTrainings,
+      inProgressTrainings,
+      notStartedTrainings,
+      overallProgress: summary.overallPercent,
+      totalTimeSpent: trainings.reduce((sum, item) => sum + item.timeSpent, 0),
+      trainings
+    };
+  }
+
+  /**
+   * POST /training_journeys/trainer/companyId/:companyId/participants-progress
+   * Agrège la progression des REPs actifs pour la page Formation entreprise.
+   */
+  async getCompanyParticipantsProgress(
+    companyId: string,
+    input: {
+      gigId?: string;
+      entries?: Array<{ repId: string; gigId: string }>;
+    } = {}
+  ) {
+    const cid = String(companyId || '').trim();
+    if (!cid) {
+      throw new AppError('companyId is required', 400);
+    }
+
+    const filterGigId = String(input.gigId || '').trim();
+    const journeys = await this.getJourneysByCompanyAndGig(cid, filterGigId || undefined);
+    const journeyByGigId = new Map<string, any>();
+    for (const journey of journeys as any[]) {
+      const gigRef = journey.gigId as Record<string, unknown> | string | undefined;
+      const gid = normalizeAnyId(typeof gigRef === 'object' ? gigRef?._id || gigRef?.id : gigRef);
+      if (gid && !journeyByGigId.has(gid)) {
+        journeyByGigId.set(gid, journey);
+      }
+    }
+
+    let entries = Array.isArray(input.entries) ? input.entries : [];
+    entries = entries
+      .map((entry) => ({
+        repId: String(entry?.repId || '').trim(),
+        gigId: String(entry?.gigId || '').trim()
+      }))
+      .filter(
+        (entry) =>
+          entry.repId &&
+          entry.gigId &&
+          mongoose.Types.ObjectId.isValid(entry.repId) &&
+          mongoose.Types.ObjectId.isValid(entry.gigId)
+      );
+
+    if (filterGigId) {
+      entries = entries.filter((entry) => entry.gigId === filterGigId);
+    }
+
+    const uniqueRepIds = [...new Set(entries.map((entry) => entry.repId))];
+    const agents =
+      uniqueRepIds.length > 0
+        ? await Agent.find({
+            _id: { $in: uniqueRepIds.map((id) => new mongoose.Types.ObjectId(id)) }
+          })
+            .select('personalInfo')
+            .lean()
+        : [];
+    const agentById = new Map(agents.map((agent: any) => [String(agent._id), agent]));
+
+    const participants = await Promise.all(
+      entries.map(async (entry) => {
+        const journey = journeyByGigId.get(entry.gigId);
+        const journeyId = journey ? normalizeAnyId(journey._id || journey.id) : '';
+        const journeyTitle = journey ? String(journey.title || journey.name || 'Formation') : '';
+        let progress = 0;
+        let status: 'not_started' | 'in_progress' | 'completed' = 'not_started';
+
+        const gigProgress = await this.getRepProgressByGig(entry.repId, entry.gigId);
+        if (gigProgress) {
+          const matchedTraining =
+            (journeyId
+              ? gigProgress.trainings.find(
+                  (training) => normalizeAnyId(training.journeyId) === journeyId
+                )
+              : undefined) || gigProgress.trainings[0];
+
+          if (matchedTraining) {
+            progress = matchedTraining.progress;
+            status = mapProgressToTrainingStatus(progress, matchedTraining.status);
+          } else if (gigProgress.overallProgress > 0) {
+            progress = gigProgress.overallProgress;
+            status = mapProgressToTrainingStatus(progress);
+          }
+        } else if (journeyId) {
+          const tracking = await this.getRepProgress(entry.repId, journeyId);
+          progress = Math.min(100, Math.round(Number((tracking as any)?.progressPercentage || 0)));
+          status = mapProgressToTrainingStatus(progress, (tracking as any)?.status);
+        }
+
+        const agent = agentById.get(entry.repId);
+        return {
+          repId: entry.repId,
+          gigId: entry.gigId,
+          name: String(agent?.personalInfo?.name || ''),
+          email: String(agent?.personalInfo?.email || ''),
+          journeyId,
+          journeyTitle,
+          progress,
+          status
+        };
+      })
+    );
+
+    const journeyStats = (journeys as any[]).map((journey) => {
+      const journeyId = normalizeAnyId(journey._id || journey.id);
+      const gigRef = journey.gigId as Record<string, unknown> | string | undefined;
+      const gigId = normalizeAnyId(typeof gigRef === 'object' ? gigRef?._id || gigRef?.id : gigRef);
+      const scopedParticipants = participants.filter((participant) => participant.gigId === gigId);
+      const participantCount = scopedParticipants.length;
+      const completedCount = scopedParticipants.filter((p) => p.status === 'completed').length;
+      const inProgressCount = scopedParticipants.filter((p) => p.status === 'in_progress').length;
+      const notStartedCount = scopedParticipants.filter((p) => p.status === 'not_started').length;
+      const avgProgress =
+        participantCount > 0
+          ? Math.round(
+              scopedParticipants.reduce((sum, participant) => sum + participant.progress, 0) /
+                participantCount
+            )
+          : 0;
+
+      return {
+        journeyId,
+        title: String(journey.title || journey.name || 'Formation'),
+        gigId,
+        modulesCount: resolveJourneyModulesCount(journey),
+        durationMinutes: computeJourneyDurationMinutes(journey),
+        participantCount,
+        avgProgress,
+        completionRate:
+          participantCount > 0 ? Math.round((completedCount / participantCount) * 100) : 0,
+        completedCount,
+        inProgressCount,
+        notStartedCount
+      };
+    });
+
+    const total = participants.length;
+    const completed = participants.filter((p) => p.status === 'completed').length;
+    const inProgress = participants.filter((p) => p.status === 'in_progress').length;
+    const notStarted = participants.filter((p) => p.status === 'not_started').length;
+    const avgProgress =
+      total > 0 ? Math.round(participants.reduce((sum, p) => sum + p.progress, 0) / total) : 0;
+
+    return {
+      participants,
+      journeys: journeyStats,
+      summary: {
+        total,
+        completed,
+        inProgress,
+        notStarted,
+        avgProgress,
+        completionRate: total > 0 ? Math.round((completed / total) * 100) : 0
+      }
+    };
   }
 
   async recordTrainingTrackingEvent(input: {

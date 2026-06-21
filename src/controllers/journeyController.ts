@@ -624,6 +624,37 @@ export const getRepProgressSummary = asyncHandler(async (req: AuthRequest, res: 
 // Backward-compatible alias
 export const getRepSlideProgressSummary = getRepProgressSummary;
 
+/** GET /training_journeys/rep/:repId/progress/gig/:gigId */
+export const getRepProgressByGig = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const repId = String(req.params.repId || '').trim();
+  const gigId = String(req.params.gigId || '').trim();
+  if (!repId || !gigId) {
+    res.status(400).json({ success: false, error: 'repId and gigId are required' });
+    return;
+  }
+  const data = await trainingJourneyService.getRepProgressByGig(repId, gigId);
+  res.status(200).json({ success: true, data });
+});
+
+/** POST /training_journeys/trainer/companyId/:companyId/participants-progress */
+export const getCompanyParticipantsProgress = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const companyId = String(req.params.companyId || '').trim();
+  if (!companyId) {
+    res.status(400).json({ success: false, error: 'companyId is required' });
+    return;
+  }
+
+  const payload = req.body || {};
+  const gigId = String(payload.gigId || req.query.gigId || '').trim() || undefined;
+  const entries = Array.isArray(payload.entries) ? payload.entries : [];
+
+  const data = await trainingJourneyService.getCompanyParticipantsProgress(companyId, {
+    gigId,
+    entries
+  });
+  res.status(200).json({ success: true, data });
+});
+
 /** GET /training_journeys/journey/:journeyId/reps-progress */
 export const getRepProgressByTraining = asyncHandler(async (req: AuthRequest, res: Response) => {
   const journeyId = String(req.params.journeyId || '').trim();
