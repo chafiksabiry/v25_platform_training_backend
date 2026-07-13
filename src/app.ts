@@ -23,7 +23,12 @@ const allowedOrigins = [
   'https://harxv25dashboardfrontend.netlify.app',
   'https://v25-platform-training-frontend.vercel.app',
   'http://localhost:3000',
-  'http://localhost:5173'
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:5174',
+  'http://localhost:8100',
+  'capacitor://localhost',
+  'ionic://localhost',
 ];
 
 app.use(cors({
@@ -31,7 +36,8 @@ app.use(cors({
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
-    const isAllowed = allowedOrigins.includes(origin) || 
+    const isAllowed = allowedOrigins.includes(origin) ||
+                     /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
                      origin.endsWith('.harx.ai') || 
                      origin.endsWith('.netlify.app');
                      
