@@ -1,40 +1,25 @@
-# Dependencies / build output
 node_modules
 dist
 coverage
 .nyc_output
-
-# Logs / temp
 logs
 *.log
 tmp
 temp
 *.tmp
-
-# VCS / tooling
 .git
-.gitignore
 .github
 .cursor
-
-# Editors / OS
 .vscode
 .idea
 *.iml
 .DS_Store
 Thumbs.db
-
-# Env files
 .env
 .env.*
 !.env.example
-
-# Runtime-local artifacts
 uploads
 storage
 cache
-
-# Unused for container build
 *.md
 *.pdf
-
