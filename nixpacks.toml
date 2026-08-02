@@ -1,0 +1,12 @@
+# Nixpacks configuration to force Node.js and prevent Java mis-detection
+[phases.setup]
+nixPkgs = ["nodejs_20", "python3"]
+
+[phases.install]
+cmds = ["npm install", "pip install python-pptx"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "npm start"
