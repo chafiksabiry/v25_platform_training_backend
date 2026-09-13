@@ -25,6 +25,13 @@ import { promisify } from 'util';
 import crypto from 'crypto';
 import { GoogleAuth } from 'google-auth-library';
 import { ImageGenerationService } from '../services/imageGenerationService';
+import {
+  AiTokenUsage,
+  assertCompanyHasAiTokens,
+  chargeCompanyAiTokens,
+  fallbackEstimatedUsage,
+  resolveUsageOrEstimate,
+} from '../utils/aiTokenBilling';
 
 const unlinkAsync = promisify(fs.unlink);
 const HARX_STYLE_TAG_REGEX = /<harx-style>\s*\{[\s\S]*?\}\s*<\/harx-style>/i;
@@ -2381,6 +2388,17 @@ export const chat = async (
       return res.status(400).json({ success: false, error: 'message is required' });
     }
 
+    const billingCompanyId = String(companyId || '').trim() || undefined;
+    const tokenGate = await assertCompanyHasAiTokens(billingCompanyId, 1);
+    if (!tokenGate.ok) {
+      return res.status(402).json({
+        success: false,
+        error: 'insufficient_tokens',
+        message: tokenGate.message,
+        data: { tokens: tokenGate.tokens },
+      });
+    }
+
     const anthropicKey = req.headers['x-anthropic-key'] as string;
     let parsedContext: any = null;
     const safeContext =
@@ -2438,8 +2456,25 @@ export const chat = async (
         'Keep it simple, concise, and practical.',
       ].join('\n');
 
-      const raw = await aiService.generateWithClaude(scriptPrompt, scriptSystemPrompt, anthropicKey, 900);
-      const responseText = String(raw || '').trim();
+      const detailed = await aiService.generateWithClaudeDetailed(
+        scriptPrompt,
+        scriptSystemPrompt,
+        anthropicKey,
+        900
+      );
+      const responseText = String(detailed.text || '').trim();
+      const usage = resolveUsageOrEstimate(
+        detailed.usage,
+        scriptPrompt,
+        scriptSystemPrompt,
+        responseText
+      );
+      const charge = await chargeCompanyAiTokens({
+        companyId: billingCompanyId,
+        usageId: `training-chat-kb-script-${Date.now()}`,
+        usage,
+        tool: 'training.chat_kb_script',
+      });
       return res.json({
         success: true,
         response: responseText || 'Je n’ai pas pu générer de script.',
@@ -2447,6 +2482,11 @@ export const chat = async (
         data: {
           script: responseText || 'Je n’ai pas pu générer de script.',
           text: responseText || 'Je n’ai pas pu générer de script.',
+        },
+        usage: {
+          ...usage,
+          billed: charge.billed,
+          balance: charge.tokens,
         },
       });
     }
@@ -3912,22 +3952,35 @@ export const chat = async (
 
     const streamEnabled = String(req.query.stream ?? 'true').toLowerCase() !== 'false';
     const shouldValidateDomain = inferredDomain.kbKeywords.length > 0;
+    let lastAiUsage: AiTokenUsage | null = null;
     if (!streamEnabled) {
       let response = '';
       if (isFullTrainingIntent && planModulesForContent.length > 0) {
         response = await generateFullTrainingByModules();
+        lastAiUsage = fallbackEstimatedUsage(prompt, systemPrompt, response);
       } else {
-        response = await aiService.generateWithClaude(
+        const detailed = await aiService.generateWithClaudeDetailed(
           prompt,
           systemPrompt,
           anthropicKey
         );
+        response = detailed.text;
+        lastAiUsage = detailed.usage;
       }
       if (shouldValidateDomain && isKbTopicMismatch(String(response || ''), inferredDomain.kbKeywords)) {
         const correctiveSystemPrompt = `${systemPrompt} CRITICAL DOMAIN LOCK: ${inferredDomain.strictTopicGuard} If draft is off-domain, regenerate fully in the correct domain.`;
-        response = isFullTrainingIntent && planModulesForContent.length > 0
-          ? await generateFullTrainingByModules()
-          : await aiService.generateWithClaude(prompt, correctiveSystemPrompt, anthropicKey);
+        if (isFullTrainingIntent && planModulesForContent.length > 0) {
+          response = await generateFullTrainingByModules();
+          lastAiUsage = fallbackEstimatedUsage(prompt, correctiveSystemPrompt, response);
+        } else {
+          const detailed = await aiService.generateWithClaudeDetailed(
+            prompt,
+            correctiveSystemPrompt,
+            anthropicKey
+          );
+          response = detailed.text;
+          lastAiUsage = detailed.usage;
+        }
       }
       if (isPlanIntent && isWeakPlanDraft(String(response || ''))) {
         const correctivePlanPrompt = `${systemPrompt}
@@ -3940,7 +3993,13 @@ Regenerate now with strict compliance.
   ### 📌 Contenu clé (min 3 bullets; alias "### 📌 Key Topics" or "**Contenu clé :**" + bullets allowed)
 - Do NOT include Activités/Livrables/Indicateur d’évaluation sections in training plan output
 - No intro before Module 1; no "Prochaines étapes" / CTA inside a module body; no questions at the end of the plan`;
-        response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
+        const detailed = await aiService.generateWithClaudeDetailed(
+          prompt,
+          correctivePlanPrompt,
+          anthropicKey
+        );
+        response = detailed.text;
+        lastAiUsage = detailed.usage;
       }
       let finalResponse = await ensureVisualResponseContract(
         String(response || ''),
@@ -3979,10 +4038,28 @@ Regenerate now with strict compliance.
       activeSession.lastActivityAt = new Date();
       await activeSession.save();
 
+      const usage = resolveUsageOrEstimate(
+        lastAiUsage,
+        prompt,
+        systemPrompt,
+        assistantMessageText
+      );
+      const charge = await chargeCompanyAiTokens({
+        companyId: billingCompanyId,
+        usageId: `training-chat-${String(activeSession._id)}-${Date.now()}`,
+        usage,
+        tool: 'training.chat',
+      });
+
       return res.status(200).json({
         success: true,
         response: assistantMessageText,
         sessionId: String(activeSession._id),
+        usage: {
+          ...usage,
+          billed: charge.billed,
+          balance: charge.tokens,
+        },
       });
     }
 
@@ -4000,14 +4077,33 @@ Regenerate now with strict compliance.
     const forceLockedIntentResponse = isPlanIntent || isModuleIntent || isFullTrainingIntent;
     if (shouldValidateDomain || forceLockedIntentResponse) {
       // For strict domain lock, generate once then stream-safe write validated content.
-      let response = isFullTrainingIntent && planModulesForContent.length > 0
-        ? await generateFullTrainingByModules()
-        : await aiService.generateWithClaude(prompt, systemPrompt, anthropicKey);
+      let response = '';
+      if (isFullTrainingIntent && planModulesForContent.length > 0) {
+        response = await generateFullTrainingByModules();
+        lastAiUsage = fallbackEstimatedUsage(prompt, systemPrompt, response);
+      } else {
+        const detailed = await aiService.generateWithClaudeDetailed(
+          prompt,
+          systemPrompt,
+          anthropicKey
+        );
+        response = detailed.text;
+        lastAiUsage = detailed.usage;
+      }
       if (isKbTopicMismatch(String(response || ''), inferredDomain.kbKeywords)) {
         const correctiveSystemPrompt = `${systemPrompt} CRITICAL DOMAIN LOCK: ${inferredDomain.strictTopicGuard} If draft is off-domain, regenerate fully in the correct domain.`;
-        response = isFullTrainingIntent && planModulesForContent.length > 0
-          ? await generateFullTrainingByModules()
-          : await aiService.generateWithClaude(prompt, correctiveSystemPrompt, anthropicKey);
+        if (isFullTrainingIntent && planModulesForContent.length > 0) {
+          response = await generateFullTrainingByModules();
+          lastAiUsage = fallbackEstimatedUsage(prompt, correctiveSystemPrompt, response);
+        } else {
+          const detailed = await aiService.generateWithClaudeDetailed(
+            prompt,
+            correctiveSystemPrompt,
+            anthropicKey
+          );
+          response = detailed.text;
+          lastAiUsage = detailed.usage;
+        }
       }
       if (isPlanIntent && isWeakPlanDraft(String(response || ''))) {
         const correctivePlanPrompt = `${systemPrompt}
@@ -4020,7 +4116,13 @@ Regenerate now with strict compliance.
   ### 📌 Contenu clé (min 3 bullets; alias "### 📌 Key Topics" or "**Contenu clé :**" + bullets allowed)
 - Do NOT include Activités/Livrables/Indicateur d’évaluation sections in training plan output
 - No intro before Module 1; no "Prochaines étapes" / CTA inside a module body; no questions at the end of the plan`;
-        response = await aiService.generateWithClaude(prompt, correctivePlanPrompt, anthropicKey);
+        const detailed = await aiService.generateWithClaudeDetailed(
+          prompt,
+          correctivePlanPrompt,
+          anthropicKey
+        );
+        response = detailed.text;
+        lastAiUsage = detailed.usage;
       }
       fullResponse = String(response || '');
       res.write(fullResponse);
@@ -4028,7 +4130,14 @@ Regenerate now with strict compliance.
         (res as any).flush();
       }
     } else {
-      for await (const chunk of aiService.streamWithClaude(prompt, systemPrompt, anthropicKey)) {
+      const streamGen = aiService.streamWithClaude(prompt, systemPrompt, anthropicKey);
+      while (true) {
+        const next = await streamGen.next();
+        if (next.done) {
+          lastAiUsage = next.value || lastAiUsage;
+          break;
+        }
+        const chunk = next.value;
         fullResponse += chunk;
         res.write(chunk);
         if (typeof (res as any).flush === 'function') {
@@ -4085,6 +4194,19 @@ Regenerate now with strict compliance.
     }
     activeSession.lastActivityAt = new Date();
     await activeSession.save();
+
+    const streamUsage = resolveUsageOrEstimate(
+      lastAiUsage,
+      prompt,
+      systemPrompt,
+      assistantMessageText
+    );
+    await chargeCompanyAiTokens({
+      companyId: billingCompanyId,
+      usageId: `training-chat-stream-${String(activeSession._id)}-${Date.now()}`,
+      usage: streamUsage,
+      tool: 'training.chat_stream',
+    });
 
     return res.end();
   } catch (error: any) {
@@ -4318,6 +4440,17 @@ export const analyzeDocument = async (
 
     const anthropicKey = req.headers['x-anthropic-key'] as string;
     const { gigId, companyId } = req.body || {};
+    const billingCompanyId = String(companyId || '').trim() || undefined;
+
+    const tokenGate = await assertCompanyHasAiTokens(billingCompanyId, 1);
+    if (!tokenGate.ok) {
+      return res.status(402).json({
+        success: false,
+        error: 'insufficient_tokens',
+        message: tokenGate.message,
+        data: { tokens: tokenGate.tokens },
+      });
+    }
 
     const analysis = await documentAnalysisService.analyzeDocument(
       req.file.path,
@@ -4404,12 +4537,33 @@ export const analyzeDocument = async (
       console.error('Error deleting local file:', unlinkError);
     }
 
+    // Document analysis runs multiple LLM passes; estimate from serialized result (+ floor).
+    const usage = resolveUsageOrEstimate(
+      null,
+      JSON.stringify(analysis || {}),
+      String(req.file.originalname || '')
+    );
+    usage.totalTokens = Math.max(800, usage.totalTokens);
+    usage.outputTokens = usage.totalTokens;
+    const charge = await chargeCompanyAiTokens({
+      companyId: billingCompanyId,
+      usageId: `analyze-doc-${billingCompanyId || 'x'}-${Date.now()}`,
+      usage,
+      tool: 'training.analyze_document',
+      meta: { fileName: req.file.originalname, mime: req.file.mimetype },
+    });
+
     return res.status(200).json({
       success: true,
       data: {
         ...analysis,
         fileUrl
-      }
+      },
+      usage: {
+        ...usage,
+        billed: charge.billed,
+        balance: charge.tokens,
+      },
     });
   } catch (error) {
     return next(error);

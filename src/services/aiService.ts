@@ -1,5 +1,18 @@
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
+import {
+  AiTokenUsage,
+  fallbackEstimatedUsage,
+  usageFromAnthropic,
+  usageFromOpenAI,
+} from '../utils/aiTokenBilling';
+
+export type { AiTokenUsage };
+
+export type AiGenerationResult = {
+  text: string;
+  usage: AiTokenUsage;
+};
 
 class AIService {
   private openai: OpenAI;
@@ -281,6 +294,24 @@ class AIService {
     maxTokensOverride?: number,
     options?: { temperature?: number; preferredModels?: string[] }
   ): Promise<string> {
+    const result = await this.generateWithClaudeDetailed(
+      prompt,
+      systemPrompt,
+      apiKey,
+      maxTokensOverride,
+      options
+    );
+    return result.text;
+  }
+
+  /** Same as generateWithClaude but returns provider usage when available. */
+  async generateWithClaudeDetailed(
+    prompt: string,
+    systemPrompt?: string,
+    apiKey?: string,
+    maxTokensOverride?: number,
+    options?: { temperature?: number; preferredModels?: string[] }
+  ): Promise<AiGenerationResult> {
     const client = apiKey ? new Anthropic({ apiKey }) : this.anthropic;
 
     const defaultChain = [
@@ -325,7 +356,10 @@ class AIService {
           if (response.stop_reason === 'max_tokens') {
             console.log(`ℹ️ Claude response truncated by max_tokens (${model}); fallback handling may apply.`);
           }
-          return combinedText;
+          const usage =
+            usageFromAnthropic(response, model) ||
+            fallbackEstimatedUsage(prompt, systemPrompt, combinedText);
+          return { text: combinedText, usage };
         }
         lastError = new Error(`Claude model ${model} returned empty text`);
         console.warn(`⚠️ ${lastError.message}; trying next model or OpenAI...`);
@@ -364,7 +398,11 @@ class AIService {
           throw new Error('OpenAI returned empty content');
         }
         console.log('✅ Analysis successful with OpenAI fallback');
-        return response.choices[0]?.message?.content || '';
+        const text = response.choices[0]?.message?.content || '';
+        const usage =
+          usageFromOpenAI(response, model) ||
+          fallbackEstimatedUsage(prompt, systemPrompt, text);
+        return { text, usage };
       } catch (openAiErr: any) {
         const message = String(openAiErr?.message || '');
         const unsupportedResponseFormat =
@@ -381,7 +419,11 @@ class AIService {
           throw new Error('OpenAI returned empty content (retry without response_format)');
         }
         console.log('✅ Analysis successful with OpenAI fallback (without response_format)');
-        return retryResponse.choices[0]?.message?.content || '';
+        const text = retryResponse.choices[0]?.message?.content || '';
+        const usage =
+          usageFromOpenAI(retryResponse, model) ||
+          fallbackEstimatedUsage(prompt, systemPrompt, text);
+        return { text, usage };
       }
     } catch (openaiError: any) {
       console.error('❌ ALL AI models failed (Claude & OpenAI):', openaiError);
@@ -401,7 +443,7 @@ class AIService {
     systemPrompt?: string,
     apiKey?: string,
     options?: { temperature?: number; preferredModels?: string[] }
-  ): AsyncGenerator<string, void, unknown> {
+  ): AsyncGenerator<string, AiTokenUsage, unknown> {
     const client = apiKey ? new Anthropic({ apiKey }) : this.anthropic;
 
     const defaultChain = [
@@ -418,6 +460,7 @@ class AIService {
         : parseFloat(process.env.OPENAI_TEMPERATURE || '0.7');
 
     let lastError: any;
+    let producedFullText = '';
     for (const model of modelsToTry) {
       try {
         const envMaxTokens = parseInt(process.env.ANTHROPIC_MAX_TOKENS || '8192', 10);
@@ -431,17 +474,36 @@ class AIService {
         } as any);
 
         let producedText = false;
+        let inputTokens = 0;
+        let outputTokens = 0;
+        producedFullText = '';
         for await (const event of stream as any) {
+          if (event?.type === 'message_start' && event?.message?.usage) {
+            inputTokens = Number(event.message.usage.input_tokens || 0);
+          }
+          if (event?.type === 'message_delta' && event?.usage) {
+            outputTokens = Number(event.usage.output_tokens || outputTokens);
+          }
           if (event?.type === 'content_block_delta' && event?.delta?.type === 'text_delta') {
             const textChunk = String(event.delta.text || '');
             if (textChunk) {
               producedText = true;
+              producedFullText += textChunk;
               yield textChunk;
             }
           }
         }
 
-        if (producedText) return;
+        if (producedText) {
+          const fromProvider = usageFromAnthropic(
+            { usage: { input_tokens: inputTokens, output_tokens: outputTokens } },
+            model
+          );
+          return (
+            fromProvider ||
+            fallbackEstimatedUsage(prompt, systemPrompt, producedFullText)
+          );
+        }
       } catch (error: any) {
         lastError = error;
         console.warn(`⚠️ Claude streaming model ${model} failed: ${error.message}`);
@@ -450,8 +512,14 @@ class AIService {
 
     // Fallback: completion non streamée (inclut OpenAI si tous les Claude ont échoué ou texte vide),
     // puis re-émission par petits morceaux pour garder une UX progressive.
-    const fallback = await this.generateWithClaude(prompt, systemPrompt, apiKey, undefined, options);
-    const trimmed = String(fallback || '').trim();
+    const fallback = await this.generateWithClaudeDetailed(
+      prompt,
+      systemPrompt,
+      apiKey,
+      undefined,
+      options
+    );
+    const trimmed = String(fallback.text || '').trim();
     if (!trimmed) {
       throw new Error(
         lastError?.message ||
@@ -459,10 +527,11 @@ class AIService {
       );
     }
 
-    const words = fallback.split(/(\s+)/);
+    const words = fallback.text.split(/(\s+)/);
     for (const word of words) {
       if (word) yield word;
     }
+    return fallback.usage;
   }
 
   async generateQuiz(topic: string, numberOfQuestions: number = 5): Promise<any> {
