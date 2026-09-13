@@ -5,6 +5,11 @@ import { asyncHandler } from '../middleware/errorHandler';
 import cloudinaryService from '../services/cloudinaryService';
 import aiService from '../services/aiService';
 import { ImageGenerationService } from '../services/imageGenerationService';
+import {
+  assertCompanyHasAiTokens,
+  chargeCompanyAiTokens,
+  resolveUsageOrEstimate,
+} from '../utils/aiTokenBilling';
 
 const isValidObjectId = (v: unknown): boolean =>
   typeof v === 'string' && /^[a-f\d]{24}$/i.test(v);
@@ -286,6 +291,19 @@ export const suggestTrainingVision = asyncHandler(async (req: AuthRequest, res: 
   const industry = String(payload.industry || gig?.industry || '').trim();
   const currentTitle = String(payload.currentTitle || '').trim();
   const currentDescription = String(payload.currentDescription || '').trim();
+  const billingCompanyId = String(
+    payload.companyId || (req as any).user?.companyId || ''
+  ).trim() || undefined;
+
+  const tokenGate = await assertCompanyHasAiTokens(billingCompanyId, 1);
+  if (!tokenGate.ok) {
+    return res.status(402).json({
+      success: false,
+      error: 'insufficient_tokens',
+      message: tokenGate.message,
+      data: { tokens: tokenGate.tokens },
+    });
+  }
 
   const gigTitle = String(gig?.title || '').trim();
   const gigDescription = String(gig?.description || '').trim();
@@ -324,13 +342,14 @@ export const suggestTrainingVision = asyncHandler(async (req: AuthRequest, res: 
     'No markdown, no extra prose.'
   ].join(' ');
 
-  const raw = await aiService.generateWithClaude(
+  const detailed = await aiService.generateWithClaudeDetailed(
     userPrompt,
     systemPrompt,
     anthropicKey,
     600,
     { temperature: 0.35 }
   );
+  const raw = detailed.text;
 
   let parsed: any;
   try {
@@ -349,12 +368,25 @@ export const suggestTrainingVision = asyncHandler(async (req: AuthRequest, res: 
     });
   }
 
+  const usage = resolveUsageOrEstimate(detailed.usage, userPrompt, systemPrompt, raw);
+  const charge = await chargeCompanyAiTokens({
+    companyId: billingCompanyId,
+    usageId: `suggest-vision-${Date.now()}`,
+    usage,
+    tool: 'training.suggest_vision',
+  });
+
   return res.status(200).json({
     success: true,
     data: {
       title: suggestedTitle,
       description: suggestedDescription
-    }
+    },
+    usage: {
+      ...usage,
+      billed: charge.billed,
+      balance: charge.tokens,
+    },
   });
 });
 
