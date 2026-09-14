@@ -2474,6 +2474,7 @@ export const chat = async (
         usageId: `training-chat-kb-script-${Date.now()}`,
         usage,
         tool: 'training.chat_kb_script',
+        gigId: String(gig?._id || gigId || '').trim() || undefined,
       });
       return res.json({
         success: true,
@@ -4049,6 +4050,7 @@ Regenerate now with strict compliance.
         usageId: `training-chat-${String(activeSession._id)}-${Date.now()}`,
         usage,
         tool: 'training.chat',
+        gigId: String(gigId || safeGigId || '').trim() || undefined,
       });
 
       return res.status(200).json({
@@ -4206,6 +4208,7 @@ Regenerate now with strict compliance.
       usageId: `training-chat-stream-${String(activeSession._id)}-${Date.now()}`,
       usage: streamUsage,
       tool: 'training.chat_stream',
+      gigId: String(gigId || safeGigId || '').trim() || undefined,
     });
 
     return res.end();
@@ -4550,6 +4553,7 @@ export const analyzeDocument = async (
       usageId: `analyze-doc-${billingCompanyId || 'x'}-${Date.now()}`,
       usage,
       tool: 'training.analyze_document',
+      gigId: String(gigId || '').trim() || undefined,
       meta: { fileName: req.file.originalname, mime: req.file.mimetype },
     });
 
