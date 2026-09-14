@@ -136,6 +136,7 @@ export async function chargeCompanyAiTokens(opts: {
   usageId: string;
   usage: AiTokenUsage;
   tool: string;
+  gigId?: string | null;
   meta?: Record<string, unknown>;
 }): Promise<{ billed: boolean; tokens?: number }> {
   const id = String(opts.companyId || '').trim();
@@ -145,6 +146,7 @@ export async function chargeCompanyAiTokens(opts: {
 
   try {
     const base = getOrchestratorApiBase();
+    const gigId = String(opts.gigId || opts.meta?.gigId || '').trim() || undefined;
     const res = await fetch(`${base}/tokens-company/charge-usage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -153,6 +155,7 @@ export async function chargeCompanyAiTokens(opts: {
         usageId: opts.usageId,
         tokensUsed,
         tool: opts.tool,
+        gigId: gigId || undefined,
         meta: {
           ...(opts.meta || {}),
           provider: opts.usage.provider,
@@ -160,6 +163,7 @@ export async function chargeCompanyAiTokens(opts: {
           inputTokens: opts.usage.inputTokens,
           outputTokens: opts.usage.outputTokens,
           estimated: opts.usage.estimated,
+          ...(gigId ? { gigId } : {}),
         },
       }),
     });
