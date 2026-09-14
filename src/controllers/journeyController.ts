@@ -374,6 +374,7 @@ export const suggestTrainingVision = asyncHandler(async (req: AuthRequest, res: 
     usageId: `suggest-vision-${Date.now()}`,
     usage,
     tool: 'training.suggest_vision',
+    gigId: String(gig?._id || gig?.id || payload.gigId || '').trim() || undefined,
   });
 
   return res.status(200).json({
