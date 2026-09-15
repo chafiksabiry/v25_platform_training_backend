@@ -927,11 +927,69 @@ function normalizeTrackingWithJourney(tracking: any, journeyModules: any[]): any
   return tracking;
 }
 
+/**
+ * If a later section is already completed, mark all prior non-completed sections
+ * as completed. Fixes races where concurrent section/complete saves overwrite
+ * a middle section back to `in_progress`/`pending`.
+ * Also: if every quiz in the module is passed, complete any remaining sections
+ * (quiz could only be reached after the trainee advanced past them).
+ */
+function healSkippedSectionsInModule(module: any): void {
+  const sections = Array.isArray(module?.sections) ? module.sections : [];
+  if (sections.length === 0) return;
+
+  let farthestCompleted = -1;
+  for (let i = 0; i < sections.length; i++) {
+    if (String(sections[i]?.status) === 'completed') farthestCompleted = i;
+  }
+
+  const quizzes = Array.isArray(module?.quizzes) ? module.quizzes : [];
+  const allQuizzesPassed =
+    quizzes.length > 0 &&
+    quizzes.every((q: any) => q?.passed === true && Number(q?.score || 0) > 70);
+  if (allQuizzesPassed) {
+    farthestCompleted = Math.max(farthestCompleted, sections.length - 1);
+  }
+
+  if (farthestCompleted < 0) return;
+
+  const now = new Date();
+  for (let i = 0; i <= farthestCompleted; i++) {
+    const section = sections[i];
+    if (!section) continue;
+    if (String(section.status) === 'completed') continue;
+    section.status = 'completed';
+    section.completedAt = section.completedAt || now;
+  }
+}
+
+/** Serialize read-modify-write on the same tracking doc (single process). */
+const trackingMutationChains = new Map<string, Promise<unknown>>();
+
+function withTrackingLock<T>(repId: string, courseId: string, fn: () => Promise<T>): Promise<T> {
+  const key = `${String(repId || '').trim()}:${String(courseId || '').trim()}`;
+  const prev = trackingMutationChains.get(key) ?? Promise.resolve();
+  const run = prev.then(fn, fn);
+  trackingMutationChains.set(
+    key,
+    run.then(
+      () => undefined,
+      () => undefined
+    )
+  );
+  return run;
+}
+
 function recomputeModuleAndCourseProgress(tracking: any): any {
   const modules = Array.isArray(tracking.modules) ? tracking.modules : [];
   modules.forEach((module: any, idx: number) => {
     const sections = Array.isArray(module.sections) ? module.sections : [];
     const quizzes = Array.isArray(module.quizzes) ? module.quizzes : [];
+
+    // Heal skipped sections lost to concurrent read-modify-write races:
+    // if a later section is completed, all prior ones must be completed too.
+    healSkippedSectionsInModule(module);
+
     const totalUnits = sections.length + quizzes.length;
     const completedSectionsCount = sections.filter((s: any) => s.status === 'completed').length;
     const passedQuizzesCount = quizzes.filter((q: any) => q.passed === true && Number(q.score || 0) > 70).length;
@@ -1526,24 +1584,26 @@ class TrainingJourneyService {
     sectionId: string;
     repEnrolledId?: string;
   }) {
-    const tracking = await this.getStructuredProgress(input.repId, input.courseId, {
-      repEnrolledId: input.repEnrolledId
-    });
-    const moduleId = String(input.moduleId || '').trim();
-    const sectionId = String(input.sectionId || '').trim();
-    const module = tracking.modules.find((m: any) => String(m.moduleId) === moduleId);
-    if (!module) throw new AppError('Module not found in course', 404);
-    if (module.status === 'locked') throw new AppError('Module is locked. Complete previous module first.', 409);
-    const section = (module.sections || []).find((s: any) => String(s.sectionId) === sectionId);
-    if (!section) throw new AppError('Section not found in module', 404);
-    if (String(section.status) === 'completed') {
+    return withTrackingLock(input.repId, input.courseId, async () => {
+      const tracking = await this.getStructuredProgress(input.repId, input.courseId, {
+        repEnrolledId: input.repEnrolledId
+      });
+      const moduleId = String(input.moduleId || '').trim();
+      const sectionId = String(input.sectionId || '').trim();
+      const module = tracking.modules.find((m: any) => String(m.moduleId) === moduleId);
+      if (!module) throw new AppError('Module not found in course', 404);
+      if (module.status === 'locked') throw new AppError('Module is locked. Complete previous module first.', 409);
+      const section = (module.sections || []).find((s: any) => String(s.sectionId) === sectionId);
+      if (!section) throw new AppError('Section not found in module', 404);
+      if (String(section.status) === 'completed') {
+        return tracking;
+      }
+      if (module.status === 'pending') module.status = 'in_progress';
+      if (section.status === 'pending') section.status = 'in_progress';
+      recomputeModuleAndCourseProgress(tracking);
+      await tracking.save();
       return tracking;
-    }
-    if (module.status === 'pending') module.status = 'in_progress';
-    if (section.status === 'pending') section.status = 'in_progress';
-    recomputeModuleAndCourseProgress(tracking);
-    await tracking.save();
-    return tracking;
+    });
   }
 
   async completeSection(input: {
@@ -1553,43 +1613,52 @@ class TrainingJourneyService {
     sectionId: string;
     repEnrolledId?: string;
   }) {
-    const tracking = await this.getStructuredProgress(input.repId, input.courseId, {
-      repEnrolledId: input.repEnrolledId
-    });
-    const moduleId = String(input.moduleId || '').trim();
-    const sectionId = String(input.sectionId || '').trim();
-    const module = tracking.modules.find((m: any) => String(m.moduleId) === moduleId);
-    if (!module) throw new AppError('Module not found in course', 404);
-    if (module.status === 'locked') throw new AppError('Module is locked. Complete previous module first.', 409);
-    const section = (module.sections || []).find((s: any) => String(s.sectionId) === sectionId);
-    if (!section) throw new AppError('Section not found in module', 404);
-    const secSt = String(section.status);
-    if (secSt === 'completed') {
-      return tracking;
-    }
-    if (secSt === 'pending') {
-      // Auto-start when complete arrives before start (race between frontend calls).
-      section.status = 'in_progress';
-    } else if (secSt !== 'in_progress') {
-      throw new AppError('Section must be in progress before it can be completed.', 409);
-    }
-    section.status = 'completed';
-    section.completedAt = new Date();
-    if (module.status === 'pending') module.status = 'in_progress';
-
-    const sectionRows = Array.isArray(module.sections) ? module.sections : [];
-    const completedIdx = sectionRows.findIndex((s: any) => String(s?.sectionId) === sectionId);
-    if (completedIdx >= 0 && completedIdx < sectionRows.length - 1) {
-      const nextSection = sectionRows[completedIdx + 1];
-      if (nextSection && String(nextSection.status) === 'pending') {
-        nextSection.status = 'in_progress';
+    return withTrackingLock(input.repId, input.courseId, async () => {
+      const tracking = await this.getStructuredProgress(input.repId, input.courseId, {
+        repEnrolledId: input.repEnrolledId
+      });
+      const moduleId = String(input.moduleId || '').trim();
+      const sectionId = String(input.sectionId || '').trim();
+      const module = tracking.modules.find((m: any) => String(m.moduleId) === moduleId);
+      if (!module) throw new AppError('Module not found in course', 404);
+      if (module.status === 'locked') throw new AppError('Module is locked. Complete previous module first.', 409);
+      const section = (module.sections || []).find((s: any) => String(s.sectionId) === sectionId);
+      if (!section) throw new AppError('Section not found in module', 404);
+      const secSt = String(section.status);
+      if (secSt === 'completed') {
+        // Still heal + recompute: a concurrent race may have left prior sections incomplete.
+        healSkippedSectionsInModule(module);
+        recomputeModuleAndCourseProgress(tracking);
+        await tracking.save();
+        return tracking;
       }
-    }
+      if (secSt === 'pending') {
+        // Auto-start when complete arrives before start (race between frontend calls).
+        section.status = 'in_progress';
+      } else if (secSt !== 'in_progress') {
+        throw new AppError('Section must be in progress before it can be completed.', 409);
+      }
+      section.status = 'completed';
+      section.completedAt = new Date();
+      if (module.status === 'pending') module.status = 'in_progress';
 
-    recomputeModuleAndCourseProgress(tracking);
-    await tracking.save();
-    repNotificationSyncService.scheduleSyncForRep(input.repId);
-    return tracking;
+      // Completing section N implies sections 0..N-1 were visited — heal gaps from races.
+      healSkippedSectionsInModule(module);
+
+      const sectionRows = Array.isArray(module.sections) ? module.sections : [];
+      const completedIdx = sectionRows.findIndex((s: any) => String(s?.sectionId) === sectionId);
+      if (completedIdx >= 0 && completedIdx < sectionRows.length - 1) {
+        const nextSection = sectionRows[completedIdx + 1];
+        if (nextSection && String(nextSection.status) === 'pending') {
+          nextSection.status = 'in_progress';
+        }
+      }
+
+      recomputeModuleAndCourseProgress(tracking);
+      await tracking.save();
+      repNotificationSyncService.scheduleSyncForRep(input.repId);
+      return tracking;
+    });
   }
 
   /** Marque le quiz en `in_progress` (ouverture / reprise après échec). */
@@ -1600,50 +1669,52 @@ class TrainingJourneyService {
     quizId: string;
     repEnrolledId?: string;
   }) {
-    const tracking = await this.getStructuredProgress(input.repId, input.courseId, {
-      repEnrolledId: input.repEnrolledId
-    });
-    const moduleId = String(input.moduleId || '').trim();
-    const quizId = String(input.quizId || '').trim();
-    const module = tracking.modules.find((m: any) => String(m.moduleId) === moduleId);
-    if (!module) throw new AppError('Module not found in course', 404);
-    if (module.status === 'locked') throw new AppError('Module is locked. Complete previous module first.', 409);
-    const quizProgress = (module.quizzes || []).find((q: any) => String(q.quizId) === quizId);
-    if (!quizProgress) throw new AppError('Quiz not found in module', 404);
+    return withTrackingLock(input.repId, input.courseId, async () => {
+      const tracking = await this.getStructuredProgress(input.repId, input.courseId, {
+        repEnrolledId: input.repEnrolledId
+      });
+      const moduleId = String(input.moduleId || '').trim();
+      const quizId = String(input.quizId || '').trim();
+      const module = tracking.modules.find((m: any) => String(m.moduleId) === moduleId);
+      if (!module) throw new AppError('Module not found in course', 404);
+      if (module.status === 'locked') throw new AppError('Module is locked. Complete previous module first.', 409);
+      const quizProgress = (module.quizzes || []).find((q: any) => String(q.quizId) === quizId);
+      if (!quizProgress) throw new AppError('Quiz not found in module', 404);
 
-    const journey = await TrainingJourney.findById(mustObjectId(input.courseId, 'courseId')).select('modules');
-    const journeyModules = Array.isArray((journey as any)?.modules) ? (journey as any).modules : [];
-    const jm = journeyModules.find((m: any) => String(m?._id) === moduleId || String(m?.id) === moduleId);
-    const jq = Array.isArray(jm?.quizzes)
-      ? jm.quizzes.find((q: any) => String(q?._id) === quizId || String(q?.id) === quizId)
-      : null;
-    const maxAttempts = resolveQuizMaxAttempts(jq);
-    const attempts = Number((quizProgress as any).attempts || 0);
-    const passed = !!(quizProgress as any).passed;
-    const lockTs = (quizProgress as any).lockedUntil ? new Date((quizProgress as any).lockedUntil).getTime() : 0;
-    if (lockTs > Date.now()) {
-      throw new AppError(
-        'Quiz temporairement bloqué pour la durée du module. Réessayez après la fin du délai.',
-        403
-      );
-    }
-    if (!passed && attempts >= maxAttempts) {
-      throw new AppError('Nombre maximum de tentatives pour ce quiz est atteint.', 403);
-    }
+      const journey = await TrainingJourney.findById(mustObjectId(input.courseId, 'courseId')).select('modules');
+      const journeyModules = Array.isArray((journey as any)?.modules) ? (journey as any).modules : [];
+      const jm = journeyModules.find((m: any) => String(m?._id) === moduleId || String(m?.id) === moduleId);
+      const jq = Array.isArray(jm?.quizzes)
+        ? jm.quizzes.find((q: any) => String(q?._id) === quizId || String(q?.id) === quizId)
+        : null;
+      const maxAttempts = resolveQuizMaxAttempts(jq);
+      const attempts = Number((quizProgress as any).attempts || 0);
+      const passed = !!(quizProgress as any).passed;
+      const lockTs = (quizProgress as any).lockedUntil ? new Date((quizProgress as any).lockedUntil).getTime() : 0;
+      if (lockTs > Date.now()) {
+        throw new AppError(
+          'Quiz temporairement bloqué pour la durée du module. Réessayez après la fin du délai.',
+          403
+        );
+      }
+      if (!passed && attempts >= maxAttempts) {
+        throw new AppError('Nombre maximum de tentatives pour ce quiz est atteint.', 403);
+      }
 
-    const qs = String((quizProgress as any).status || '');
-    if (qs === 'completed' || qs === 'in_progress') {
+      const qs = String((quizProgress as any).status || '');
+      if (qs === 'completed' || qs === 'in_progress') {
+        return tracking;
+      }
+      if (qs === 'failed') {
+        (quizProgress as any).status = 'in_progress';
+      } else if (qs === 'pending') {
+        (quizProgress as any).status = 'in_progress';
+      }
+      if (module.status === 'pending') module.status = 'in_progress';
+      recomputeModuleAndCourseProgress(tracking);
+      await tracking.save();
       return tracking;
-    }
-    if (qs === 'failed') {
-      (quizProgress as any).status = 'in_progress';
-    } else if (qs === 'pending') {
-      (quizProgress as any).status = 'in_progress';
-    }
-    if (module.status === 'pending') module.status = 'in_progress';
-    recomputeModuleAndCourseProgress(tracking);
-    await tracking.save();
-    return tracking;
+    });
   }
 
   async submitQuiz(input: {
@@ -1654,85 +1725,93 @@ class TrainingJourneyService {
     answers: number[];
     repEnrolledId?: string;
   }) {
-    const tracking = await this.getStructuredProgress(input.repId, input.courseId, {
-      repEnrolledId: input.repEnrolledId
-    });
-    const moduleId = String(input.moduleId || '').trim();
-    const quizId = String(input.quizId || '').trim();
-    const module = tracking.modules.find((m: any) => String(m.moduleId) === moduleId);
-    if (!module) throw new AppError('Module not found in course', 404);
-    if (module.status === 'locked') throw new AppError('Module is locked. Complete previous module first.', 409);
-    const quizProgress = (module.quizzes || []).find((q: any) => String(q.quizId) === quizId);
-    if (!quizProgress) throw new AppError('Quiz not found in module', 404);
+    return withTrackingLock(input.repId, input.courseId, async () => {
+      const tracking = await this.getStructuredProgress(input.repId, input.courseId, {
+        repEnrolledId: input.repEnrolledId
+      });
+      const moduleId = String(input.moduleId || '').trim();
+      const quizId = String(input.quizId || '').trim();
+      const module = tracking.modules.find((m: any) => String(m.moduleId) === moduleId);
+      if (!module) throw new AppError('Module not found in course', 404);
+      if (module.status === 'locked') throw new AppError('Module is locked. Complete previous module first.', 409);
+      const quizProgress = (module.quizzes || []).find((q: any) => String(q.quizId) === quizId);
+      if (!quizProgress) throw new AppError('Quiz not found in module', 404);
 
-    const journey = await TrainingJourney.findById(mustObjectId(input.courseId, 'courseId')).select('modules');
-    const journeyModules = Array.isArray((journey as any)?.modules) ? (journey as any).modules : [];
-    const jm = journeyModules.find((m: any) => String(m?._id) === moduleId || String(m?.id) === moduleId);
-    const jq = Array.isArray(jm?.quizzes)
-      ? jm.quizzes.find((q: any) => String(q?._id) === quizId || String(q?.id) === quizId)
-      : null;
-    const maxAttempts = resolveQuizMaxAttempts(jq);
-    const passedAlready =
-      !!(quizProgress as any).passed || String((quizProgress as any).status || '') === 'completed';
-    if (passedAlready) {
+      const journey = await TrainingJourney.findById(mustObjectId(input.courseId, 'courseId')).select('modules');
+      const journeyModules = Array.isArray((journey as any)?.modules) ? (journey as any).modules : [];
+      const jm = journeyModules.find((m: any) => String(m?._id) === moduleId || String(m?.id) === moduleId);
+      const jq = Array.isArray(jm?.quizzes)
+        ? jm.quizzes.find((q: any) => String(q?._id) === quizId || String(q?.id) === quizId)
+        : null;
+      const maxAttempts = resolveQuizMaxAttempts(jq);
+      const passedAlready =
+        !!(quizProgress as any).passed || String((quizProgress as any).status || '') === 'completed';
+      if (passedAlready) {
+        // Heal any skipped sections left behind by races before returning.
+        healSkippedSectionsInModule(module);
+        recomputeModuleAndCourseProgress(tracking);
+        await tracking.save();
+        return {
+          score: Number((quizProgress as any).score || 0),
+          passed: true,
+          attempts: Number((quizProgress as any).attempts || 0),
+          maxAttempts,
+          requiredScore: 70,
+          progress: tracking
+        };
+      }
+
+      const lockTs = (quizProgress as any).lockedUntil ? new Date((quizProgress as any).lockedUntil).getTime() : 0;
+      if (lockTs > Date.now()) {
+        throw new AppError(
+          'Quiz temporairement bloqué pour la durée du module. Réessayez après la fin du délai.',
+          403
+        );
+      }
+      const currentAttempts = Number((quizProgress as any).attempts || 0);
+      if (currentAttempts >= maxAttempts) {
+        throw new AppError('Nombre maximum de tentatives pour ce quiz est atteint.', 403);
+      }
+
+      const questions = Array.isArray(jq?.questions) ? jq.questions : [];
+      const total = questions.length;
+      let correct = 0;
+      for (let i = 0; i < total; i++) {
+        const expected = Number((questions[i] as any)?.correctAnswer);
+        const given = Number((input.answers || [])[i]);
+        if (Number.isFinite(expected) && given === expected) correct += 1;
+      }
+      const score = total > 0 ? Math.round((correct / total) * 100) : 0;
+      const passed = score > 70;
+
+      quizProgress.score = score;
+      (quizProgress as any).attempts = currentAttempts + 1;
+      quizProgress.lastSubmittedAt = new Date();
+      quizProgress.passed = passed;
+      quizProgress.status = passed ? 'completed' : 'failed';
+
+      if (!passed && (quizProgress as any).attempts >= maxAttempts) {
+        (quizProgress as any).lockedUntil = new Date(Date.now() + resolveModuleLockDurationMs(jm));
+      } else if (passed) {
+        (quizProgress as any).lockedUntil = undefined;
+      }
+
+      if (module.status === 'pending') module.status = 'in_progress';
+      // Passing the quiz implies the trainee advanced through the module sections.
+      if (passed) healSkippedSectionsInModule(module);
+      recomputeModuleAndCourseProgress(tracking);
+      await tracking.save();
+      repNotificationSyncService.scheduleSyncForRep(input.repId);
       return {
-        score: Number((quizProgress as any).score || 0),
-        passed: true,
-        attempts: Number((quizProgress as any).attempts || 0),
+        score,
+        passed,
+        attempts: (quizProgress as any).attempts,
         maxAttempts,
+        lockedUntil: (quizProgress as any).lockedUntil,
         requiredScore: 70,
         progress: tracking
       };
-    }
-
-    const lockTs = (quizProgress as any).lockedUntil ? new Date((quizProgress as any).lockedUntil).getTime() : 0;
-    if (lockTs > Date.now()) {
-      throw new AppError(
-        'Quiz temporairement bloqué pour la durée du module. Réessayez après la fin du délai.',
-        403
-      );
-    }
-    const currentAttempts = Number((quizProgress as any).attempts || 0);
-    if (currentAttempts >= maxAttempts) {
-      throw new AppError('Nombre maximum de tentatives pour ce quiz est atteint.', 403);
-    }
-
-    const questions = Array.isArray(jq?.questions) ? jq.questions : [];
-    const total = questions.length;
-    let correct = 0;
-    for (let i = 0; i < total; i++) {
-      const expected = Number((questions[i] as any)?.correctAnswer);
-      const given = Number((input.answers || [])[i]);
-      if (Number.isFinite(expected) && given === expected) correct += 1;
-    }
-    const score = total > 0 ? Math.round((correct / total) * 100) : 0;
-    const passed = score > 70;
-
-    quizProgress.score = score;
-    (quizProgress as any).attempts = currentAttempts + 1;
-    quizProgress.lastSubmittedAt = new Date();
-    quizProgress.passed = passed;
-    quizProgress.status = passed ? 'completed' : 'failed';
-
-    if (!passed && (quizProgress as any).attempts >= maxAttempts) {
-      (quizProgress as any).lockedUntil = new Date(Date.now() + resolveModuleLockDurationMs(jm));
-    } else if (passed) {
-      (quizProgress as any).lockedUntil = undefined;
-    }
-
-    if (module.status === 'pending') module.status = 'in_progress';
-    recomputeModuleAndCourseProgress(tracking);
-    await tracking.save();
-    repNotificationSyncService.scheduleSyncForRep(input.repId);
-    return {
-      score,
-      passed,
-      attempts: (quizProgress as any).attempts,
-      maxAttempts,
-      lockedUntil: (quizProgress as any).lockedUntil,
-      requiredScore: 70,
-      progress: tracking
-    };
+    });
   }
 
   async upsertRepProgress(input: {
@@ -1779,84 +1858,88 @@ class TrainingJourneyService {
       throw new AppError('repId and journeyId must be valid ObjectIds', 400);
     }
 
-    const repOid = new mongoose.Types.ObjectId(rid);
-    const journeyOid = new mongoose.Types.ObjectId(jid);
-    await TrainingJourney.updateOne({ _id: journeyOid }, { $addToSet: { enrolledRepIds: repOid } });
+    return withTrackingLock(rid, jid, async () => {
+      const repOid = new mongoose.Types.ObjectId(rid);
+      const journeyOid = new mongoose.Types.ObjectId(jid);
+      await TrainingJourney.updateOne({ _id: journeyOid }, { $addToSet: { enrolledRepIds: repOid } });
 
-    const tracking = await this.getStructuredProgress(rid, jid, {
-      repEnrolledId: input.repEnrolledId
-    });
-    const moduleId = String(input.moduleId || '').trim();
-    const moduleRow = tracking.modules.find((m: any) => String(m?.moduleId) === moduleId);
-    if (moduleRow && moduleRow.status === 'pending') moduleRow.status = 'in_progress';
+      const tracking = await this.getStructuredProgress(rid, jid, {
+        repEnrolledId: input.repEnrolledId
+      });
+      const moduleId = String(input.moduleId || '').trim();
+      const moduleRow = tracking.modules.find((m: any) => String(m?.moduleId) === moduleId);
+      if (moduleRow && moduleRow.status === 'pending') moduleRow.status = 'in_progress';
 
-    if (input.sectionUpdate) {
-      const sectionOid = normalizeSectionUpdateObjectId(input.sectionUpdate);
-      if (moduleRow && sectionOid) {
-        const row = (moduleRow.sections || []).find((s: any) => String(s?.sectionId) === String(sectionOid));
-        if (row) {
-          const requested = (input.sectionUpdate.status || 'completed') as
-            | 'pending'
-            | 'in_progress'
-            | 'completed';
-          if (requested === 'completed') {
-            const rs = String(row.status);
-            if (rs !== 'pending' && rs !== 'in_progress' && rs !== 'completed') {
-              throw new AppError('Section must be in progress before it can be completed.', 409);
+      if (input.sectionUpdate) {
+        const sectionOid = normalizeSectionUpdateObjectId(input.sectionUpdate);
+        if (moduleRow && sectionOid) {
+          const row = (moduleRow.sections || []).find((s: any) => String(s?.sectionId) === String(sectionOid));
+          if (row) {
+            const requested = (input.sectionUpdate.status || 'completed') as
+              | 'pending'
+              | 'in_progress'
+              | 'completed';
+            if (requested === 'completed') {
+              const rs = String(row.status);
+              if (rs !== 'pending' && rs !== 'in_progress' && rs !== 'completed') {
+                throw new AppError('Section must be in progress before it can be completed.', 409);
+              }
             }
+            row.status = requested;
+            if (row.status === 'completed') row.completedAt = new Date();
           }
-          row.status = requested;
-          if (row.status === 'completed') row.completedAt = new Date();
+          if (moduleRow) healSkippedSectionsInModule(moduleRow);
         }
       }
-    }
 
-    if (input.quizUpdate && moduleRow) {
-      const row = findQuizRowForUpdate(moduleRow, input.quizUpdate);
-      if (row) {
-        if (typeof input.quizUpdate.score === 'number') row.score = Math.max(0, Math.min(100, Math.round(input.quizUpdate.score)));
-        if (typeof input.quizUpdate.attempts === 'number') row.attempts = Math.max(0, Math.floor(input.quizUpdate.attempts));
-        if (typeof input.quizUpdate.attemptsDelta === 'number') {
-          row.attempts = Math.max(0, Math.floor(Number(row.attempts || 0) + input.quizUpdate.attemptsDelta));
+      if (input.quizUpdate && moduleRow) {
+        const row = findQuizRowForUpdate(moduleRow, input.quizUpdate);
+        if (row) {
+          if (typeof input.quizUpdate.score === 'number') row.score = Math.max(0, Math.min(100, Math.round(input.quizUpdate.score)));
+          if (typeof input.quizUpdate.attempts === 'number') row.attempts = Math.max(0, Math.floor(input.quizUpdate.attempts));
+          if (typeof input.quizUpdate.attemptsDelta === 'number') {
+            row.attempts = Math.max(0, Math.floor(Number(row.attempts || 0) + input.quizUpdate.attemptsDelta));
+          }
+          if (typeof input.quizUpdate.passed === 'boolean') row.passed = input.quizUpdate.passed;
+          row.status =
+            input.quizUpdate.status === 'passed' || row.passed
+              ? 'completed'
+              : input.quizUpdate.status === 'failed'
+                ? 'failed'
+                : 'in_progress';
+          row.lastSubmittedAt = new Date();
+          if (row.passed) healSkippedSectionsInModule(moduleRow);
         }
-        if (typeof input.quizUpdate.passed === 'boolean') row.passed = input.quizUpdate.passed;
-        row.status =
-          input.quizUpdate.status === 'passed' || row.passed
-            ? 'completed'
-            : input.quizUpdate.status === 'failed'
-              ? 'failed'
-              : 'in_progress';
-        row.lastSubmittedAt = new Date();
       }
-    }
 
-    if (typeof input.currentSlideIndex === 'number' && Number.isFinite(input.currentSlideIndex)) {
-      (tracking as any).slideIndex = Math.max(0, Math.floor(input.currentSlideIndex));
-    }
-    if (typeof input.durationMs === 'number' && Number.isFinite(input.durationMs) && input.durationMs > 0) {
-      (tracking as any).durationMs = Math.max(0, Number((tracking as any).durationMs || 0) + Math.floor(input.durationMs));
-    }
-    const cmid = String(input.currentModuleId || '').trim();
-    if (cmid && mongoose.Types.ObjectId.isValid(cmid)) {
-      (tracking as any).moduleId = new mongoose.Types.ObjectId(cmid);
-    }
-    if (input.currentQuizPageBySlide && typeof input.currentQuizPageBySlide === 'object') {
-      const prev = (tracking as any).currentQuizPageBySlide;
-      const prevObj =
-        prev && typeof prev === 'object' && !Array.isArray(prev) && !(prev instanceof Map)
-          ? { ...(prev as Record<string, unknown>) }
-          : {};
-      (tracking as any).currentQuizPageBySlide = {
-        ...prevObj,
-        ...(input.currentQuizPageBySlide as Record<string, unknown>)
-      };
-    }
-    recomputeModuleAndCourseProgress(tracking);
-    if (typeof input.engagementScore === 'number' && Number.isFinite(input.engagementScore)) {
-      (tracking as any).engagementScore = Math.max(0, Math.min(100, Math.round(input.engagementScore)));
-    }
-    await tracking.save();
-    return tracking;
+      if (typeof input.currentSlideIndex === 'number' && Number.isFinite(input.currentSlideIndex)) {
+        (tracking as any).slideIndex = Math.max(0, Math.floor(input.currentSlideIndex));
+      }
+      if (typeof input.durationMs === 'number' && Number.isFinite(input.durationMs) && input.durationMs > 0) {
+        (tracking as any).durationMs = Math.max(0, Number((tracking as any).durationMs || 0) + Math.floor(input.durationMs));
+      }
+      const cmid = String(input.currentModuleId || '').trim();
+      if (cmid && mongoose.Types.ObjectId.isValid(cmid)) {
+        (tracking as any).moduleId = new mongoose.Types.ObjectId(cmid);
+      }
+      if (input.currentQuizPageBySlide && typeof input.currentQuizPageBySlide === 'object') {
+        const prev = (tracking as any).currentQuizPageBySlide;
+        const prevObj =
+          prev && typeof prev === 'object' && !Array.isArray(prev) && !(prev instanceof Map)
+            ? { ...(prev as Record<string, unknown>) }
+            : {};
+        (tracking as any).currentQuizPageBySlide = {
+          ...prevObj,
+          ...(input.currentQuizPageBySlide as Record<string, unknown>)
+        };
+      }
+      recomputeModuleAndCourseProgress(tracking);
+      if (typeof input.engagementScore === 'number' && Number.isFinite(input.engagementScore)) {
+        (tracking as any).engagementScore = Math.max(0, Math.min(100, Math.round(input.engagementScore)));
+      }
+      await tracking.save();
+      return tracking;
+    });
   }
 
   async getTrainingProgressByRep(repId: string) {
