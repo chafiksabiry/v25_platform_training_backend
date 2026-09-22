@@ -935,6 +935,38 @@ function normalizeTrackingWithJourney(tracking: any, journeyModules: any[]): any
  * Also: if every quiz in the module is passed, complete any remaining sections
  * (quiz could only be reached after the trainee advanced past them).
  */
+function correctAnswersFromQuizDef(jq: any): number[] {
+  const questions = Array.isArray(jq?.questions) ? jq.questions : [];
+  return questions.map((q: any) => {
+    const n = Number(q?.correctAnswer);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  });
+}
+
+/**
+ * Anciennes soumissions : pas de lastAnswers. Pour la revue, on seed temporairement
+ * avec les bonnes réponses du parcours (réponse reps = bonne réponse).
+ */
+function healMissingQuizLastAnswersInModule(module: any, journeyModule: any): boolean {
+  const quizzes = Array.isArray(module?.quizzes) ? module.quizzes : [];
+  const defs = Array.isArray(journeyModule?.quizzes) ? journeyModule.quizzes : [];
+  if (quizzes.length === 0) return false;
+  let changed = false;
+  for (const q of quizzes) {
+    const passed = !!q?.passed || String(q?.status || '') === 'completed';
+    if (!passed) continue;
+    if (Array.isArray(q?.lastAnswers) && q.lastAnswers.length > 0) continue;
+    const qid = String(q?.quizId || '');
+    const jq =
+      defs.find((d: any) => String(d?._id) === qid || String(d?.id) === qid) || null;
+    const answers = correctAnswersFromQuizDef(jq);
+    if (answers.length === 0) continue;
+    q.lastAnswers = answers;
+    changed = true;
+  }
+  return changed;
+}
+
 function healSkippedSectionsInModule(module: any): void {
   const sections = Array.isArray(module?.sections) ? module.sections : [];
   if (sections.length === 0) return;
@@ -1573,7 +1605,20 @@ class TrainingJourneyService {
         }
       }
     }
+    // Seed lastAnswers manquants (revue) = bonnes réponses du parcours.
+    let healedAnswers = false;
+    for (let i = 0; i < tracking.modules.length; i++) {
+      const jm = journeyModules[i] || journeyModules.find(
+        (m: any) =>
+          String(m?._id) === String((tracking.modules[i] as any)?.moduleId) ||
+          String(m?.id) === String((tracking.modules[i] as any)?.moduleId)
+      );
+      if (healMissingQuizLastAnswersInModule(tracking.modules[i], jm)) healedAnswers = true;
+    }
     recomputeModuleAndCourseProgress(tracking);
+    if (healedAnswers && typeof tracking.markModified === 'function') {
+      tracking.markModified('modules');
+    }
     await tracking.save();
     return tracking;
   }
@@ -1750,7 +1795,11 @@ class TrainingJourneyService {
       if (passedAlready) {
         // Heal any skipped sections left behind by races before returning.
         healSkippedSectionsInModule(module);
+        const healed = healMissingQuizLastAnswersInModule(module, jm);
         recomputeModuleAndCourseProgress(tracking);
+        if (healed && typeof tracking.markModified === 'function') {
+          tracking.markModified('modules');
+        }
         await tracking.save();
         return {
           score: Number((quizProgress as any).score || 0),
@@ -1758,6 +1807,9 @@ class TrainingJourneyService {
           attempts: Number((quizProgress as any).attempts || 0),
           maxAttempts,
           requiredScore: 70,
+          lastAnswers: Array.isArray((quizProgress as any).lastAnswers)
+            ? (quizProgress as any).lastAnswers
+            : undefined,
           progress: tracking
         };
       }
@@ -2000,17 +2052,25 @@ class TrainingJourneyService {
                   (qz: any) => normalizeAnyId(qz?._id) === qid || normalizeAnyId(qz?.id) === qid
                 )
               : null;
+            const storedAnswers = Array.isArray(q?.lastAnswers)
+              ? q.lastAnswers.map((n: unknown) => Number(n))
+              : [];
+            const passed = !!q?.passed;
+            const lastAnswers =
+              storedAnswers.length > 0
+                ? storedAnswers
+                : passed
+                  ? correctAnswersFromQuizDef(jqDef)
+                  : undefined;
             return {
               quizKey: normalizeAnyId(q?.quizId) || String(q?.title || ''),
               attempts: Number(q?.attempts || 0),
               score: Number(q?.score || 0),
               status: q?.passed ? 'passed' : q?.status,
-              passed: !!q?.passed,
+              passed,
               lockedUntil: q?.lockedUntil,
               maxAttempts: resolveQuizMaxAttempts(jqDef),
-              lastAnswers: Array.isArray(q?.lastAnswers)
-                ? q.lastAnswers.map((n: unknown) => Number(n))
-                : undefined
+              lastAnswers
             };
           }),
           quizScores: (Array.isArray(m?.quizzes) ? m.quizzes : []).map((q: any) => ({
