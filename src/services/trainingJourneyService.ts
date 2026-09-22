@@ -290,7 +290,8 @@ function toProgressModulesLookup(raw: unknown): Record<string, any> {
           passed: !!q?.passed,
           attempts: Number(q?.attempts || 0),
           score: Number(q?.score || 0),
-          lockedUntil: q?.lockedUntil
+          lockedUntil: q?.lockedUntil,
+          lastAnswers: Array.isArray(q?.lastAnswers) ? q.lastAnswers.map((n: unknown) => Number(n)) : undefined
         })),
         quizScores: quizzes.map((q: any) => ({
           quizId: q?.quizId,
@@ -1789,6 +1790,9 @@ class TrainingJourneyService {
       quizProgress.lastSubmittedAt = new Date();
       quizProgress.passed = passed;
       quizProgress.status = passed ? 'completed' : 'failed';
+      (quizProgress as any).lastAnswers = (input.answers || []).map((a) =>
+        Number.isFinite(Number(a)) ? Number(a) : -1
+      );
 
       if (!passed && (quizProgress as any).attempts >= maxAttempts) {
         (quizProgress as any).lockedUntil = new Date(Date.now() + resolveModuleLockDurationMs(jm));
@@ -2003,7 +2007,10 @@ class TrainingJourneyService {
               status: q?.passed ? 'passed' : q?.status,
               passed: !!q?.passed,
               lockedUntil: q?.lockedUntil,
-              maxAttempts: resolveQuizMaxAttempts(jqDef)
+              maxAttempts: resolveQuizMaxAttempts(jqDef),
+              lastAnswers: Array.isArray(q?.lastAnswers)
+                ? q.lastAnswers.map((n: unknown) => Number(n))
+                : undefined
             };
           }),
           quizScores: (Array.isArray(m?.quizzes) ? m.quizzes : []).map((q: any) => ({

@@ -30,6 +30,8 @@ export interface IQuizProgress {
   attempts: number;
   passed: boolean;
   lastSubmittedAt?: Date;
+  /** Dernières réponses soumises (index d’option par question). */
+  lastAnswers?: number[];
   /** Après épuisement des tentatives (échec) : fin du blocage temporaire sur le module / quiz. */
   lockedUntil?: Date;
 }
@@ -95,6 +97,7 @@ const quizProgressSchema = new Schema<IQuizProgress>(
     attempts: { type: Number, min: 0, default: 0 },
     passed: { type: Boolean, default: false },
     lastSubmittedAt: { type: Date },
+    lastAnswers: { type: [Number], default: undefined },
     lockedUntil: { type: Date }
   },
   { _id: false }
