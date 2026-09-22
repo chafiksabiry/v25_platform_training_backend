@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import trainingJourneyService from '../services/trainingJourneyService';
+import scriptReadService from '../services/scriptReadService';
 import { asyncHandler } from '../middleware/errorHandler';
 import cloudinaryService from '../services/cloudinaryService';
 import aiService from '../services/aiService';
@@ -750,4 +751,27 @@ export const getCertification = asyncHandler(async (req: AuthRequest, res: Respo
   }
   const result = await trainingJourneyService.getCertification(repId, journeyId);
   res.status(200).json(result);
+});
+
+/** POST /training_journeys/script/read — marque le script d'appel comme lu (persisté en DB). */
+export const markScriptRead = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const payload = req.body || {};
+  const row = await scriptReadService.markScriptRead({
+    repId: String(payload.repId || '').trim(),
+    gigId: String(payload.gigId || '').trim(),
+    journeyId: String(payload.journeyId || payload.courseId || '').trim() || undefined,
+    scriptId: String(payload.scriptId || '').trim() || undefined,
+  });
+  res.status(200).json({ success: true, data: row });
+});
+
+/** GET /training_journeys/rep/:repId/script-reads — scripts lus par le REP. */
+export const listScriptReads = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const repId = String(req.params.repId || '').trim();
+  if (!repId) {
+    res.status(400).json({ success: false, error: 'repId is required' });
+    return;
+  }
+  const rows = await scriptReadService.listScriptReadsForRep(repId);
+  res.status(200).json({ success: true, data: rows });
 });
