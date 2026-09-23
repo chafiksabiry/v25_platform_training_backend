@@ -10,6 +10,7 @@
     "start": "node dist/server.js",
     "lint": "eslint src --ext .ts",
     "seed:certifications": "ts-node-dev --transpile-only src/scripts/seedCertifications.ts",
+    "seed:quiz-last-answers": "ts-node-dev --transpile-only src/scripts/seedQuizLastAnswers.ts",
     "test": "jest"
   },
   "keywords": [

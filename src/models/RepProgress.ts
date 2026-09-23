@@ -21,6 +21,7 @@ export interface IQuizProgressRow {
   attempts: number;
   passed: boolean;
   lockedUntil?: Date;
+  lastAnswers?: number[];
   durationMs: number;
   updatedAt?: Date;
 }
@@ -92,6 +93,7 @@ const quizProgressRowSchema = new Schema(
     attempts: { type: Number, default: 0, min: 0 },
     passed: { type: Boolean, default: false },
     lockedUntil: { type: Date },
+    lastAnswers: { type: [Number], default: undefined },
     durationMs: { type: Number, default: 0, min: 0 },
     updatedAt: { type: Date }
   },

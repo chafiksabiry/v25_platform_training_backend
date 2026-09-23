@@ -29,6 +29,8 @@ router.get('/rep/:repId/progress/gig/:gigId', journeyController.getRepProgressBy
 router.get('/rep/:repId/progress-summary', journeyController.getRepProgressSummary);
 router.get('/rep/:repId/slide-progress-summary', journeyController.getRepSlideProgressSummary);
 router.get('/rep/:repId/training-tracking', journeyController.listTrainingTrackingByRep);
+router.get('/rep/:repId/script-reads', journeyController.listScriptReads);
+router.post('/script/read', journeyController.markScriptRead);
 router.get('/certification/:repId/:journeyId', journeyController.getCertification);
 router.get('/journey/:journeyId/reps-progress', journeyController.getRepProgressByTraining);
 router.get('/gig/:gigId', journeyController.listJourneysByGig);
