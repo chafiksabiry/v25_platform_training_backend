@@ -570,20 +570,6 @@ function resolveQuizMaxAttempts(quizDoc: any): number {
   return 3;
 }
 
-/** Durée de blocage après épuisement des tentatives = durée « module » du journey (plafonnée). */
-function resolveModuleLockDurationMs(journeyModule: any): number {
-  const cap = 7 * 24 * 60 * 60 * 1000;
-  const fromMinutes = Number(journeyModule?.durationMinutes);
-  if (Number.isFinite(fromMinutes) && fromMinutes > 0) {
-    return Math.min(cap, Math.floor(fromMinutes * 60 * 1000));
-  }
-  const fromDuration = Number(journeyModule?.duration);
-  if (Number.isFinite(fromDuration) && fromDuration > 0) {
-    return Math.min(cap, Math.floor(fromDuration * 60 * 1000));
-  }
-  return 30 * 60 * 1000;
-}
-
 function progressRowMergeKey(row: any, keyField: 'sectionId' | 'quizKey'): string {
   if (keyField === 'quizKey') {
     return String(row?.quizKey || '').trim();
@@ -1762,13 +1748,6 @@ class TrainingJourneyService {
       const maxAttempts = resolveQuizMaxAttempts(jq);
       const attempts = Number((quizProgress as any).attempts || 0);
       const passed = !!(quizProgress as any).passed;
-      const lockTs = (quizProgress as any).lockedUntil ? new Date((quizProgress as any).lockedUntil).getTime() : 0;
-      if (lockTs > Date.now()) {
-        throw new AppError(
-          'Quiz temporairement bloqué pour la durée du module. Réessayez après la fin du délai.',
-          403
-        );
-      }
       if (!passed && attempts >= maxAttempts) {
         throw new AppError('Nombre maximum de tentatives pour ce quiz est atteint.', 403);
       }
@@ -1840,13 +1819,6 @@ class TrainingJourneyService {
         };
       }
 
-      const lockTs = (quizProgress as any).lockedUntil ? new Date((quizProgress as any).lockedUntil).getTime() : 0;
-      if (lockTs > Date.now()) {
-        throw new AppError(
-          'Quiz temporairement bloqué pour la durée du module. Réessayez après la fin du délai.',
-          403
-        );
-      }
       const currentAttempts = Number((quizProgress as any).attempts || 0);
       if (currentAttempts >= maxAttempts) {
         throw new AppError('Nombre maximum de tentatives pour ce quiz est atteint.', 403);
@@ -1872,11 +1844,7 @@ class TrainingJourneyService {
         Number.isFinite(Number(a)) ? Number(a) : -1
       );
 
-      if (!passed && (quizProgress as any).attempts >= maxAttempts) {
-        (quizProgress as any).lockedUntil = new Date(Date.now() + resolveModuleLockDurationMs(jm));
-      } else if (passed) {
-        (quizProgress as any).lockedUntil = undefined;
-      }
+      (quizProgress as any).lockedUntil = undefined;
 
       if (module.status === 'pending') module.status = 'in_progress';
       // Passing the quiz implies the trainee advanced through the module sections.
