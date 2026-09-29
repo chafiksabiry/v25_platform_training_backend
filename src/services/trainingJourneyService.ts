@@ -910,6 +910,9 @@ function normalizeTrackingWithJourney(tracking: any, journeyModules: any[]): any
         attempts: Number(prev?.attempts || 0),
         passed: !!prev?.passed,
         lastSubmittedAt: prev?.lastSubmittedAt,
+        lastAnswers: Array.isArray(prev?.lastAnswers)
+          ? prev.lastAnswers.map((n: unknown) => Number(n))
+          : undefined,
         lockedUntil: prev?.lockedUntil
       };
     });
@@ -967,6 +970,29 @@ function healMissingQuizLastAnswersInModule(module: any, journeyModule: any): bo
   return changed;
 }
 
+/** Seuil affiché au rep : une note ≥ 70 % valide le quiz. */
+const QUIZ_PASS_MIN_SCORE = 70;
+
+function quizMeetsPassScore(score: unknown): boolean {
+  return Number(score || 0) >= QUIZ_PASS_MIN_SCORE;
+}
+
+/**
+ * Anciennes soumissions : `status: completed` + score suffisant, mais `passed` resté à false.
+ * Sans ce drapeau, le module ne se termine pas et le suivant reste verrouillé.
+ */
+function healQuizPassedFlags(module: any): void {
+  const quizzes = Array.isArray(module?.quizzes) ? module.quizzes : [];
+  for (const q of quizzes) {
+    if (q?.passed === true) continue;
+    const st = String(q?.status || '');
+    if (!quizMeetsPassScore(q?.score)) continue;
+    if (st !== 'completed' && st !== 'passed') continue;
+    q.passed = true;
+    q.status = 'completed';
+  }
+}
+
 function healSkippedSectionsInModule(module: any): void {
   const sections = Array.isArray(module?.sections) ? module.sections : [];
   if (sections.length === 0) return;
@@ -979,7 +1005,7 @@ function healSkippedSectionsInModule(module: any): void {
   const quizzes = Array.isArray(module?.quizzes) ? module.quizzes : [];
   const allQuizzesPassed =
     quizzes.length > 0 &&
-    quizzes.every((q: any) => q?.passed === true && Number(q?.score || 0) > 70);
+    quizzes.every((q: any) => q?.passed === true && quizMeetsPassScore(q?.score));
   if (allQuizzesPassed) {
     farthestCompleted = Math.max(farthestCompleted, sections.length - 1);
   }
@@ -1018,6 +1044,7 @@ function recomputeModuleAndCourseProgress(tracking: any): any {
   modules.forEach((module: any, idx: number) => {
     const sections = Array.isArray(module.sections) ? module.sections : [];
     const quizzes = Array.isArray(module.quizzes) ? module.quizzes : [];
+    healQuizPassedFlags(module);
 
     // Heal skipped sections lost to concurrent read-modify-write races:
     // if a later section is completed, all prior ones must be completed too.
@@ -1025,11 +1052,11 @@ function recomputeModuleAndCourseProgress(tracking: any): any {
 
     const totalUnits = sections.length + quizzes.length;
     const completedSectionsCount = sections.filter((s: any) => s.status === 'completed').length;
-    const passedQuizzesCount = quizzes.filter((q: any) => q.passed === true && Number(q.score || 0) > 70).length;
+    const passedQuizzesCount = quizzes.filter((q: any) => q.passed === true && quizMeetsPassScore(q.score)).length;
 
-    // Strict validation for module completion: all sections completed AND all quizzes score > 70
+    // Module terminé seulement si toutes les sections sont faites et chaque quiz est ≥ 70 %.
     const allSectionsDone = sections.every((s: any) => s.status === 'completed');
-    const allQuizzesPassed = quizzes.every((q: any) => q.passed === true && Number(q.score || 0) > 70);
+    const allQuizzesPassed = quizzes.every((q: any) => q.passed === true && quizMeetsPassScore(q.score));
 
     if (totalUnits > 0 && allSectionsDone && allQuizzesPassed) {
       module.status = 'completed';
@@ -1606,17 +1633,16 @@ class TrainingJourneyService {
       }
     }
     // Seed lastAnswers manquants (revue) = bonnes réponses du parcours.
-    let healedAnswers = false;
     for (let i = 0; i < tracking.modules.length; i++) {
       const jm = journeyModules[i] || journeyModules.find(
         (m: any) =>
           String(m?._id) === String((tracking.modules[i] as any)?.moduleId) ||
           String(m?.id) === String((tracking.modules[i] as any)?.moduleId)
       );
-      if (healMissingQuizLastAnswersInModule(tracking.modules[i], jm)) healedAnswers = true;
+      healMissingQuizLastAnswersInModule(tracking.modules[i], jm);
     }
     recomputeModuleAndCourseProgress(tracking);
-    if (healedAnswers && typeof tracking.markModified === 'function') {
+    if (typeof tracking.markModified === 'function') {
       tracking.markModified('modules');
     }
     await tracking.save();
@@ -1835,7 +1861,7 @@ class TrainingJourneyService {
         if (Number.isFinite(expected) && given === expected) correct += 1;
       }
       const score = total > 0 ? Math.round((correct / total) * 100) : 0;
-      const passed = score > 70;
+      const passed = quizMeetsPassScore(score);
 
       quizProgress.score = score;
       (quizProgress as any).attempts = currentAttempts + 1;
@@ -1856,6 +1882,7 @@ class TrainingJourneyService {
       // Passing the quiz implies the trainee advanced through the module sections.
       if (passed) healSkippedSectionsInModule(module);
       recomputeModuleAndCourseProgress(tracking);
+      if (typeof tracking.markModified === 'function') tracking.markModified('modules');
       await tracking.save();
       repNotificationSyncService.scheduleSyncForRep(input.repId);
       return {
@@ -1950,7 +1977,15 @@ class TrainingJourneyService {
 
       if (input.quizUpdate && moduleRow) {
         const row = findQuizRowForUpdate(moduleRow, input.quizUpdate);
-        if (row) {
+        // Ping de durée (chaque réponse) : pas de note. Ne pas écraser un quiz déjà soumis.
+        const heartbeatOnly =
+          !!row &&
+          input.quizUpdate.status === 'in_progress' &&
+          typeof input.quizUpdate.score !== 'number' &&
+          typeof input.quizUpdate.passed !== 'boolean' &&
+          typeof input.quizUpdate.attempts !== 'number' &&
+          typeof input.quizUpdate.attemptsDelta !== 'number';
+        if (row && !heartbeatOnly) {
           if (typeof input.quizUpdate.score === 'number') row.score = Math.max(0, Math.min(100, Math.round(input.quizUpdate.score)));
           if (typeof input.quizUpdate.attempts === 'number') row.attempts = Math.max(0, Math.floor(input.quizUpdate.attempts));
           if (typeof input.quizUpdate.attemptsDelta === 'number') {
