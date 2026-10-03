@@ -1264,6 +1264,16 @@ class TrainingJourneyService {
     journey.launchDate = new Date();
 
     await journey.save();
+
+    try {
+      const { notifyTrainingLaunched } = await import('./repActivityNotificationClient');
+      void notifyTrainingLaunched(journey as any).catch((err) =>
+        console.error('[TrainingJourneyService] training notif failed', err)
+      );
+    } catch (err) {
+      console.error('[TrainingJourneyService] training notif import failed', err);
+    }
+
     return journey;
   }
 
@@ -1342,6 +1352,15 @@ class TrainingJourneyService {
 
     if (!journey) {
       throw new AppError('Journey not found', 404);
+    }
+
+    try {
+      const { notifyTrainingDeactivated } = await import('./repActivityNotificationClient');
+      void notifyTrainingDeactivated(journey as any).catch((err) =>
+        console.error('[TrainingJourneyService] deactivate notif failed', err)
+      );
+    } catch (err) {
+      console.error('[TrainingJourneyService] deactivate notif import failed', err);
     }
 
     return journey;
@@ -1917,7 +1936,32 @@ class TrainingJourneyService {
     return withTrackingLock(rid, jid, async () => {
       const repOid = new mongoose.Types.ObjectId(rid);
       const journeyOid = new mongoose.Types.ObjectId(jid);
+      const before = await TrainingJourney.findById(journeyOid).select('enrolledRepIds title name gigId').lean();
+      const alreadyEnrolled = Array.isArray(before?.enrolledRepIds)
+        ? before!.enrolledRepIds.some((x) => String(x) === rid)
+        : false;
       await TrainingJourney.updateOne({ _id: journeyOid }, { $addToSet: { enrolledRepIds: repOid } });
+
+      if (!alreadyEnrolled && before) {
+        try {
+          const { persistActivityNotification } = await import('./repActivityNotificationClient');
+          const jTitle = String((before as any).title || (before as any).name || 'Formation');
+          const gigId = (before as any).gigId ? String((before as any).gigId) : undefined;
+          void persistActivityNotification({
+            repId: rid,
+            kind: 'action_assigned',
+            status: 'action_assigned',
+            notificationKey: `action:journey:${jid}`,
+            journeyId: jid,
+            gigId,
+            actionPath: '/training',
+            title: 'Action assignée',
+            message: `Une formation vous a été assignée : « ${jTitle} ».`,
+          }).catch((err) => console.error('[TrainingJourneyService] action notif failed', err));
+        } catch (err) {
+          console.error('[TrainingJourneyService] action notif import failed', err);
+        }
+      }
 
       const tracking = await this.getStructuredProgress(rid, jid, {
         repEnrolledId: input.repEnrolledId
