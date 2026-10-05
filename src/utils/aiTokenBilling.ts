@@ -1,7 +1,13 @@
 /**
  * HARX prepaid AI tokens — normalize provider usage + charge orchestrator wallet.
  * Providers: Anthropic (Claude), OpenAI, Gemini/Vertex. Fallback: ~4 chars ≈ 1 token.
+ *
+ * Product rule: the company's **first gig package** (0 or 1 gig) includes AI
+ * (training vision/chat, docs, etc.) in the subscription — no prepaid balance check
+ * and no debit. From the 2nd gig onward, prepaid AI tokens are required.
  */
+
+import Gig from '../models/Gig';
 
 export type AiProvider = 'anthropic' | 'openai' | 'gemini' | 'estimated';
 
@@ -104,12 +110,65 @@ function getOrchestratorApiBase(): string {
   return String(raw).replace(/\/$/, '');
 }
 
+function getGigsApiBase(): string {
+  const raw =
+    process.env.GIGS_API_URL ||
+    process.env.GIGS_API ||
+    process.env.API_URL_GIGS ||
+    'https://v25gigsmanualcreationbackend-production.up.railway.app/api';
+  return String(raw).replace(/\/$/, '');
+}
+
+/**
+ * True while company still has at most one gig (first-gig package / subscription).
+ * Prefers gigs service count; falls back to local Gig collection.
+ */
+export async function isFirstGigForCompany(
+  companyId: string | undefined | null
+): Promise<boolean> {
+  const id = String(companyId || '').trim();
+  if (!id) return true;
+  try {
+    const base = getGigsApiBase();
+    const res = await fetch(
+      `${base}/gigs/company/${encodeURIComponent(id)}/has-gigs`
+    );
+    if (res.ok) {
+      const json: any = await res.json().catch(() => ({}));
+      const countRaw = json?.data?.count ?? json?.count;
+      if (typeof countRaw === 'number' && Number.isFinite(countRaw)) {
+        return countRaw <= 1;
+      }
+      const hasGigs = Boolean(json?.data?.hasGigs ?? json?.hasGigs);
+      if (!hasGigs) return true;
+    }
+  } catch (err) {
+    console.warn('[aiTokenBilling] gigs has-gigs check failed, falling back to local Gig:', err);
+  }
+  try {
+    const count = await Gig.countDocuments({ companyId: id });
+    return count <= 1;
+  } catch (err) {
+    console.warn('[aiTokenBilling] first-gig local count failed (treating as first):', err);
+    return true;
+  }
+}
+
 export async function assertCompanyHasAiTokens(
   companyId: string | undefined | null,
-  minRequired = 1
-): Promise<{ ok: boolean; tokens: number; message?: string }> {
+  minRequired = 1,
+  options?: { skipIfFirstGig?: boolean }
+): Promise<{ ok: boolean; tokens: number; message?: string; firstGigFree?: boolean }> {
   const id = String(companyId || '').trim();
   if (!id) return { ok: true, tokens: 0 }; // no company → skip gate (legacy callers)
+
+  if (options?.skipIfFirstGig !== false) {
+    const firstGig = await isFirstGigForCompany(id);
+    if (firstGig) {
+      return { ok: true, tokens: 0, firstGigFree: true };
+    }
+  }
+
   try {
     const base = getOrchestratorApiBase();
     const res = await fetch(
@@ -138,9 +197,24 @@ export async function chargeCompanyAiTokens(opts: {
   tool: string;
   gigId?: string | null;
   meta?: Record<string, unknown>;
-}): Promise<{ billed: boolean; tokens?: number }> {
+  /** When true, skip debit (first gig free). Auto-detected if omitted. */
+  skipCharge?: boolean;
+}): Promise<{ billed: boolean; tokens?: number; firstGigFree?: boolean }> {
   const id = String(opts.companyId || '').trim();
   if (!id) return { billed: false };
+
+  let skip = Boolean(opts.skipCharge);
+  if (!skip) {
+    try {
+      skip = await isFirstGigForCompany(id);
+    } catch {
+      skip = false;
+    }
+  }
+  if (skip) {
+    return { billed: false, firstGigFree: true };
+  }
+
   const tokensUsed = Math.max(0, Math.round(opts.usage.totalTokens || 0));
   if (tokensUsed <= 0) return { billed: false };
 
