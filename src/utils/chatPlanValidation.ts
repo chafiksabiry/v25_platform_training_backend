@@ -491,8 +491,66 @@ function buildStrictPlanMarkdown(modulePlan: ModulePlanItem[]): string {
   return out.join('\n').trim();
 }
 
+function moduleHeadingNumber(line: string): number | null {
+  const n = line.replace(/\*\*/g, '').replace(/^#+\s*/, '').trim();
+  const at = n.search(/\bmodule\s*\d+/i);
+  if (at < 0 || at > 24) return null;
+  if (/[a-zà-ÿæœ]/i.test(n.slice(0, at))) return null;
+  const match = n.slice(at).match(/^module\s*(\d+)/i);
+  const num = match ? Number(match[1]) : NaN;
+  return Number.isFinite(num) ? num : null;
+}
+
+function planLanguageScore(block: string): number {
+  const body = block.replace(
+    /^.*\b(objectifs?|key\s*topics?|learning\s+objectives?|sujets?\s*cl[eé]s?|th[eè]mes?\s*cl[eé]s?)\b.*$/gim,
+    ''
+  );
+  const lower = body.toLowerCase();
+  const french =
+    (lower.match(/\b(le|la|les|des|une|pour|dans|avec|est|sont|cette|ces|aux|qui|sur)\b/g) || []).length +
+    (body.match(/[àâäéèêëïîôùûüçœæ]/gi) || []).length;
+  const english =
+    (lower.match(/\b(the|and|with|for|this|that|these|from|overview|framework|compliance|retention|excellence)\b/g) || []).length;
+  return french - english;
+}
+
+/** Keep one language. A second copy appended as Module 7+ is not part of the plan. */
+function dropSecondaryLanguageModules(planMarkdown: string): string {
+  let text = String(planMarkdown || '').replace(/```translation-(fr|en)\s*[\s\S]*?```/gi, '');
+  const unclosed = text.search(/```translation-(fr|en)\b/i);
+  if (unclosed >= 0) text = text.slice(0, unclosed);
+  const lines = text.split(/\r?\n/);
+  const heads: { line: number; num: number }[] = [];
+  lines.forEach((line, index) => {
+    const num = moduleHeadingNumber(line);
+    if (num != null) heads.push({ line: index, num });
+  });
+  if (heads.length < 2) return text.trim();
+  for (let i = 1; i < heads.length; i++) {
+    if (heads[i].num === 1 && heads[i - 1].num >= 2) {
+      return lines.slice(0, heads[i].line).join('\n').trim();
+    }
+  }
+  const scores = heads.map((head, index) => {
+    const end = index + 1 < heads.length ? heads[index + 1].line : lines.length;
+    return planLanguageScore(lines.slice(head.line, end).join('\n'));
+  });
+  const primaryIsFrench = scores[0] >= 1;
+  const primaryIsEnglish = scores[0] <= -1;
+  if (!primaryIsFrench && !primaryIsEnglish) return text.trim();
+  for (let i = 1; i < scores.length; i++) {
+    const switched = primaryIsFrench ? scores[i] <= -1 : scores[i] >= 1;
+    if (!switched) continue;
+    const restStays = scores.slice(i).every((score) => (primaryIsFrench ? score < 0 : score > 0));
+    if (!restStays) continue;
+    return lines.slice(0, heads[i].line).join('\n').trim();
+  }
+  return text.trim();
+}
+
 export function sanitizePlanForStorage(planMarkdown: string): string {
-  let stripped = stripHarxTags(planMarkdown);
+  let stripped = dropSecondaryLanguageModules(stripHarxTags(planMarkdown));
   stripped = stripped.replace(/\n+\*\*Souhaitez-vous[\s\S]*$/i, '').trim();
   stripped = stripped.replace(/\n---\s*\n+\s*\*?\*?Quelle option[\s\S]*$/i, '').trim();
   stripped = stripped.replace(/\n\*?\*?Quelle option préférez-vous[\s\S]*$/i, '').trim();

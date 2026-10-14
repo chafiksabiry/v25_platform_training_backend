@@ -3551,6 +3551,7 @@ export const chat = async (
             `- Proposer au minimum 8 modules ; viser idéalement autant de modules que de piliers (${methodologyPlanPillars.length}) lorsque la durée le permet (un module = un pilier). Si la durée impose moins de modules, fusionner seulement des piliers adjacents et le signaler dans les puces « Contenu clé ».`,
             '- Ne JAMAIS écrire le préfixe « Axes méthodologie 360° ». Intégrer directement les piliers comme intitulés naturels (titres, objectifs et/ou puces contenu clé) sans formule technique.',
             '- Sur l’ensemble du plan, chaque pilier listé ci-dessus doit apparaître au moins une fois (dans les objectifs et/ou le contenu clé). Aucun pilier majeur ne doit être omis.',
+            '- Écrire ces piliers dans la langue de la session, à l’intérieur des modules 1..N. Ne pas les ajouter ensuite dans l’autre langue à partir du module 7.',
             '- La méthodologie pilote la PROGRESSION et les COMPÉTENCES ; le GIG (fiche mission) pilote le VOCABULAIRE et les EXEMPLES terrain (voir ANCRAGE GIG).',
           ]
             .filter(Boolean)
@@ -3622,6 +3623,8 @@ export const chat = async (
             'Do NOT mention, label, or print the methodology itself in output text (no "méthodologie 360", no "axes"). Just apply it implicitly in module design.',
             'Never add intros, conclusions, next steps, questions, quizzes, exercises, self-evaluation, or CTA.',
             'Keep module titles concise and aligned with the gig mission.',
+            'ONE LANGUAGE for the visible plan. Number modules 1, 2, 3… a single time. Never switch language from a later module, and never restart at Module 1.',
+            'The other language is a translation of those same modules, only inside a fenced ```translation-fr or ```translation-en block after the plan. It is not Module 7+.',
             'Minimum 3 modules.',
           ].join('\n')
         : '',
