@@ -156,8 +156,17 @@ const userTextForLocaleInference = (session: any, message: string): string => {
   return lastNaturalUserChatText(session, t);
 };
 
-/** Prefer gig language (title/description) when available in Journey Builder context. */
+/** Prefer the gig destination-zone language. Title text is only a fallback. */
 const inferGigLocaleHint = (parsedContext: any): 'fr' | 'en' | null => {
+  const explicit = String(
+    parsedContext?.outputLanguage ||
+    parsedContext?.contentLanguage ||
+    parsedContext?.languageFromGig?.detected ||
+    parsedContext?.gigSnapshot?.destinationLanguage ||
+    ''
+  ).toLowerCase();
+  if (explicit.startsWith('en')) return 'en';
+  if (explicit.startsWith('fr')) return 'fr';
   const title = String(parsedContext?.selectedGigTitle || parsedContext?.gigSnapshot?.title || '').trim();
   const description = String(parsedContext?.gigSnapshot?.description || '').trim();
   const source = `${title}\n${description}`.trim();
