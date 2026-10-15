@@ -3536,6 +3536,64 @@ export const chat = async (
         : methodology360NameMatch && isJourneyBuilderApp(parsedContext)
           ? [...METHODOLOGY_360_DEFAULT_PILLARS]
           : [];
+    // ENT-15: the 4-question "personalization" step (source / level / objective / format)
+    // used to reach the model only as free text buried in the conversation, with no
+    // deterministic instruction telling it how to use the answers — so the plan rarely
+    // actually changed with the level, objective or format chosen. These three answers
+    // are a small fixed set of known English values (see ContentUploader.tsx's
+    // personalizationQuestions), so they are mapped here to explicit, strict directives.
+    const personalizationProfileFromContext = (parsedContext as any)?.personalizationProfile || {};
+    const personalizationLevel = String(personalizationProfileFromContext.level || '').trim();
+    const personalizationObjective = String(personalizationProfileFromContext.objective || '').trim();
+    const personalizationFormat = String(personalizationProfileFromContext.format || '').trim();
+    const PERSONALIZATION_LEVEL_DIRECTIVES: Record<string, string> = {
+      'Complete beginner':
+        'Audience is a complete beginner: start from absolute basics, define every term, use simple vocabulary, assume no prior knowledge.',
+      'Some basics':
+        'Audience already has some basics: briefly recap fundamentals, then move quickly to applied content.',
+      Intermediate:
+        'Audience is intermediate: skip basic definitions, focus on applied techniques and nuance.',
+      Advanced:
+        'Audience is advanced: skip fundamentals entirely, focus on edge cases, advanced techniques and expert-level nuance.',
+    };
+    const PERSONALIZATION_OBJECTIVE_DIRECTIVES: Record<string, string> = {
+      'Understand the fundamentals':
+        'Primary objective is understanding fundamentals: prioritize clear explanations and core concepts over sales technique.',
+      'Sell the product better':
+        'Primary objective is selling better: every module must include concrete sales techniques, objection handling, and persuasion tactics tied to the gig.',
+      'Handle practical use cases':
+        'Primary objective is handling practical use cases: prioritize realistic scenarios, role-plays, and case studies over theory.',
+      'Prepare for certification':
+        'Primary objective is certification prep: structure the plan around testable knowledge, include a final assessment/quiz module, and be exhaustive on the compliance/regulatory points likely to be tested.',
+    };
+    const PERSONALIZATION_FORMAT_DIRECTIVES: Record<string, string> = {
+      'Structured training plan': '',
+      'Practical cases + exercises':
+        'Each module must foreground a practical case or exercise over pure theory — reduce purely theoretical bullet points.',
+      'Interactive workshop format':
+        'Frame modules as interactive workshop sessions: include activities, discussion prompts and group exercises, not a one-way lecture.',
+      'Quick reference sheet format':
+        'OVERRIDE THE DEFAULT MODULE FORMAT: do NOT produce a full multi-module plan with objectives/key topics per module. Instead produce a single short, scannable quick-reference sheet — key points, checklists and must-know facts only, organized under a handful of short sections. This takes priority over any other module-structure instruction in this prompt.',
+    };
+    const personalizationDirective = [personalizationLevel, personalizationObjective, personalizationFormat].some(
+      Boolean
+    )
+      ? [
+          'PERSONNALISATION (réponses de l’entreprise au questionnaire) — à respecter strictement, prioritaire sur les instructions de format par défaut ci-dessus en cas de conflit :',
+          personalizationLevel
+            ? `- Niveau (${personalizationLevel}): ${PERSONALIZATION_LEVEL_DIRECTIVES[personalizationLevel] || personalizationLevel}`
+            : '',
+          personalizationObjective
+            ? `- Objectif (${personalizationObjective}): ${PERSONALIZATION_OBJECTIVE_DIRECTIVES[personalizationObjective] || personalizationObjective}`
+            : '',
+          personalizationFormat && PERSONALIZATION_FORMAT_DIRECTIVES[personalizationFormat]
+            ? `- Format (${personalizationFormat}): ${PERSONALIZATION_FORMAT_DIRECTIVES[personalizationFormat]}`
+            : '',
+        ]
+          .filter(Boolean)
+          .join('\n')
+      : '';
+
     const methodology360PlanLock =
       isJourneyBuilderApp(parsedContext) && isPlanIntent && methodologyPlanPillars.length > 0
         ? [
@@ -3625,6 +3683,7 @@ export const chat = async (
             'Minimum 3 modules.',
           ].join('\n')
         : '',
+      personalizationDirective,
       requestedOutput === 'full_training_content'
         ? [
             'INTENT LOCK: FULL TRAINING CONTENT',
