@@ -3543,7 +3543,7 @@ export const chat = async (
             methodologyDescriptionFromContext
               ? `Référence méthodologique (contexte JSON — methodologyDescription) : ${methodologyDescriptionFromContext.slice(0, 1400)}`
               : '',
-            'Le plan doit respecter la progression « vision 360° ». Intitulés des piliers (adapter en français dans les titres de modules si besoin, sans vider le sens) :',
+            `Le plan doit respecter la progression « vision 360° ». Intitulés des piliers (les écrire en ${userLocaleHint === 'en' ? 'anglais' : 'français'} dans les titres de modules, sans vider le sens) :`,
             ...methodologyPlanPillars.map((p, idx) => `${idx + 1}. ${p}`),
             '',
             `Durée / contexte durée indiqué dans le JSON : ${String(selectedDuration || 'non spécifiée')}.`,
@@ -3623,8 +3623,7 @@ export const chat = async (
             'Do NOT mention, label, or print the methodology itself in output text (no "méthodologie 360", no "axes"). Just apply it implicitly in module design.',
             'Never add intros, conclusions, next steps, questions, quizzes, exercises, self-evaluation, or CTA.',
             'Keep module titles concise and aligned with the gig mission.',
-            'ONE LANGUAGE for the visible plan. Number modules 1, 2, 3… a single time. Never switch language from a later module, and never restart at Module 1.',
-            'The other language is a translation of those same modules, only inside a fenced ```translation-fr or ```translation-en block after the plan. It is not Module 7+.',
+            `ONE LANGUAGE: write the whole plan in ${userLocaleHint === 'en' ? 'English' : 'French'} only. Number modules 1, 2, 3… a single time. Do not add a translation, a second language, or a later module in the other language.`,
             'Minimum 3 modules.',
           ].join('\n')
         : '',
@@ -3632,7 +3631,7 @@ export const chat = async (
         ? [
             'INTENT LOCK: FULL TRAINING CONTENT',
             isJourneyBuilderApp(parsedContext)
-              ? 'LANGUE OBLIGATOIRE: tout le contenu pédagogique en français (titres, listes, quiz, questions).'
+              ? `LANGUAGE: write all learner-facing content in ${userLocaleHint === 'en' ? 'English' : 'French'} only. One language. Do not add a translation.`
               : '',
             isPlanFrozen
               ? 'PLAN LOCK: use ONLY modules and scope from the saved training plan provided in context. Do not add, rename, or reorder modules.'
@@ -3640,7 +3639,9 @@ export const chat = async (
             'Generate complete learner-facing content for all modules.',
             'Per module include: Title, Objectives, Detailed Explanation, Examples, Hands-on Exercise, Mini Quiz (3-5), Summary, Reflection, Self-assessment (1-5).',
             isJourneyBuilderApp(parsedContext)
-              ? 'Traduire ces rubriques en libellés français dans la sortie (ex. « Objectifs », « Explication », « Exercice », « Mini quiz », « Auto-évaluation »).'
+              ? userLocaleHint === 'en'
+                ? 'Use these English section labels in the output: Objectives, Explanation, Exercise, Mini quiz, Self-assessment.'
+                : 'Traduire ces rubriques en libellés français dans la sortie (ex. « Objectifs », « Explication », « Exercice », « Mini quiz », « Auto-évaluation »).'
               : '',
             'Keep each module under 800 words; if more depth is needed, ask which module to expand.',
           ].join('\n')

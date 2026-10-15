@@ -332,6 +332,7 @@ export const suggestTrainingVision = asyncHandler(async (req: AuthRequest, res: 
     '- Do not mention AI, Claude, or implementation details.',
     '- Title: 4-10 words.',
     '- Description: 1-3 sentences, practical and outcome-oriented.',
+    `- Write in ${String(payload.outputLanguage || '').toLowerCase().startsWith('en') ? 'English' : 'French'} only. One language. Do not add a translation.`,
     '',
     'STRICT JSON FORMAT:',
     '{"title":"...","description":"..."}'
