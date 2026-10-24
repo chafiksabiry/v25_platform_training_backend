@@ -310,6 +310,14 @@ export const suggestTrainingVision = asyncHandler(async (req: AuthRequest, res: 
   const gigDescription = String(gig?.description || '').trim();
   const activities = Array.isArray(gig?.activities) ? gig.activities : [];
   const skills = gig?.skills || {};
+  const requestedLanguage = String(payload.outputLanguage || payload.contentLanguage || '')
+    .trim()
+    .toLowerCase()
+    .slice(0, 2);
+  const languageLabel =
+    ({ fr: 'French', en: 'English', es: 'Spanish', de: 'German', pt: 'Portuguese', it: 'Italian', ar: 'Arabic' } as Record<string, string>)[
+      requestedLanguage
+    ] || '';
 
   const userPrompt = [
     'Generate training vision metadata from the gig context.',
@@ -327,6 +335,9 @@ export const suggestTrainingVision = asyncHandler(async (req: AuthRequest, res: 
     `- currentDescription: ${currentDescription}`,
     '',
     'RULES:',
+    languageLabel
+      ? `- Write the title and the description in ${languageLabel} only, even if the gig context is in another language (translate it). Do not mix languages.`
+      : '- Write in the same language as the gig title.',
     '- Output concise, professional training metadata.',
     '- Keep business domain aligned with gig context.',
     '- Do not mention AI, Claude, or implementation details.',
@@ -360,7 +371,7 @@ export const suggestTrainingVision = asyncHandler(async (req: AuthRequest, res: 
   }
 
   const suggestedTitle = String(parsed?.title || gigTitle || currentTitle || '').trim();
-  const suggestedDescription = String(parsed?.description || gigDescription || currentDescription || '').trim();
+  const suggestedDescription = String(parsed?.description || currentDescription || '').trim();
 
   if (!suggestedTitle && !suggestedDescription) {
     return res.status(422).json({

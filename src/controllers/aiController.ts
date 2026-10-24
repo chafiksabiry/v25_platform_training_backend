@@ -55,17 +55,16 @@ const isNaturalValidateAllModulesIntent = (message: string): boolean =>
 
 /** Piliers par défaut — méthodologie 360° (couverture attendue du plan Journey Builder). */
 const METHODOLOGY_360_DEFAULT_PILLARS: string[] = [
-  'Insurance Fundamentals & Industry Overview',
-  'Regulatory Compliance & Legal Framework',
-  'Health Insurance Product Mastery',
-  'Sales Process Excellence & Customer Acquisition',
-  'Customer Service Excellence & Retention',
-  'Technology Systems & Digital Tools',
-  'Company Culture, Values & Procedures',
-  'Professional Development & Soft Skills',
-  'EU Regional Compliance & Data Protection',
-  'Contact Centre Excellence & Customer Operations',
-  'US Federal & State Compliance Framework',
+  'Domain fundamentals & industry overview',
+  'Regulatory compliance & legal framework applicable to the activity',
+  'Product / offer mastery',
+  'Sales process & customer acquisition',
+  'Customer service excellence & retention',
+  'Technology systems & digital tools',
+  'Company culture, values & procedures',
+  'Professional development & soft skills',
+  'Data protection & regional compliance',
+  'Customer operations & contact centre excellence',
 ];
 
 /** Infer fr vs en from the latest user text for canned chat replies (no LLM). */
@@ -157,6 +156,25 @@ const userTextForLocaleInference = (session: any, message: string): string => {
 };
 
 /** Prefer gig language (title/description) when available in Journey Builder context. */
+const CONTENT_LANGUAGE_LABELS: Record<string, string> = {
+  fr: 'French',
+  en: 'English',
+  es: 'Spanish',
+  de: 'German',
+  pt: 'Portuguese',
+  it: 'Italian',
+  ar: 'Arabic',
+};
+
+/** Language explicitly chosen by the user for the generated training (may differ from the gig language). */
+const explicitContentLanguage = (parsedContext: any): string | null => {
+  const code = String(parsedContext?.outputLanguage || parsedContext?.contentLanguage || '')
+    .trim()
+    .toLowerCase()
+    .slice(0, 2);
+  return CONTENT_LANGUAGE_LABELS[code] ? code : null;
+};
+
 const inferGigLocaleHint = (parsedContext: any): 'fr' | 'en' | null => {
   const title = String(parsedContext?.selectedGigTitle || parsedContext?.gigSnapshot?.title || '').trim();
   const description = String(parsedContext?.gigSnapshot?.description || '').trim();
@@ -3512,8 +3530,11 @@ export const chat = async (
           trimmedMessage,
         ].join('\n');
 
+    const chosenLanguage = isJourneyBuilderApp(parsedContext) ? explicitContentLanguage(parsedContext) : null;
+    const chosenLanguageLabel = chosenLanguage ? CONTENT_LANGUAGE_LABELS[chosenLanguage] : '';
     const gigLocaleHint = isJourneyBuilderApp(parsedContext) ? inferGigLocaleHint(parsedContext) : null;
     const userLocaleHint =
+      (chosenLanguage === 'fr' || chosenLanguage === 'en' ? chosenLanguage : null) ||
       gigLocaleHint ||
       inferJourneyChatLocale(userTextForLocaleInference(activeSession, trimmedMessage));
     const missingInfoQuestionPolicy =
@@ -3632,6 +3653,9 @@ export const chat = async (
         : isJourneyBuilderApp(parsedContext)
           ? 'LANGUAGE LOCK: use French for this session because gig title/description are French. English is allowed only for unavoidable proper nouns, product names, acronyms, or short quoted terms.'
           : 'LANGUAGE LOCK: the latest user message is French — write the entire reply in French only.',
+      chosenLanguage
+        ? `LANGUAGE CHOICE (highest priority): the user chose ${chosenLanguageLabel} for this training. Write all plans, modules, quizzes and replies in ${chosenLanguageLabel}, even if the gig description is in another language (translate its content). Proper nouns and product names may stay as is.`
+        : '',
       'Use markdown only. Never output HTML/CSS/JS or fake UI buttons.',
       'Keep business context from conversation unless user changes it.',
       missingInfoQuestionPolicy,
@@ -3657,19 +3681,10 @@ export const chat = async (
             'INTENT LOCK: TRAINING PLAN',
             'Generate a training plan based ONLY on gig title and gig description from context.',
             'Do not use other assumptions beyond the gig context.',
-            'Apply internally the 360-degree methodology coverage across the full plan. Ensure all these pillars are covered at least once across module objectives/topics:',
-            '- Insurance Fundamentals & Industry Overview',
-            '- Regulatory Compliance & Legal Framework',
-            '- Health Insurance Product Mastery',
-            '- Sales Process Excellence & Customer Acquisition',
-            '- Customer Service Excellence & Retention',
-            '- Technology Systems & Digital Tools',
-            '- Company Culture, Values & Procedures',
-            '- Professional Development & Soft Skills',
-            '- EU Regional Compliance & Data Protection',
-            '- Contact Centre Excellence & Customer Operations',
-            '- US Federal & State Compliance Framework',
-            'Regulatory emphasis is mandatory: include strong coverage of legal/compliance/data-protection topics in multiple modules, not only one.',
+            methodologyPlanPillars.length > 0
+              ? 'Apply internally the selected methodology across the full plan: every pillar listed in the MÉTHODOLOGIE block must be covered at least once in module objectives/topics. A pillar written "Title : topic ; topic" carries sub-topics that must appear in the Key Topics of the matching module(s).'
+              : 'Apply internally a complete 360-degree coverage of the gig domain: fundamentals, product/offer knowledge, sector rules and compliance where they apply, sales or service process, customer relationship, tools, and soft skills.',
+            'Adapt the vocabulary, products, regulations and examples to the domain of the gig (never import another sector\'s rules, e.g. do not add health-insurance or other sector content to an unrelated gig).',
             'Output markdown only and start directly with Module 1.',
             'For each module, output ONLY these parts (and nothing else):',
             '- ## Module N : <Titre du module>',
@@ -3688,7 +3703,7 @@ export const chat = async (
         ? [
             'INTENT LOCK: FULL TRAINING CONTENT',
             isJourneyBuilderApp(parsedContext)
-              ? 'LANGUE OBLIGATOIRE: tout le contenu pédagogique en français (titres, listes, quiz, questions).'
+              ? (chosenLanguage ? `LANGUAGE: write all learner-facing content in ${chosenLanguageLabel} (titles, lists, quizzes, questions).` : 'LANGUE OBLIGATOIRE: tout le contenu pédagogique en français (titres, listes, quiz, questions).')
               : '',
             isPlanFrozen
               ? 'PLAN LOCK: use ONLY modules and scope from the saved training plan provided in context. Do not add, rename, or reorder modules.'
@@ -3705,7 +3720,7 @@ export const chat = async (
         ? [
             `INTENT LOCK: MODULE CONTENT${requestedModuleReference ? ` (${requestedModuleReference})` : ''}`,
             isJourneyBuilderApp(parsedContext)
-              ? 'LANGUE OBLIGATOIRE: tout le contenu du module en français (titres, listes, quiz, questions).'
+              ? (chosenLanguage ? `LANGUAGE: write the whole module in ${chosenLanguageLabel} (titles, lists, quizzes, questions).` : 'LANGUE OBLIGATOIRE: tout le contenu du module en français (titres, listes, quiz, questions).')
               : '',
             isPlanFrozen
               ? 'PLAN LOCK: the requested module must match an existing module from the saved plan. If not found, ask user to choose one saved module title.'
@@ -3768,7 +3783,7 @@ export const chat = async (
         const module = planModulesForContent[i];
         const modulePrompt = [
           ...(isJourneyBuilderApp(parsedContext)
-            ? ['LANGUE OBLIGATOIRE: rédiger tout le module en français (titres ###, listes, quiz).']
+            ? [chosenLanguage ? `LANGUAGE: write the whole module in ${chosenLanguageLabel} (### titles, lists, quiz).` : 'LANGUE OBLIGATOIRE: rédiger tout le module en français (titres ###, listes, quiz).']
             : []),
           'Generate learner-facing content for ONE module only.',
           `Module index: ${i + 1}/${planModulesForContent.length}`,
