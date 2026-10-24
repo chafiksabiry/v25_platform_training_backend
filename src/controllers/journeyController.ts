@@ -314,7 +314,10 @@ export const suggestTrainingVision = asyncHandler(async (req: AuthRequest, res: 
     .trim()
     .toLowerCase()
     .slice(0, 2);
-  const languageLabel = requestedLanguage === 'fr' ? 'French' : requestedLanguage === 'en' ? 'English' : '';
+  const languageLabel =
+    ({ fr: 'French', en: 'English', es: 'Spanish', de: 'German', pt: 'Portuguese', it: 'Italian', ar: 'Arabic' } as Record<string, string>)[
+      requestedLanguage
+    ] || '';
 
   const userPrompt = [
     'Generate training vision metadata from the gig context.',

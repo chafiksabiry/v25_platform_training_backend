@@ -156,6 +156,25 @@ const userTextForLocaleInference = (session: any, message: string): string => {
 };
 
 /** Prefer gig language (title/description) when available in Journey Builder context. */
+const CONTENT_LANGUAGE_LABELS: Record<string, string> = {
+  fr: 'French',
+  en: 'English',
+  es: 'Spanish',
+  de: 'German',
+  pt: 'Portuguese',
+  it: 'Italian',
+  ar: 'Arabic',
+};
+
+/** Language explicitly chosen by the user for the generated training (may differ from the gig language). */
+const explicitContentLanguage = (parsedContext: any): string | null => {
+  const code = String(parsedContext?.outputLanguage || parsedContext?.contentLanguage || '')
+    .trim()
+    .toLowerCase()
+    .slice(0, 2);
+  return CONTENT_LANGUAGE_LABELS[code] ? code : null;
+};
+
 const inferGigLocaleHint = (parsedContext: any): 'fr' | 'en' | null => {
   const title = String(parsedContext?.selectedGigTitle || parsedContext?.gigSnapshot?.title || '').trim();
   const description = String(parsedContext?.gigSnapshot?.description || '').trim();
@@ -3511,8 +3530,11 @@ export const chat = async (
           trimmedMessage,
         ].join('\n');
 
+    const chosenLanguage = isJourneyBuilderApp(parsedContext) ? explicitContentLanguage(parsedContext) : null;
+    const chosenLanguageLabel = chosenLanguage ? CONTENT_LANGUAGE_LABELS[chosenLanguage] : '';
     const gigLocaleHint = isJourneyBuilderApp(parsedContext) ? inferGigLocaleHint(parsedContext) : null;
     const userLocaleHint =
+      (chosenLanguage === 'fr' || chosenLanguage === 'en' ? chosenLanguage : null) ||
       gigLocaleHint ||
       inferJourneyChatLocale(userTextForLocaleInference(activeSession, trimmedMessage));
     const missingInfoQuestionPolicy =
@@ -3631,6 +3653,9 @@ export const chat = async (
         : isJourneyBuilderApp(parsedContext)
           ? 'LANGUAGE LOCK: use French for this session because gig title/description are French. English is allowed only for unavoidable proper nouns, product names, acronyms, or short quoted terms.'
           : 'LANGUAGE LOCK: the latest user message is French — write the entire reply in French only.',
+      chosenLanguage
+        ? `LANGUAGE CHOICE (highest priority): the user chose ${chosenLanguageLabel} for this training. Write all plans, modules, quizzes and replies in ${chosenLanguageLabel}, even if the gig description is in another language (translate its content). Proper nouns and product names may stay as is.`
+        : '',
       'Use markdown only. Never output HTML/CSS/JS or fake UI buttons.',
       'Keep business context from conversation unless user changes it.',
       missingInfoQuestionPolicy,
@@ -3678,7 +3703,7 @@ export const chat = async (
         ? [
             'INTENT LOCK: FULL TRAINING CONTENT',
             isJourneyBuilderApp(parsedContext)
-              ? 'LANGUE OBLIGATOIRE: tout le contenu pédagogique en français (titres, listes, quiz, questions).'
+              ? (chosenLanguage ? `LANGUAGE: write all learner-facing content in ${chosenLanguageLabel} (titles, lists, quizzes, questions).` : 'LANGUE OBLIGATOIRE: tout le contenu pédagogique en français (titres, listes, quiz, questions).')
               : '',
             isPlanFrozen
               ? 'PLAN LOCK: use ONLY modules and scope from the saved training plan provided in context. Do not add, rename, or reorder modules.'
@@ -3695,7 +3720,7 @@ export const chat = async (
         ? [
             `INTENT LOCK: MODULE CONTENT${requestedModuleReference ? ` (${requestedModuleReference})` : ''}`,
             isJourneyBuilderApp(parsedContext)
-              ? 'LANGUE OBLIGATOIRE: tout le contenu du module en français (titres, listes, quiz, questions).'
+              ? (chosenLanguage ? `LANGUAGE: write the whole module in ${chosenLanguageLabel} (titles, lists, quizzes, questions).` : 'LANGUE OBLIGATOIRE: tout le contenu du module en français (titres, listes, quiz, questions).')
               : '',
             isPlanFrozen
               ? 'PLAN LOCK: the requested module must match an existing module from the saved plan. If not found, ask user to choose one saved module title.'
@@ -3758,7 +3783,7 @@ export const chat = async (
         const module = planModulesForContent[i];
         const modulePrompt = [
           ...(isJourneyBuilderApp(parsedContext)
-            ? ['LANGUE OBLIGATOIRE: rédiger tout le module en français (titres ###, listes, quiz).']
+            ? [chosenLanguage ? `LANGUAGE: write the whole module in ${chosenLanguageLabel} (### titles, lists, quiz).` : 'LANGUE OBLIGATOIRE: rédiger tout le module en français (titres ###, listes, quiz).']
             : []),
           'Generate learner-facing content for ONE module only.',
           `Module index: ${i + 1}/${planModulesForContent.length}`,
