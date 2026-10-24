@@ -14,6 +14,21 @@ export type AiGenerationResult = {
   usage: AiTokenUsage;
 };
 
+/**
+ * The OpenAI fallback may only be forced into JSON mode when the caller really wants a JSON answer.
+ * The chat prompts embed the gig as a JSON context, so the mere presence of the word "json" must not
+ * switch it on (the model then answered with the context object instead of the markdown plan).
+ */
+const MARKDOWN_ONLY_MARKER = /markdown only/i;
+const JSON_OUTPUT_DIRECTIVE =
+  /valid json|json valide|json object|objet json|strict(?:ly)? json|return (?:only )?json|respond(?:ez)? (?:with|en) (?:only )?(?:a )?json|schema json|json schema|avec ce schema/i;
+
+function wantsJsonOutput(prompt: string, systemPrompt?: string, explicit?: boolean): boolean {
+  if (explicit !== undefined) return explicit;
+  if (MARKDOWN_ONLY_MARKER.test(systemPrompt || '')) return false;
+  return JSON_OUTPUT_DIRECTIVE.test(`${systemPrompt || ''}\n${prompt}`);
+}
+
 /** OpenAI retired the original GPT-4 models: a stale OPENAI_MODEL must not break every generation. */
 const RETIRED_OPENAI_MODELS = new Set([
   'gpt-4',
@@ -326,7 +341,7 @@ class AIService {
     systemPrompt?: string,
     apiKey?: string,
     maxTokensOverride?: number,
-    options?: { temperature?: number; preferredModels?: string[] }
+    options?: { temperature?: number; preferredModels?: string[]; expectJson?: boolean }
   ): Promise<AiGenerationResult> {
     const client = apiKey ? new Anthropic({ apiKey }) : this.anthropic;
 
@@ -393,7 +408,7 @@ class AIService {
     // FINAL FALLBACK: OpenAI
     console.log('🔄 All Claude models failed. Falling back to OpenAI...');
     try {
-      const isJsonRequested = prompt.toLowerCase().includes('json') || (systemPrompt || '').toLowerCase().includes('json');
+      const isJsonRequested = wantsJsonOutput(prompt, systemPrompt, options?.expectJson);
       const model = resolveOpenAiModel();
       const basePayload: any = {
         model,
