@@ -14,6 +14,22 @@ export type AiGenerationResult = {
   usage: AiTokenUsage;
 };
 
+/** OpenAI retired the original GPT-4 models: a stale OPENAI_MODEL must not break every generation. */
+const RETIRED_OPENAI_MODELS = new Set([
+  'gpt-4',
+  'gpt-4-0314',
+  'gpt-4-0613',
+  'gpt-4-32k',
+  'gpt-4-32k-0314',
+  'gpt-4-32k-0613',
+  'gpt-3.5-turbo-0301',
+]);
+
+function resolveOpenAiModel(): string {
+  const configured = (process.env.OPENAI_MODEL || '').trim();
+  return !configured || RETIRED_OPENAI_MODELS.has(configured) ? 'gpt-4o' : configured;
+}
+
 class AIService {
   private openai: OpenAI;
   private anthropic: Anthropic;
@@ -254,7 +270,7 @@ class AIService {
   async generateTrainingContent(prompt: string): Promise<string> {
     try {
       const response = await this.openai.chat.completions.create({
-        model: process.env.OPENAI_MODEL || 'gpt-4',
+        model: resolveOpenAiModel(),
         messages: [
           {
             role: 'system',
@@ -378,7 +394,7 @@ class AIService {
     console.log('🔄 All Claude models failed. Falling back to OpenAI...');
     try {
       const isJsonRequested = prompt.toLowerCase().includes('json') || (systemPrompt || '').toLowerCase().includes('json');
-      const model = process.env.OPENAI_MODEL || 'gpt-4o';
+      const model = resolveOpenAiModel();
       const basePayload: any = {
         model,
         messages: [
@@ -548,7 +564,7 @@ class AIService {
 
     try {
       const response = await this.openai.chat.completions.create({
-        model: process.env.OPENAI_MODEL || 'gpt-4',
+        model: resolveOpenAiModel(),
         messages: [
           {
             role: 'system',
@@ -576,7 +592,7 @@ class AIService {
 
     try {
       const response = await this.openai.chat.completions.create({
-        model: process.env.OPENAI_MODEL || 'gpt-4',
+        model: resolveOpenAiModel(),
         messages: [
           {
             role: 'system',
