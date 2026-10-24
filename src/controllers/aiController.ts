@@ -55,17 +55,16 @@ const isNaturalValidateAllModulesIntent = (message: string): boolean =>
 
 /** Piliers par défaut — méthodologie 360° (couverture attendue du plan Journey Builder). */
 const METHODOLOGY_360_DEFAULT_PILLARS: string[] = [
-  'Insurance Fundamentals & Industry Overview',
-  'Regulatory Compliance & Legal Framework',
-  'Health Insurance Product Mastery',
-  'Sales Process Excellence & Customer Acquisition',
-  'Customer Service Excellence & Retention',
-  'Technology Systems & Digital Tools',
-  'Company Culture, Values & Procedures',
-  'Professional Development & Soft Skills',
-  'EU Regional Compliance & Data Protection',
-  'Contact Centre Excellence & Customer Operations',
-  'US Federal & State Compliance Framework',
+  'Domain fundamentals & industry overview',
+  'Regulatory compliance & legal framework applicable to the activity',
+  'Product / offer mastery',
+  'Sales process & customer acquisition',
+  'Customer service excellence & retention',
+  'Technology systems & digital tools',
+  'Company culture, values & procedures',
+  'Professional development & soft skills',
+  'Data protection & regional compliance',
+  'Customer operations & contact centre excellence',
 ];
 
 /** Infer fr vs en from the latest user text for canned chat replies (no LLM). */
@@ -3657,19 +3656,10 @@ export const chat = async (
             'INTENT LOCK: TRAINING PLAN',
             'Generate a training plan based ONLY on gig title and gig description from context.',
             'Do not use other assumptions beyond the gig context.',
-            'Apply internally the 360-degree methodology coverage across the full plan. Ensure all these pillars are covered at least once across module objectives/topics:',
-            '- Insurance Fundamentals & Industry Overview',
-            '- Regulatory Compliance & Legal Framework',
-            '- Health Insurance Product Mastery',
-            '- Sales Process Excellence & Customer Acquisition',
-            '- Customer Service Excellence & Retention',
-            '- Technology Systems & Digital Tools',
-            '- Company Culture, Values & Procedures',
-            '- Professional Development & Soft Skills',
-            '- EU Regional Compliance & Data Protection',
-            '- Contact Centre Excellence & Customer Operations',
-            '- US Federal & State Compliance Framework',
-            'Regulatory emphasis is mandatory: include strong coverage of legal/compliance/data-protection topics in multiple modules, not only one.',
+            methodologyPlanPillars.length > 0
+              ? 'Apply internally the selected methodology across the full plan: every pillar listed in the MÉTHODOLOGIE block must be covered at least once in module objectives/topics. A pillar written "Title : topic ; topic" carries sub-topics that must appear in the Key Topics of the matching module(s).'
+              : 'Apply internally a complete 360-degree coverage of the gig domain: fundamentals, product/offer knowledge, sector rules and compliance where they apply, sales or service process, customer relationship, tools, and soft skills.',
+            'Adapt the vocabulary, products, regulations and examples to the domain of the gig (never import another sector\'s rules, e.g. do not add health-insurance or other sector content to an unrelated gig).',
             'Output markdown only and start directly with Module 1.',
             'For each module, output ONLY these parts (and nothing else):',
             '- ## Module N : <Titre du module>',
