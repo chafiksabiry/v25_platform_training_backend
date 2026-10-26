@@ -7,7 +7,21 @@
  * and no debit. From the 2nd gig onward, prepaid AI tokens are required.
  */
 
+import crypto from 'crypto';
 import Gig from '../models/Gig';
+
+const b64url = (v: string | Buffer) =>
+  Buffer.from(v).toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+
+/** JWT HS256 de service à service, valable une minute (même format que ceux vérifiés par l'orchestrateur). */
+export function signServiceToken(secret: string, payload: Record<string, unknown>, ttlSeconds = 60): string {
+  const now = Math.floor(Date.now() / 1000);
+  const body = `${b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))}.${b64url(
+    JSON.stringify({ ...payload, iat: now, exp: now + ttlSeconds })
+  )}`;
+  const sig = b64url(crypto.createHmac('sha256', secret).update(body).digest());
+  return `${body}.${sig}`;
+}
 
 export type AiProvider = 'anthropic' | 'openai' | 'gemini' | 'estimated';
 
@@ -171,17 +185,29 @@ export async function assertCompanyHasAiTokens(
 
   try {
     const base = getOrchestratorApiBase();
+    // L'orchestrateur exige un JWT sur /check (PAY-12) : appel de service à service, jeton signé avec le secret commun.
+    const headers: Record<string, string> = {};
+    if (process.env.JWT_SECRET) {
+      headers.Authorization = `Bearer ${signServiceToken(process.env.JWT_SECRET, { service: 'training', companyId: id })}`;
+    }
     const res = await fetch(
-      `${base}/tokens-company/${encodeURIComponent(id)}/check?min=${Math.max(1, minRequired)}`
+      `${base}/tokens-company/${encodeURIComponent(id)}/check?min=${Math.max(1, minRequired)}`,
+      { headers }
     );
     const json: any = await res.json().catch(() => ({}));
     const tokens = typeof json?.data?.tokens === 'number' ? json.data.tokens : 0;
-    if (!res.ok || json?.success === false) {
+    // Solde insuffisant = 402 (ou success:false). Tout autre refus (401, 5xx…) n'est pas un solde insuffisant :
+    // on ne peut pas vérifier, la requête passe et le débit (charge-usage) fera foi, comme en cas d'erreur réseau.
+    if (res.status === 402 || json?.success === false) {
       return {
         ok: false,
         tokens,
         message: json?.message || 'Solde de tokens AI insuffisant. Rechargez pour continuer.',
       };
+    }
+    if (!res.ok) {
+      console.warn('[aiTokenBilling] balance check unavailable (allowing request):', res.status);
+      return { ok: true, tokens: 0 };
     }
     return { ok: true, tokens };
   } catch (err) {
