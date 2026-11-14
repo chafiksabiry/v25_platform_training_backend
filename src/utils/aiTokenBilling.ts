@@ -2,13 +2,11 @@
  * HARX prepaid AI tokens — normalize provider usage + charge orchestrator wallet.
  * Providers: Anthropic (Claude), OpenAI, Gemini/Vertex. Fallback: ~4 chars ≈ 1 token.
  *
- * Product rule: the company's **first gig package** (0 or 1 gig) includes AI
- * (training vision/chat, docs, etc.) in the subscription — no prepaid balance check
- * and no debit. From the 2nd gig onward, prepaid AI tokens are required.
+ * Product rule: AI tokens are ALWAYS prepaid and debited (no free first gig). Without a companyId the
+ * request is refused; if the balance cannot be read the request fails cleanly (never a silent free generation).
  */
 
 import crypto from 'crypto';
-import Gig from '../models/Gig';
 
 const b64url = (v: string | Buffer) =>
   Buffer.from(v).toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
@@ -124,64 +122,58 @@ function getOrchestratorApiBase(): string {
   return String(raw).replace(/\/$/, '');
 }
 
-function getGigsApiBase(): string {
-  const raw =
-    process.env.GIGS_API_URL ||
-    process.env.GIGS_API ||
-    process.env.API_URL_GIGS ||
-    'https://v25gigsmanualcreationbackend-production.up.railway.app/api';
-  return String(raw).replace(/\/$/, '');
+export type TokenGateCode = 'company_required' | 'insufficient_tokens' | 'balance_unavailable';
+
+export interface TokenGateResult {
+  ok: boolean;
+  /** Solde réel lu à l'orchestrateur (jamais un marqueur : undefined si inconnu). */
+  tokens?: number;
+  code?: TokenGateCode;
+  message?: string;
+}
+
+/** Réponse HTTP uniforme d'un refus de garde (400 sans entreprise, 402 solde insuffisant, 503 solde illisible). */
+export function tokenGateErrorResponse(gate: TokenGateResult): { status: number; body: Record<string, unknown> } {
+  const status = gate.code === 'company_required' ? 400 : gate.code === 'balance_unavailable' ? 503 : 402;
+  return {
+    status,
+    body: {
+      success: false,
+      error: gate.code || 'insufficient_tokens',
+      message: gate.message,
+      data: { tokens: gate.tokens },
+    },
+  };
 }
 
 /**
- * True while company still has at most one gig (first-gig package / subscription).
- * Prefers gigs service count; falls back to local Gig collection.
+ * Vérifie le solde de jetons prépayés de l'entreprise auprès de l'orchestrateur.
+ * - sans companyId : refus (400) ;
+ * - solde < minRequired : refus (402) avec le vrai solde ;
+ * - solde illisible (réseau, 401, 5xx, réponse invalide) : refus propre (503), jamais de génération gratuite.
  */
-export async function isFirstGigForCompany(
-  companyId: string | undefined | null
-): Promise<boolean> {
-  const id = String(companyId || '').trim();
-  if (!id) return true;
-  try {
-    const base = getGigsApiBase();
-    const res = await fetch(
-      `${base}/gigs/company/${encodeURIComponent(id)}/has-gigs`
-    );
-    if (res.ok) {
-      const json: any = await res.json().catch(() => ({}));
-      const countRaw = json?.data?.count ?? json?.count;
-      if (typeof countRaw === 'number' && Number.isFinite(countRaw)) {
-        return countRaw <= 1;
-      }
-      const hasGigs = Boolean(json?.data?.hasGigs ?? json?.hasGigs);
-      if (!hasGigs) return true;
-    }
-  } catch (err) {
-    console.warn('[aiTokenBilling] gigs has-gigs check failed, falling back to local Gig:', err);
-  }
-  try {
-    const count = await Gig.countDocuments({ companyId: id });
-    return count <= 1;
-  } catch (err) {
-    console.warn('[aiTokenBilling] first-gig local count failed (treating as first):', err);
-    return true;
-  }
-}
-
 export async function assertCompanyHasAiTokens(
   companyId: string | undefined | null,
-  minRequired = 1,
-  options?: { skipIfFirstGig?: boolean }
-): Promise<{ ok: boolean; tokens: number; message?: string; firstGigFree?: boolean }> {
+  minRequired = 1
+): Promise<TokenGateResult> {
   const id = String(companyId || '').trim();
-  if (!id) return { ok: true, tokens: 0 }; // no company → skip gate (legacy callers)
-
-  if (options?.skipIfFirstGig !== false) {
-    const firstGig = await isFirstGigForCompany(id);
-    if (firstGig) {
-      return { ok: true, tokens: 0, firstGigFree: true };
-    }
+  if (!id) {
+    return {
+      ok: false,
+      code: 'company_required',
+      message: "Identifiant d'entreprise requis pour utiliser les jetons IA.",
+    };
   }
+
+  const min = Math.max(1, Math.ceil(Number(minRequired) || 1));
+  const unavailable = (detail: string): TokenGateResult => {
+    console.warn('[aiTokenBilling] balance check unavailable:', detail);
+    return {
+      ok: false,
+      code: 'balance_unavailable',
+      message: "Impossible de vérifier votre solde de jetons IA pour le moment. Réessayez dans quelques instants.",
+    };
+  };
 
   try {
     const base = getOrchestratorApiBase();
@@ -190,32 +182,38 @@ export async function assertCompanyHasAiTokens(
     if (process.env.JWT_SECRET) {
       headers.Authorization = `Bearer ${signServiceToken(process.env.JWT_SECRET, { service: 'training', companyId: id })}`;
     }
-    const res = await fetch(
-      `${base}/tokens-company/${encodeURIComponent(id)}/check?min=${Math.max(1, minRequired)}`,
-      { headers }
-    );
+    const res = await fetch(`${base}/tokens-company/${encodeURIComponent(id)}/check?min=${min}`, { headers });
     const json: any = await res.json().catch(() => ({}));
-    const tokens = typeof json?.data?.tokens === 'number' ? json.data.tokens : 0;
-    // Solde insuffisant = 402 (ou success:false). Tout autre refus (401, 5xx…) n'est pas un solde insuffisant :
-    // on ne peut pas vérifier, la requête passe et le débit (charge-usage) fera foi, comme en cas d'erreur réseau.
+    const balance = json?.data?.tokens;
+    const hasBalance = typeof balance === 'number' && Number.isFinite(balance);
+
     if (res.status === 402 || json?.success === false) {
       return {
         ok: false,
-        tokens,
+        code: 'insufficient_tokens',
+        tokens: hasBalance ? balance : undefined,
         message: json?.message || 'Solde de tokens AI insuffisant. Rechargez pour continuer.',
       };
     }
-    if (!res.ok) {
-      console.warn('[aiTokenBilling] balance check unavailable (allowing request):', res.status);
-      return { ok: true, tokens: 0 };
-    }
-    return { ok: true, tokens };
+    if (!res.ok) return unavailable(`HTTP ${res.status}`);
+    if (!hasBalance) return unavailable('balance missing in orchestrator response');
+    return { ok: true, tokens: balance };
   } catch (err) {
-    console.warn('[aiTokenBilling] assert check failed (allowing request):', err);
-    return { ok: true, tokens: 0 };
+    return unavailable(String((err as any)?.message || err));
   }
 }
 
+export interface ChargeResult {
+  billed: boolean;
+  /** Solde restant renvoyé par l'orchestrateur, si connu. */
+  tokens?: number;
+  /** Montant réellement débité (0 si non débité). */
+  charged: number;
+  /** Raison lorsque rien n'a été débité. */
+  reason?: 'company_required' | 'no_usage' | 'insufficient_tokens' | 'charge_failed';
+}
+
+/** Débite le coût réel après génération (toujours, aucun gig gratuit) ; le résultat est journalisé et renvoyé. */
 export async function chargeCompanyAiTokens(opts: {
   companyId?: string | null;
   usageId: string;
@@ -223,26 +221,24 @@ export async function chargeCompanyAiTokens(opts: {
   tool: string;
   gigId?: string | null;
   meta?: Record<string, unknown>;
-  /** When true, skip debit (first gig free). Auto-detected if omitted. */
-  skipCharge?: boolean;
-}): Promise<{ billed: boolean; tokens?: number; firstGigFree?: boolean }> {
+}): Promise<ChargeResult> {
   const id = String(opts.companyId || '').trim();
-  if (!id) return { billed: false };
-
-  let skip = Boolean(opts.skipCharge);
-  if (!skip) {
-    try {
-      skip = await isFirstGigForCompany(id);
-    } catch {
-      skip = false;
-    }
-  }
-  if (skip) {
-    return { billed: false, firstGigFree: true };
-  }
-
+  const log = (r: ChargeResult, tokensUsed: number): ChargeResult => {
+    console.info('[aiTokenBilling] charge', {
+      tool: opts.tool,
+      usageId: opts.usageId,
+      companyId: id || null,
+      tokensUsed,
+      billed: r.billed,
+      charged: r.charged,
+      balance: r.tokens,
+      reason: r.reason,
+    });
+    return r;
+  };
   const tokensUsed = Math.max(0, Math.round(opts.usage.totalTokens || 0));
-  if (tokensUsed <= 0) return { billed: false };
+  if (!id) return log({ billed: false, charged: 0, reason: 'company_required' }, tokensUsed);
+  if (tokensUsed <= 0) return log({ billed: false, charged: 0, reason: 'no_usage' }, tokensUsed);
 
   try {
     const base = getOrchestratorApiBase();
@@ -268,21 +264,22 @@ export async function chargeCompanyAiTokens(opts: {
       }),
     });
     const json: any = await res.json().catch(() => ({}));
+    const balance = typeof json?.data?.tokens === 'number' ? json.data.tokens : undefined;
     if (res.status === 402) {
-      console.warn('[aiTokenBilling] charge 402 insufficient_tokens', id, tokensUsed);
-      return { billed: false, tokens: json?.data?.tokens };
+      return log({ billed: false, tokens: balance, charged: 0, reason: 'insufficient_tokens' }, tokensUsed);
     }
     if (!res.ok) {
       console.warn('[aiTokenBilling] charge failed', res.status, json);
-      return { billed: false };
+      return log({ billed: false, charged: 0, reason: 'charge_failed' }, tokensUsed);
     }
-    return {
-      billed: Boolean(json?.charged),
-      tokens: typeof json?.data?.tokens === 'number' ? json.data.tokens : undefined,
-    };
+    const billed = Boolean(json?.charged);
+    return log(
+      { billed, tokens: balance, charged: billed ? tokensUsed : 0, ...(billed ? {} : { reason: 'charge_failed' as const }) },
+      tokensUsed
+    );
   } catch (err) {
     console.warn('[aiTokenBilling] charge error:', err);
-    return { billed: false };
+    return log({ billed: false, charged: 0, reason: 'charge_failed' }, tokensUsed);
   }
 }
 

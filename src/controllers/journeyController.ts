@@ -12,6 +12,7 @@ import {
   assertCompanyHasAiTokens,
   chargeCompanyAiTokens,
   resolveUsageOrEstimate,
+  tokenGateErrorResponse,
 } from '../utils/aiTokenBilling';
 
 const isValidObjectId = (v: unknown): boolean =>
@@ -300,12 +301,8 @@ export const suggestTrainingVision = asyncHandler(async (req: AuthRequest, res: 
 
   const tokenGate = await assertCompanyHasAiTokens(billingCompanyId, 1);
   if (!tokenGate.ok) {
-    return res.status(402).json({
-      success: false,
-      error: 'insufficient_tokens',
-      message: tokenGate.message,
-      data: { tokens: tokenGate.tokens },
-    });
+    const denied = tokenGateErrorResponse(tokenGate);
+    return res.status(denied.status).json(denied.body);
   }
 
   const gigTitle = String(gig?.title || '').trim();
@@ -400,6 +397,7 @@ export const suggestTrainingVision = asyncHandler(async (req: AuthRequest, res: 
     usage: {
       ...usage,
       billed: charge.billed,
+      charged: charge.charged,
       balance: charge.tokens,
     },
   });
