@@ -1,4 +1,4 @@
-import { sortPlanMarkdownByPhase, parseModulePhase, inferPhaseFromTitle } from '../utils/planPhaseOrder';
+import { sortPlanMarkdownByPhase, parseModulePhase, inferPhaseFromTitle, forcedPhaseFromTitle } from '../utils/planPhaseOrder';
 
 const mod = (n: number, title: string, phase?: string) =>
   [`## Module ${n} : ${title}`, ...(phase ? [`Phase : ${phase}`] : []), '### 🎯 Objectifs', '- Objectif A', '- Objectif B', '- Objectif C', '### 📌 Key Topics', '- Sujet 1', '- Sujet 2', '- Sujet 3', ''].join('\n');
@@ -111,6 +111,45 @@ describe('repli : phase déduite du titre (sans ligne Phase)', () => {
     expect(titles(sortPlanMarkdownByPhase(md)).map((t) => t.split(':')[1])).toEqual(['Posture professionnelle', 'Garanties', 'Suivi client']);
     const md2 = [mod(1, 'Suivi client'), mod(2, 'Posture professionnelle'), mod(3, 'Garanties', 'contexte')].join('\n');
     expect(titles(sortPlanMarkdownByPhase(md2)).map((t) => t.split(':')[1])).toEqual(['Garanties', 'Posture professionnelle', 'Suivi client']);
+  });
+});
+
+describe('cas C : le modèle étiquette la sécurité sociale en « conformite »', () => {
+  it('le module reste/passe en tête malgré la phase émise', () => {
+    const md = [
+      mod(1, 'Offres et garanties', 'offre'),
+      mod(2, 'Prospection et objections', 'prospection'),
+      mod(3, 'Système de sécurité sociale', 'conformite'),
+      mod(4, 'Règles légales de la vente', 'conformite'),
+      mod(5, 'Suivi client', 'suivi'),
+    ].join('\n');
+    expect(titles(sortPlanMarkdownByPhase(md)).map((t) => t.split(':')[1])).toEqual([
+      'Système de sécurité sociale',
+      'Offres et garanties',
+      'Prospection et objections',
+      'Règles légales de la vente',
+      'Suivi client',
+    ]);
+  });
+
+  it.each([
+    ['Système de sécurité sociale', 'contexte'],
+    ['Le système de santé français', 'contexte'],
+    ['Assurance maladie obligatoire et complémentaire', 'contexte'],
+    ['Protection sociale : les bases', 'contexte'],
+    ['Règles légales de la vente', null],
+    ['Garanties et produits', null],
+  ])('titre « %s » → contexte imposé : %s', (title, expected) => {
+    expect(forcedPhaseFromTitle(title)).toBe(expected);
+  });
+
+  it('étiquettes « prospection », « offre » ou « suivi » écartées aussi ; un titre sans mot-clé garde la phase émise', () => {
+    for (const wrong of ['prospection', 'offre', 'suivi']) {
+      const md = [mod(1, 'Offres et garanties', 'offre'), mod(2, 'Assurance maladie, les bases', wrong)].join('\n');
+      expect(titles(sortPlanMarkdownByPhase(md)).map((t) => t.split(':')[1])).toEqual(['Assurance maladie, les bases', 'Offres et garanties']);
+    }
+    const md2 = [mod(1, 'Règles légales', 'conformite'), mod(2, 'Garanties', 'offre')].join('\n');
+    expect(titles(sortPlanMarkdownByPhase(md2)).map((t) => t.split(':')[1])).toEqual(['Garanties', 'Règles légales']);
   });
 });
 
