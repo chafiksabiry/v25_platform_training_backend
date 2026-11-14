@@ -73,6 +73,17 @@ export const inferPhaseFromTitle = (title: string): PlanPhase | null => {
   return best ? best.phase : null;
 };
 
+/**
+ * Titres qui relèvent TOUJOURS du contexte, même si le modèle les étiquette autrement (ex. « conformite ») :
+ * le fonctionnement du système de santé / de la sécurité sociale n'est pas de la conformité de vente.
+ */
+const FORCED_CONTEXT_KEYWORDS = ['securite sociale', 'systeme de sante', 'assurance maladie', 'protection sociale'];
+
+export const forcedPhaseFromTitle = (title: string): PlanPhase | null => {
+  const text = ` ${normalizeText(title)} `;
+  return FORCED_CONTEXT_KEYWORDS.some((kw) => text.includes(` ${kw} `) || text.includes(` ${kw}`)) ? 'contexte' : null;
+};
+
 const isPhaseLine = (line: string): boolean => {
   const m = line.match(PHASE_LINE_RE);
   return Boolean(m && normalizePhase(m[1]));
@@ -95,10 +106,12 @@ export const sortPlanMarkdownByPhase = (markdown: string, options?: { stripPhase
 
   const preamble = lines.slice(0, starts[0]);
   const blocks = starts.map((from, s) => lines.slice(from, s + 1 < starts.length ? starts[s + 1] : lines.length));
-  // Phase émise par le modèle, sinon déduite du titre ; à défaut le module garde sa place.
-  const phases = blocks.map(
-    (b) => parseModulePhase(b) ?? inferPhaseFromTitle(b[0].replace(MODULE_HEADING_RE, '').replace(/^\s*[:\-–—]\s*/, ''))
-  );
+  // Priorité : contexte imposé par le titre (sécurité sociale…) > phase émise par le modèle > phase déduite du
+  // titre ; à défaut le module garde sa place.
+  const phases = blocks.map((b) => {
+    const title = b[0].replace(MODULE_HEADING_RE, '').replace(/^\s*[:\-–—]\s*/, '');
+    return forcedPhaseFromTitle(title) ?? parseModulePhase(b) ?? inferPhaseFromTitle(title);
+  });
   if (phases.every((p) => p === null)) return raw;
 
   // Positions occupées par des modules sans phase : inchangées. Les autres reçoivent les modules phasés triés.
