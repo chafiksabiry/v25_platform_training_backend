@@ -3,6 +3,8 @@ import { AuthRequest } from '../middleware/auth';
 import trainingJourneyService from '../services/trainingJourneyService';
 import scriptReadService from '../services/scriptReadService';
 import { asyncHandler } from '../middleware/errorHandler';
+import TrainingJourney from '../models/TrainingJourney';
+import { applyModuleReview } from '../services/moduleReviewService';
 import cloudinaryService from '../services/cloudinaryService';
 import aiService from '../services/aiService';
 import { ImageGenerationService } from '../services/imageGenerationService';
@@ -785,4 +787,24 @@ export const listScriptReads = asyncHandler(async (req: AuthRequest, res: Respon
   }
   const rows = await scriptReadService.listScriptReadsForRep(repId);
   res.status(200).json({ success: true, data: rows });
+});
+
+/** PATCH /training_journeys/:journeyId/modules/:index/review-status — revue du contenu STOCKÉ d'un module. */
+export const reviewModuleStatus = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { journeyId, index } = req.params;
+  if (!isValidObjectId(journeyId)) {
+    return res.status(400).json({ success: false, code: 'invalid_journey_id', error: 'journeyId invalide.' });
+  }
+  const journey = await TrainingJourney.findById(journeyId);
+  const companyId = String(
+    req.body?.companyId || req.query.companyId || req.headers['x-company-id'] || (req as any).user?.companyId || ''
+  );
+  const result = applyModuleReview(journey, {
+    index,
+    status: req.body?.status,
+    note: req.body?.note,
+    companyId,
+  });
+  if (result.httpStatus === 200 && journey) await journey.save();
+  return res.status(result.httpStatus).json(result.body);
 });

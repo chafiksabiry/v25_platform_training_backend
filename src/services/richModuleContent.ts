@@ -608,7 +608,7 @@ export const parseAppliedParts = (raw: string): Partial<Record<AppliedPart, stri
   }
   marks.forEach((mk, i) => {
     const body = text.slice(mk.end, i + 1 < marks.length ? marks[i + 1].start : text.length);
-    out[mk.part] = body.replace(/^\s*[—-]\s*/, '').trim();
+    out[mk.part] = body.replace(/^[ \t]*—[ \t]*/, '').trim();
   });
   return out;
 };

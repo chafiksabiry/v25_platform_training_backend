@@ -44,6 +44,7 @@ router.post('/:id/edit-with-prompt', journeyController.editJourneyWithPrompt);
 router.post('/:id/launch', journeyController.launchJourney);
 router.delete('/:id', journeyController.deleteJourney);
 router.patch('/:id/archive', journeyController.archiveJourney);
+router.patch('/:journeyId/modules/:index/review-status', journeyController.reviewModuleStatus);
 
 export default router;
 
