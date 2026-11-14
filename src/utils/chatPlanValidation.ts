@@ -1,3 +1,4 @@
+import { sortPlanMarkdownByPhase } from './planPhaseOrder';
 import mongoose from 'mongoose';
 import trainingJourneyService from '../services/trainingJourneyService';
 import TrainingJourney from '../models/TrainingJourney';
@@ -492,7 +493,8 @@ function buildStrictPlanMarkdown(modulePlan: ModulePlanItem[]): string {
 }
 
 export function sanitizePlanForStorage(planMarkdown: string): string {
-  let stripped = stripHarxTags(planMarkdown);
+  // Ordre logique des modules (phase) appliqué aussi à l'enregistrement : idempotent si déjà trié.
+  let stripped = sortPlanMarkdownByPhase(stripHarxTags(planMarkdown));
   stripped = stripped.replace(/\n+\*\*Souhaitez-vous[\s\S]*$/i, '').trim();
   stripped = stripped.replace(/\n---\s*\n+\s*\*?\*?Quelle option[\s\S]*$/i, '').trim();
   stripped = stripped.replace(/\n\*?\*?Quelle option préférez-vous[\s\S]*$/i, '').trim();
