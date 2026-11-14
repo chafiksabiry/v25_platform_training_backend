@@ -30,6 +30,7 @@ import {
   assertCompanyHasAiTokens,
   chargeCompanyAiTokens,
   fallbackEstimatedUsage,
+  tokenGateErrorResponse,
   resolveUsageOrEstimate,
 } from '../utils/aiTokenBilling';
 import { KbDocInput, selectKbPassages } from '../services/knowledgePassages';
@@ -2435,7 +2436,7 @@ export const estimateModuleContent = async (
         billing: {
           sufficient: gate.ok,
           balance: gate.tokens,
-          firstGigFree: gate.firstGigFree === true,
+          code: gate.code,
           message: gate.message,
         },
         assumptions: [
@@ -2575,12 +2576,8 @@ export const chat = async (
     const billingCompanyId = String(companyId || '').trim() || undefined;
     const tokenGate = await assertCompanyHasAiTokens(billingCompanyId, 1);
     if (!tokenGate.ok) {
-      return res.status(402).json({
-        success: false,
-        error: 'insufficient_tokens',
-        message: tokenGate.message,
-        data: { tokens: tokenGate.tokens },
-      });
+      const denied = tokenGateErrorResponse(tokenGate);
+      return res.status(denied.status).json(denied.body);
     }
 
     const anthropicKey = req.headers['x-anthropic-key'] as string;
@@ -2671,6 +2668,7 @@ export const chat = async (
         usage: {
           ...usage,
           billed: charge.billed,
+          charged: charge.charged,
           balance: charge.tokens,
         },
       });
@@ -4270,10 +4268,9 @@ export const chat = async (
     if (contentEstimate) {
       const balanceGate = await assertCompanyHasAiTokens(billingCompanyId, contentEstimate.minTokens);
       if (!balanceGate.ok) {
-        return res.status(402).json({
-          success: false,
-          error: 'insufficient_tokens',
-          message: balanceGate.message,
+        const denied = tokenGateErrorResponse(balanceGate);
+        return res.status(denied.status).json({
+          ...denied.body,
           data: { tokens: balanceGate.tokens, estimate: contentEstimate },
         });
       }
@@ -4368,6 +4365,7 @@ Regenerate now with strict compliance.
         usage: {
           ...usage,
           billed: charge.billed,
+          charged: charge.charged,
           balance: charge.tokens,
         },
         ...(contentEstimate ? { estimate: contentEstimate } : {}),
@@ -4743,12 +4741,8 @@ export const analyzeDocument = async (
 
     const tokenGate = await assertCompanyHasAiTokens(billingCompanyId, 1);
     if (!tokenGate.ok) {
-      return res.status(402).json({
-        success: false,
-        error: 'insufficient_tokens',
-        message: tokenGate.message,
-        data: { tokens: tokenGate.tokens },
-      });
+      const denied = tokenGateErrorResponse(tokenGate);
+      return res.status(denied.status).json(denied.body);
     }
 
     const analysis = await documentAnalysisService.analyzeDocument(
@@ -4862,6 +4856,7 @@ export const analyzeDocument = async (
       usage: {
         ...usage,
         billed: charge.billed,
+        charged: charge.charged,
         balance: charge.tokens,
       },
     });
