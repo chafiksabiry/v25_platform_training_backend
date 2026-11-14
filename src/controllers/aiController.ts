@@ -32,6 +32,18 @@ import {
   fallbackEstimatedUsage,
   resolveUsageOrEstimate,
 } from '../utils/aiTokenBilling';
+import { KbDocInput, selectKbPassages } from '../services/knowledgePassages';
+import {
+  PlanModuleInput,
+  buildSingleCallStructureInstructions,
+  estimateModuleTokens,
+  generateRichModule,
+  getContentMaxTokens,
+  isModuleMarkdownConform,
+  resolveModuleLang,
+  sumEstimates,
+  sumUsage,
+} from '../services/richModuleContent';
 
 const unlinkAsync = promisify(fs.unlink);
 const HARX_STYLE_TAG_REGEX = /<harx-style>\s*\{[\s\S]*?\}\s*<\/harx-style>/i;
@@ -195,9 +207,9 @@ const stripStyleTagsForReadiness = (raw: string): string =>
     .replace(HARX_TRAINING_STATUS_REGEX, '')
     .trim();
 
-const parseModuleSectionsFromMarkdown = (markdownRaw: string): { sections: any[] } => {
+export const parseModuleSectionsFromMarkdown = (markdownRaw: string): { sections: any[]; quizzes: any[] } => {
   const markdown = stripStyleTagsForReadiness(String(markdownRaw || '')).trim();
-  if (!markdown) return { sections: [] };
+  if (!markdown) return { sections: [], quizzes: [] };
 
   const lines = markdown.split(/\r?\n/);
   const headingRegex = /^(#{2,3})\s+(.+?)\s*$/;
@@ -243,7 +255,14 @@ const parseModuleSectionsFromMarkdown = (markdownRaw: string): { sections: any[]
     for (const line of quizLines) {
       if (/^(\d+[\).\s-]+|[-*]\s*)?(question\s*\d+|q\d+[:.)-]?)/i.test(line) || /^\d+[\).\s-]+/.test(line)) {
         if (currentQuestion && currentQuestion.question) questions.push(currentQuestion);
-        currentQuestion = { question: line.replace(/^(\d+[\).\s-]+|[-*]\s*)/i, '').trim(), options: [], correctAnswer: 0 };
+        currentQuestion = {
+          question: line
+            .replace(/^(\d+[\).\s-]+|[-*]\s*)/i, '')
+            .replace(/^(?:question\s*\d+|q\d+)\s*[:.)-]\s*/i, '')
+            .trim(),
+          options: [],
+          correctAnswer: 0,
+        };
         continue;
       }
       if (/^[a-dA-D][\).:\-]\s+/.test(line) || /^[-*]\s+/.test(line)) {
@@ -280,7 +299,7 @@ const parseModuleSectionsFromMarkdown = (markdownRaw: string): { sections: any[]
     }
   }
 
-  return { sections: sections.slice(0, 16) };
+  return { sections: sections.slice(0, 16), quizzes };
 };
 
 const generateModuleQuizzesWithClaude = async (params: {
@@ -704,6 +723,66 @@ const buildGigGroundingBlocks = async (
     'La méthodologie pilote le format pédagogique ; le GIG pilote le domaine métier et le vocabulaire terrain.',
   ];
   return { promptAppend, systemRules };
+};
+
+/**
+ * Texte réel des documents de la base de connaissances de l'opération (gig) pour la génération
+ * de contenu riche. Si le contexte liste des documents (ids ou noms), on se limite à ceux-ci ;
+ * sinon on prend tous les documents du gig. Une erreur d'accès renvoie une KB vide (le contenu
+ * produit est alors marqué « pédagogique général »).
+ */
+const loadKbDocsForGeneration = async (
+  safeGigId: mongoose.Types.ObjectId | undefined,
+  parsedContext: any
+): Promise<KbDocInput[]> => {
+  if (!safeGigId) return [];
+  try {
+    const rows: any[] = await Document.find({ gigId: safeGigId })
+      .sort({ createdAt: -1 })
+      .select('name content chunks')
+      .limit(60)
+      .lean();
+    const listed: any[] = Array.isArray(parsedContext?.knowledgeBaseDocuments) ? parsedContext.knowledgeBaseDocuments : [];
+    const ids = new Set(listed.map((d) => String(d?._id || d?.id || '')).filter(Boolean));
+    const names = new Set(listed.map((d) => String(d?.name || '').trim().toLowerCase()).filter(Boolean));
+    let selected = rows;
+    if (ids.size > 0 || names.size > 0) {
+      const subset = rows.filter((r) => ids.has(String(r._id)) || names.has(String(r.name || '').trim().toLowerCase()));
+      if (subset.length > 0) selected = subset;
+    }
+    return selected.map((r) => ({
+      name: String(r.name || 'Document'),
+      content: typeof r.content === 'string' ? r.content : '',
+      chunks: Array.isArray(r.chunks) ? r.chunks : [],
+    }));
+  } catch (err) {
+    console.warn('[module-content] KB load failed, continuing without KB:', String((err as any)?.message || err));
+    return [];
+  }
+};
+
+/** Module ciblé par la demande (« module 3 », titre, ou module courant du workflow). */
+const resolveTargetModuleIndex = (
+  modules: CompactPlanModule[],
+  moduleReference: string,
+  currentModuleIndex: number | null | undefined
+): number | null => {
+  if (modules.length === 0) return null;
+  const refNum = String(moduleReference || '').match(/module\s*(\d+)/i);
+  if (refNum) return Math.max(0, Math.min(parseInt(refNum[1], 10) - 1, modules.length - 1));
+  const norm = (t: string) => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const refKey = norm(moduleReference);
+  if (refKey) {
+    const byTitle = modules.findIndex((m) => {
+      const k = norm(m.title);
+      return k && (k === refKey || k.includes(refKey) || refKey.includes(k));
+    });
+    if (byTitle >= 0) return byTitle;
+  }
+  if (typeof currentModuleIndex === 'number' && currentModuleIndex >= 0) {
+    return Math.min(currentModuleIndex, modules.length - 1);
+  }
+  return 0;
 };
 
 const buildSessionTitle = (seedText: string): string => {
@@ -2284,6 +2363,91 @@ export const generateTrainingFromGig = async (
   }
 };
 
+/**
+ * Estimation (sans aucun appel IA) du coût en jetons de la génération du contenu riche, par module et
+ * pour le parcours, avant génération. Les modules viennent du corps de requête (`modules`), du parcours
+ * (`trainingJourneyId`) ou de la session de chat (`sessionId`). Le coût réel est débité ensuite à partir
+ * de l'usage renvoyé par le fournisseur (voir `chat`).
+ */
+export const estimateModuleContent = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { gigId, companyId, trainingJourneyId, sessionId, modules, moduleIndex } = req.body || {};
+
+    let plan: CompactPlanModule[] = toCompactPlanModules(modules);
+    const journeyOid = toObjectIdOrUndefined(trainingJourneyId);
+    if (plan.length === 0 && journeyOid) {
+      const journey: any = await TrainingJourney.findById(journeyOid).select('modulePlan').lean();
+      plan = toCompactPlanModules(journey?.modulePlan);
+    }
+    const sessionOid = toObjectIdOrUndefined(sessionId);
+    if (plan.length === 0 && sessionOid) {
+      const session: any = await TrainingChatSession.findById(sessionOid).select('modulePlan').lean();
+      plan = toCompactPlanModules(session?.modulePlan);
+    }
+    if (plan.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Aucun module à estimer : fournir modules, trainingJourneyId ou sessionId.',
+      });
+    }
+
+    const docs = await loadKbDocsForGeneration(toObjectIdOrUndefined(gigId), null);
+    const gigContextChars = (() => {
+      const snap = typeof req.body?.gigSnapshot === 'object' && req.body.gigSnapshot ? JSON.stringify(req.body.gigSnapshot) : '';
+      return snap.length;
+    })();
+    const perModule = plan.map((m, index) => {
+      const selection = selectKbPassages(docs, m);
+      const estimate = estimateModuleTokens({
+        passageChars: selection.passages.reduce((n, p) => n + p.text.length, 0),
+        gigContextChars,
+        totalModules: plan.length,
+      });
+      return {
+        index,
+        title: m.title,
+        kb: { status: selection.status, passages: selection.passages.length, docsWithText: selection.docsWithText },
+        ...estimate,
+      };
+    });
+    const total = sumEstimates(perModule);
+    const requestedIdx = Number.isInteger(Number(moduleIndex)) ? Number(moduleIndex) : null;
+    const selected =
+      requestedIdx !== null && requestedIdx >= 0 && requestedIdx < perModule.length ? perModule[requestedIdx] : null;
+
+    const billingCompanyId = String(companyId || '').trim() || undefined;
+    const gate = await assertCompanyHasAiTokens(billingCompanyId, (selected || total).minTokens);
+
+    return res.json({
+      success: true,
+      data: {
+        estimated: true,
+        modules: perModule,
+        parcours: total,
+        ...(selected ? { module: selected } : {}),
+        maxOutputTokensPerCall: getContentMaxTokens(),
+        billing: {
+          sufficient: gate.ok,
+          balance: gate.tokens,
+          firstGigFree: gate.firstGigFree === true,
+          message: gate.message,
+        },
+        assumptions: [
+          'Estimation à ±35 % : ≈ 4 caractères par jeton, 5 sections par module, longueurs de sortie moyennes.',
+          'Le coût réel est débité à partir de l’usage renvoyé par le fournisseur (entrée + sortie).',
+          'minTokens/maxTokens encadrent le coût sans / avec une régénération ciblée.',
+        ],
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 /** Liste les documents KB rattachés à un Gig (métadonnées + résumé court). */
 export const listGigKnowledgeDocuments = async (
   req: Request,
@@ -2742,13 +2906,20 @@ export const chat = async (
         moduleIdx = Math.max(0, Math.min(parseInt(refMatch[1], 10) - 1, sessionPlan.length - 1));
       }
       const existingPlanEntry = sessionPlan[moduleIdx] || {};
-      const { sections } = parseModuleSectionsFromMarkdown(cleanMarkdown);
+      const { sections, quizzes: parsedQuizzes } = parseModuleSectionsFromMarkdown(cleanMarkdown);
       if (sections.length === 0) return;
-      const generatedQuizzes = await generateModuleQuizzesWithClaude({
-        markdown: cleanMarkdown,
-        moduleTitle: String(existingPlanEntry?.title || sessionPlan[moduleIdx]?.title || '').trim(),
-        anthropicKey,
-      });
+      // Module au format riche : son quiz (5 QCM avec explications) est conservé tel quel
+      // au lieu d'être remplacé par un quiz régénéré de 3 à 5 questions.
+      const hasRichQuiz =
+        isModuleMarkdownConform(cleanMarkdown).conform &&
+        parsedQuizzes.some((q: any) => Array.isArray(q?.questions) && q.questions.length >= 5);
+      const generatedQuizzes = hasRichQuiz
+        ? parsedQuizzes.slice(0, 1)
+        : await generateModuleQuizzesWithClaude({
+            markdown: cleanMarkdown,
+            moduleTitle: String(existingPlanEntry?.title || sessionPlan[moduleIdx]?.title || '').trim(),
+            anthropicKey,
+          });
       const quizzes =
         generatedQuizzes.length > 0
           ? generatedQuizzes
@@ -3133,6 +3304,18 @@ export const chat = async (
         const moduleDetailedContent = stripStyleTagsForReadiness(
           String(lastAssistantModuleMessage?.text || '')
         ).slice(0, 250000);
+        // Seul un module conforme à la structure cible (objectifs, 4 à 6 sections, exemples,
+        // étude de cas, jeu de rôle, quiz de 5 QCM, synthèse, points d'attention, durée) peut être validé.
+        const moduleConformity = isModuleMarkdownConform(moduleDetailedContent);
+        if (!moduleConformity.conform) {
+          return res.status(409).json({
+            success: false,
+            code: 'module_content_not_conform',
+            error:
+              "Ce contenu ne respecte pas la structure attendue d'un module (objectifs, 4 à 6 sections développées, exemples, étude de cas, jeu de rôle, quiz de 5 QCM, synthèse, points d'attention, durée). Régénérez le contenu du module avant de le valider.",
+            missing: moduleConformity.missing,
+          });
+        }
         const compactPlan = toCompactPlanModules((journey as any).modulePlan);
         const workflow = normalizeWorkflowState(md.workflow, compactPlan);
         const currentIdx = Math.max(0, Math.min(workflow.currentModuleIndex, Math.max(workflow.totalModules - 1, 0)));
@@ -3708,12 +3891,8 @@ export const chat = async (
             isPlanFrozen
               ? 'PLAN LOCK: use ONLY modules and scope from the saved training plan provided in context. Do not add, rename, or reorder modules.'
               : '',
-            'Generate complete learner-facing content for all modules.',
-            'Per module include: Title, Objectives, Detailed Explanation, Examples, Hands-on Exercise, Mini Quiz (3-5), Summary, Reflection, Self-assessment (1-5).',
-            isJourneyBuilderApp(parsedContext)
-              ? 'Traduire ces rubriques en libellés français dans la sortie (ex. « Objectifs », « Explication », « Exercice », « Mini quiz », « Auto-évaluation »).'
-              : '',
-            'Keep each module under 800 words; if more depth is needed, ask which module to expand.',
+            'Generate complete, in-depth learner-facing content for all modules. There is no length limit: each module must be as developed as a real professional training manual.',
+            ...buildSingleCallStructureInstructions(resolveModuleLang(chosenLanguage || userLocaleHint)),
           ].join('\n')
         : '',
       requestedOutput === 'module_content'
@@ -3725,33 +3904,8 @@ export const chat = async (
             isPlanFrozen
               ? 'PLAN LOCK: the requested module must match an existing module from the saved plan. If not found, ask user to choose one saved module title.'
               : '',
-            'Generate only the requested module.',
-            'STRICT OUTPUT FORMAT (no extra sections, no open-ended reflection):',
-            '- ## Module X : <Titre>',
-            '- ### Section 1 : <Titre section>',
-            '- <contenu section 1>',
-            '- ### Section 2 : <Titre section>',
-            '- <contenu section 2>',
-            '- ### Section 3 : <Titre section> (optionnel)',
-            '- <contenu section 3>',
-            '- ### Quiz',
-            '- Q1 : <question>',
-            '- a) <option 1>',
-            '- b) <option 2>',
-            '- c) <option 3>',
-            '- d) <option 4>',
-            '- Réponse : <a|b|c|d>',
-            '- Q2...Q5 same format',
-            '- Minimum 2 sections, maximum 6 sections.',
-            '- Quiz must contain 3 to 5 MCQ questions.',
-            '- NEVER ask open questions to the user.',
-            '- NEVER include reflection prompts, self-assessment prompts, or "questions de consolidation".',
-            '- Do not add any content outside this structure.',
-            isJourneyBuilderApp(parsedContext)
-              ? 'Respect strict des libellés en français dans la sortie (Section, Quiz, Q1, Réponse).'
-              : '',
-            'Keep content under 600 words for a single module.',
-            'Focus on concise, operational learning content.',
+            'Generate only the requested module, in depth. There is no length limit: aim for the depth of a real professional training manual (developed explanations, concrete examples, exact wording agents can reuse).',
+            ...buildSingleCallStructureInstructions(resolveModuleLang(chosenLanguage || userLocaleHint)),
           ].join('\n')
         : '',
       requiresTypedStyle
@@ -3765,71 +3919,83 @@ export const chat = async (
         : '',
     ].filter(Boolean).join('\n');
 
-    const generateFullTrainingByModules = async (): Promise<string> => {
+    // ── Contenu riche (comportement par défaut) : deux passes par module, KB réelle, contrôle + régénération ciblée.
+    const contentLanguageCode = chosenLanguage || userLocaleHint || 'fr';
+    const richExtraSystem = [
+      chosenLanguage
+        ? `LANGUAGE CHOICE (highest priority): the user chose ${chosenLanguageLabel} for this training. Write everything in ${chosenLanguageLabel}, translating gig content when needed. Proper nouns and product names may stay as is.`
+        : '',
+      personalizationDirective,
+      ...(gigGrounding.systemRules.length
+        ? gigGrounding.systemRules
+        : ['Do not invent company/gig context not provided by user.']),
+      inferredDomain.strictTopicGuard,
+    ].filter(Boolean);
+    let moduleGenUsages: AiTokenUsage[] = [];
+    let kbDocsForGeneration: KbDocInput[] | null = null;
+    const getKbDocs = async (): Promise<KbDocInput[]> => {
+      if (kbDocsForGeneration === null) kbDocsForGeneration = await loadKbDocsForGeneration(safeGigId, parsedContext);
+      return kbDocsForGeneration;
+    };
+    const richGenerate = async (genPrompt: string, genSystem: string, maxTokens: number) =>
+      aiService.generateWithClaudeDetailed(genPrompt, genSystem, anthropicKey, maxTokens);
+
+    // Demande de modification d'un module existant : la demande et la version actuelle sont transmises à la génération.
+    const isModuleRevisionRequest =
+      isModuleIntent &&
+      /\b(modifi\w*|corrig\w*|ajout\w*|rajout\w*|retir\w*|supprim\w*|reformul\w*|am[ée]lior\w*|r[ée][ée]cri\w*|rewrite|update|change|adapt\w*|plus\s+(?:court|long|d[ée]taill\w*|simple)|enrichi\w*)\b/i.test(trimmedMessage);
+    const previousAssistantModule = isModuleRevisionRequest
+      ? stripStyleTagsForReadiness(
+          String(
+            [...(activeSession.messages || [])]
+              .reverse()
+              .find((m: any) => String(m?.role || '').toLowerCase() === 'assistant')?.text || ''
+          )
+        )
+      : '';
+
+    const generateRichModuleAt = async (index: number): Promise<string> => {
+      const planModule = planModulesForContent[index];
+      const result = await generateRichModule({
+        module: planModule as PlanModuleInput,
+        moduleNumber: index + 1,
+        totalModules: planModulesForContent.length,
+        catalog: planModulesForContent as PlanModuleInput[],
+        gigContext: gigGrounding.promptAppend,
+        kbDocs: await getKbDocs(),
+        languageCode: contentLanguageCode,
+        extraSystem: richExtraSystem,
+        generate: richGenerate,
+        userRequest: isModuleRevisionRequest && !isFullTrainingIntent ? trimmedMessage : undefined,
+        previousVersion: isModuleRevisionRequest && !isFullTrainingIntent ? previousAssistantModule : undefined,
+      });
+      moduleGenUsages.push(result.usage);
+      console.log('[module-content] rich module generated', {
+        module: planModule.title,
+        calls: result.calls,
+        kb: result.kb,
+        conform: result.conformity.ok,
+        structureIssues: result.conformity.structureIssues.map((i) => i.key),
+        sourceIssues: result.conformity.sourceIssues.map((i) => i.key),
+        regenerated: result.regenerated,
+        totalTokens: result.usage.totalTokens,
+      });
+      return result.markdown;
+    };
+
+    const generateFullTrainingByModules = async (onModule?: (chunk: string) => void): Promise<string> => {
       if (planModulesForContent.length === 0) {
         return '';
       }
 
-      const catalog = planModulesForContent.map((m, idx) => ({
-        module: idx + 1,
-        title: m.title,
-        objectifs: m.objectifs.slice(0, 8),
-        keyTopics: m.keyTopics.slice(0, 12),
-        durationMinutes: m.durationMinutes,
-      }));
-
       const outputs: string[] = [];
       for (let i = 0; i < planModulesForContent.length; i++) {
         const module = planModulesForContent[i];
-        const modulePrompt = [
-          ...(isJourneyBuilderApp(parsedContext)
-            ? [chosenLanguage ? `LANGUAGE: write the whole module in ${chosenLanguageLabel} (### titles, lists, quiz).` : 'LANGUE OBLIGATOIRE: rédiger tout le module en français (titres ###, listes, quiz).']
-            : []),
-          'Generate learner-facing content for ONE module only.',
-          `Module index: ${i + 1}/${planModulesForContent.length}`,
-          '',
-          'LOCKED TRAINING PLAN (all modules, do not drift):',
-          JSON.stringify(catalog),
-          '',
-          'TARGET MODULE (must match exactly):',
-          JSON.stringify({
-            module: i + 1,
-            title: module.title,
-            objectifs: module.objectifs,
-            keyTopics: module.keyTopics,
-            durationMinutes: module.durationMinutes,
-          }),
-          '',
-          'Required output format (markdown only):',
-          `## ${module.title}`,
-          '### 🎯 Objectifs',
-          '- Reprise fidèle et concise des objectifs du module',
-          '### 📚 Explication détaillée',
-          '- Explications pédagogiques structurées basées sur les key topics du module',
-          '### 🧪 Exemple(s) pratique(s)',
-          '- Exemples opérationnels ancrés sur ce module',
-          '### ✅ Mini quiz (3-5 questions)',
-          '- Questions + réponses attendues courtes',
-          '### 📝 Auto-évaluation',
-          '- 3-5 critères notés 1-5',
-          '',
-          'Hard constraints:',
-          '- Do not add/remove/rename modules.',
-          '- Stay strictly within this module title/objectifs/keyTopics.',
-          '- Avoid references to unrelated modules.',
-          '- Keep this module under ~700 words.',
-        ].join('\n');
-
-        const moduleSystemPrompt = [
-          systemPrompt,
-          'STRICT MODULE EXECUTION: produce content ONLY for the provided target module.',
-        ].join('\n');
-
         let moduleText = '';
         let lastErr: any;
         for (let attempt = 0; attempt < 2; attempt++) {
           try {
-            moduleText = await aiService.generateWithClaude(modulePrompt, moduleSystemPrompt, anthropicKey, 2400);
+            moduleText = await generateRichModuleAt(i);
             if (String(moduleText || '').trim()) break;
           } catch (e) {
             lastErr = e;
@@ -3839,6 +4005,7 @@ export const chat = async (
         if (!String(moduleText || '').trim()) {
           const fallback = `## ${module.title}\n\nLe contenu de ce module n'a pas pu être généré automatiquement pour le moment. Réessayez uniquement ce module avec: \`Donne le contenu du ${module.title}\`.`;
           outputs.push(fallback);
+          if (onModule) onModule(`${outputs.length > 1 ? '\n\n---\n\n' : ''}${fallback}`);
           if (lastErr) {
             console.warn('[chat] module generation failed', { module: module.title, error: String((lastErr as any)?.message || lastErr) });
           }
@@ -3846,9 +4013,37 @@ export const chat = async (
         }
 
         outputs.push(String(moduleText).trim());
+        if (onModule) onModule(`${outputs.length > 1 ? '\n\n---\n\n' : ''}${String(moduleText).trim()}`);
       }
 
       return outputs.join('\n\n---\n\n').trim();
+    };
+
+    /** Module visé par la demande « contenu du module X » lorsque le plan est connu. */
+    const richSingleModuleIndex: number | null = isModuleIntent
+      ? resolveTargetModuleIndex(
+          planModulesForContent,
+          requestedModuleReference,
+          normalizeWorkflowState((parsedContext as any)?.workflowState, planModulesForContent)?.currentModuleIndex
+        )
+      : null;
+
+    /** Estimation (sans appel IA) des jetons du contenu demandé : sert au contrôle de solde avant génération. */
+    const estimateRequestedContent = async () => {
+      if (planModulesForContent.length === 0 || !(isFullTrainingIntent || richSingleModuleIndex !== null)) return null;
+      const docs = await getKbDocs();
+      const indices = isFullTrainingIntent
+        ? planModulesForContent.map((_, i) => i)
+        : [richSingleModuleIndex as number];
+      return sumEstimates(
+        indices.map((i) =>
+          estimateModuleTokens({
+            passageChars: selectKbPassages(docs, planModulesForContent[i]).passages.reduce((n, x) => n + x.text.length, 0),
+            gigContextChars: gigGrounding.promptAppend.length,
+            totalModules: planModulesForContent.length,
+          })
+        )
+      );
     };
 
     const isWeakPlanDraft = (value: string): boolean => {
@@ -4028,34 +4223,63 @@ export const chat = async (
     const streamEnabled = String(req.query.stream ?? 'true').toLowerCase() !== 'false';
     const shouldValidateDomain = inferredDomain.kbKeywords.length > 0;
     let lastAiUsage: AiTokenUsage | null = null;
-    if (!streamEnabled) {
-      let response = '';
+    let usedRichContent = false;
+    let streamedChars = 0;
+
+    /**
+     * Génération du contenu de formation (parcours complet ou module). Contenu riche par défaut ;
+     * repli sur un appel unique (sans plafond de mots) si le plan du module est inconnu ou si la
+     * génération riche échoue. L'usage renvoyé par le fournisseur est cumulé pour la facturation.
+     */
+    const runContentGeneration = async (sys: string, streamSink?: (chunk: string) => void): Promise<string> => {
+      moduleGenUsages = [];
       if (isFullTrainingIntent && planModulesForContent.length > 0) {
-        response = await generateFullTrainingByModules();
-        lastAiUsage = fallbackEstimatedUsage(prompt, systemPrompt, response);
-      } else {
-        const detailed = await aiService.generateWithClaudeDetailed(
-          prompt,
-          systemPrompt,
-          anthropicKey
-        );
-        response = detailed.text;
-        lastAiUsage = detailed.usage;
+        usedRichContent = true;
+        const text = await generateFullTrainingByModules(streamSink);
+        lastAiUsage = moduleGenUsages.length > 0 ? sumUsage(moduleGenUsages) : fallbackEstimatedUsage(prompt, sys, text);
+        return text;
       }
-      if (shouldValidateDomain && isKbTopicMismatch(String(response || ''), inferredDomain.kbKeywords)) {
-        const correctiveSystemPrompt = `${systemPrompt} CRITICAL DOMAIN LOCK: ${inferredDomain.strictTopicGuard} If draft is off-domain, regenerate fully in the correct domain.`;
-        if (isFullTrainingIntent && planModulesForContent.length > 0) {
-          response = await generateFullTrainingByModules();
-          lastAiUsage = fallbackEstimatedUsage(prompt, correctiveSystemPrompt, response);
-        } else {
-          const detailed = await aiService.generateWithClaudeDetailed(
-            prompt,
-            correctiveSystemPrompt,
-            anthropicKey
-          );
-          response = detailed.text;
-          lastAiUsage = detailed.usage;
+      if (richSingleModuleIndex !== null) {
+        let richText = '';
+        try {
+          richText = await generateRichModuleAt(richSingleModuleIndex);
+        } catch (e) {
+          console.warn('[chat] rich module generation failed, falling back to single call:', String((e as any)?.message || e));
         }
+        if (String(richText || '').trim()) {
+          usedRichContent = true;
+          lastAiUsage = sumUsage(moduleGenUsages);
+          return richText;
+        }
+      }
+      const detailed = await aiService.generateWithClaudeDetailed(prompt, sys, anthropicKey);
+      lastAiUsage = moduleGenUsages.length > 0 ? sumUsage([...moduleGenUsages, detailed.usage]) : detailed.usage;
+      return detailed.text;
+    };
+
+    // Estimation + contrôle de solde AVANT génération (le contenu riche consomme nettement plus de jetons).
+    const contentEstimate = await estimateRequestedContent();
+    if (contentEstimate) {
+      const balanceGate = await assertCompanyHasAiTokens(billingCompanyId, contentEstimate.minTokens);
+      if (!balanceGate.ok) {
+        return res.status(402).json({
+          success: false,
+          error: 'insufficient_tokens',
+          message: balanceGate.message,
+          data: { tokens: balanceGate.tokens, estimate: contentEstimate },
+        });
+      }
+    }
+
+    if (!streamEnabled) {
+      let response = await runContentGeneration(systemPrompt);
+      if (
+        shouldValidateDomain &&
+        !usedRichContent &&
+        isKbTopicMismatch(String(response || ''), inferredDomain.kbKeywords)
+      ) {
+        const correctiveSystemPrompt = `${systemPrompt} CRITICAL DOMAIN LOCK: ${inferredDomain.strictTopicGuard} If draft is off-domain, regenerate fully in the correct domain.`;
+        response = await runContentGeneration(correctiveSystemPrompt);
       }
       if (isPlanIntent && isWeakPlanDraft(String(response || ''))) {
         const correctivePlanPrompt = `${systemPrompt}
@@ -4136,6 +4360,7 @@ Regenerate now with strict compliance.
           billed: charge.billed,
           balance: charge.tokens,
         },
+        ...(contentEstimate ? { estimate: contentEstimate } : {}),
       });
     }
 
@@ -4153,33 +4378,18 @@ Regenerate now with strict compliance.
     const forceLockedIntentResponse = isPlanIntent || isModuleIntent || isFullTrainingIntent;
     if (shouldValidateDomain || forceLockedIntentResponse) {
       // For strict domain lock, generate once then stream-safe write validated content.
-      let response = '';
-      if (isFullTrainingIntent && planModulesForContent.length > 0) {
-        response = await generateFullTrainingByModules();
-        lastAiUsage = fallbackEstimatedUsage(prompt, systemPrompt, response);
-      } else {
-        const detailed = await aiService.generateWithClaudeDetailed(
-          prompt,
-          systemPrompt,
-          anthropicKey
-        );
-        response = detailed.text;
-        lastAiUsage = detailed.usage;
-      }
-      if (isKbTopicMismatch(String(response || ''), inferredDomain.kbKeywords)) {
-        const correctiveSystemPrompt = `${systemPrompt} CRITICAL DOMAIN LOCK: ${inferredDomain.strictTopicGuard} If draft is off-domain, regenerate fully in the correct domain.`;
-        if (isFullTrainingIntent && planModulesForContent.length > 0) {
-          response = await generateFullTrainingByModules();
-          lastAiUsage = fallbackEstimatedUsage(prompt, correctiveSystemPrompt, response);
-        } else {
-          const detailed = await aiService.generateWithClaudeDetailed(
-            prompt,
-            correctiveSystemPrompt,
-            anthropicKey
-          );
-          response = detailed.text;
-          lastAiUsage = detailed.usage;
+      // Parcours complet : chaque module est écrit dans le flux dès qu'il est prêt (évite un silence de plusieurs minutes).
+      const streamSink = (chunk: string) => {
+        streamedChars += chunk.length;
+        res.write(chunk);
+        if (typeof (res as any).flush === 'function') {
+          (res as any).flush();
         }
+      };
+      let response = await runContentGeneration(systemPrompt, streamSink);
+      if (!usedRichContent && isKbTopicMismatch(String(response || ''), inferredDomain.kbKeywords)) {
+        const correctiveSystemPrompt = `${systemPrompt} CRITICAL DOMAIN LOCK: ${inferredDomain.strictTopicGuard} If draft is off-domain, regenerate fully in the correct domain.`;
+        response = await runContentGeneration(correctiveSystemPrompt);
       }
       if (isPlanIntent && isWeakPlanDraft(String(response || ''))) {
         const correctivePlanPrompt = `${systemPrompt}
@@ -4201,7 +4411,7 @@ Regenerate now with strict compliance.
         lastAiUsage = detailed.usage;
       }
       fullResponse = String(response || '');
-      res.write(fullResponse);
+      res.write(fullResponse.slice(streamedChars));
       if (typeof (res as any).flush === 'function') {
         (res as any).flush();
       }
