@@ -34,6 +34,7 @@ import {
 } from '../utils/aiTokenBilling';
 import { KbDocInput, selectKbPassages } from '../services/knowledgePassages';
 import { upsertJourneyModuleContent } from '../services/moduleReviewService';
+import { sortPlanMarkdownByPhase } from '../utils/planPhaseOrder';
 import {
   PlanModuleInput,
   buildSingleCallStructureInstructions,
@@ -3867,8 +3868,10 @@ export const chat = async (
               : 'Apply internally a complete 360-degree coverage of the gig domain: fundamentals, product/offer knowledge, sector rules and compliance where they apply, sales or service process, customer relationship, tools, and soft skills.',
             'Adapt the vocabulary, products, regulations and examples to the domain of the gig (never import another sector\'s rules, e.g. do not add health-insurance or other sector content to an unrelated gig).',
             'Output markdown only and start directly with Module 1.',
+            'MODULE ORDER (mandatory, takes precedence over the order in which pillars or topics are listed): sequence the modules logically — 1) context and fundamentals, 2) product / offer / guarantees, 3) prospecting techniques and objection handling, 4) legal framework and compliance, 5) follow-up (customer follow-up, indicators, continuous improvement). Never put a legal/compliance or follow-up module in the middle of the sales-technique modules.',
             'For each module, output ONLY these parts (and nothing else):',
             '- ## Module N : <Titre du module>',
+            '- Phase : <contexte|offre|prospection|conformite|suivi>   (one line right under the module title, exactly one of these five words, no other text)',
             '- ### 🎯 Objectifs',
             '- 3 to 5 bullet points',
             '- ### 📌 Key Topics',
@@ -4291,6 +4294,7 @@ export const chat = async (
 HARD PLAN ENFORCEMENT:
 Regenerate now with strict compliance.
 - Start at "## Module 1: <titre>"
+- Under each module title add one line "Phase : <contexte|offre|prospection|conformite|suivi>" and order modules contexte → offre → prospection → conformite → suivi
 - Minimum 3 modules (4+ if duration allows), progressive
 - Each module MUST use this exact skeleton (### headings + "- " bullets only under each):
   ### 🎯 Objectifs (min 3 bullets)
@@ -4305,6 +4309,7 @@ Regenerate now with strict compliance.
         response = detailed.text;
         lastAiUsage = detailed.usage;
       }
+      if (isPlanIntent) response = sortPlanMarkdownByPhase(String(response || ''));
       let finalResponse = await ensureVisualResponseContract(
         String(response || ''),
         selectedDuration,
@@ -4401,6 +4406,7 @@ Regenerate now with strict compliance.
 HARD PLAN ENFORCEMENT:
 Regenerate now with strict compliance.
 - Start at "## Module 1: <titre>"
+- Under each module title add one line "Phase : <contexte|offre|prospection|conformite|suivi>" and order modules contexte → offre → prospection → conformite → suivi
 - Minimum 3 modules (4+ if duration allows), progressive
 - Each module MUST use this exact skeleton (### headings + "- " bullets only under each):
   ### 🎯 Objectifs (min 3 bullets)
@@ -4415,6 +4421,7 @@ Regenerate now with strict compliance.
         response = detailed.text;
         lastAiUsage = detailed.usage;
       }
+      if (isPlanIntent) response = sortPlanMarkdownByPhase(String(response || ''));
       fullResponse = String(response || '');
       res.write(fullResponse.slice(streamedChars));
       if (typeof (res as any).flush === 'function') {
