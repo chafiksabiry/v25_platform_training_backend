@@ -2971,7 +2971,7 @@ export const chat = async (
           String(existingModule?.title || '').trim() ||
           String(sessionPlan[moduleIdx]?.title || '').trim() ||
           `Module ${moduleIdx + 1}`,
-        description: cleanMarkdown.slice(0, 50000),
+        description: cleanMarkdown.slice(0, 250000),
         sections,
         quizzes: safeJourneyQuizzes,
         order: typeof existingModule?.order === 'number' ? existingModule.order : moduleIdx + 1,

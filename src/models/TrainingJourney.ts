@@ -65,6 +65,11 @@ export interface IModulePlanItem {
   objectifs?: string[];
   keyTopics?: string[];
   durationMinutes?: number;
+  /** Revue du contenu du module (route PATCH .../modules/:index/review-status). */
+  isValid?: boolean;
+  reviewStatus?: 'validated' | 'to_review' | 'changes_requested';
+  reviewNote?: string;
+  reviewedAt?: Date;
 }
 
 /** Géométries décoratives générées par l’IA (coordonnées en % de la slide 0–100). */
@@ -261,6 +266,10 @@ const modulePlanItemSchema = new Schema<IModulePlanItem>(
     objectifs: [{ type: String }],
     keyTopics: [{ type: String }],
     durationMinutes: { type: Number },
+    isValid: { type: Boolean },
+    reviewStatus: { type: String, enum: ['validated', 'to_review', 'changes_requested'] },
+    reviewNote: { type: String },
+    reviewedAt: { type: Date },
   },
   { _id: false }
 );
