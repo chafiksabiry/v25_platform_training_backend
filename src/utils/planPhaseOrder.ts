@@ -3,7 +3,7 @@
  *
  * Le prompt du plan impose une ligne « Phase : <contexte|offre|prospection|conformite|suivi> » sous le titre de
  * chaque module. Cette ligne est lue ici, les modules sont triés de façon STABLE par rang de phase
- * (contexte → offre → prospection → conformité → suivi), puis renumérotés. Les modules sans phase reconnue
+ * (contexte → offre → prospection → conformité → suivi), puis renumérotés. Sans ligne de phase, la phase est déduite du titre (mots-clés) ; les modules sans phase reconnue
  * gardent leur position ; seuls les modules avec phase se répartissent dans les positions restantes.
  * Fonction pure, sans effet de bord.
  */
@@ -34,6 +34,45 @@ export const parseModulePhase = (blockLines: string[]): PlanPhase | null => {
   return null;
 };
 
+/**
+ * Repli : phase déduite des mots-clés du TITRE quand le modèle n'a pas émis de ligne « Phase : … ».
+ * Le mot-clé qui apparaît le plus tôt dans le titre l'emporte. « conformité » = règles légales de la vente et
+ * protection du client ; le fonctionnement du système de santé / de la sécurité sociale relève du contexte.
+ */
+const PHASE_KEYWORDS: Record<PlanPhase, string[]> = {
+  contexte: [
+    'securite sociale', 'systeme de sante', 'systeme de soin', 'assurance maladie', 'protection sociale', 'contexte',
+    'marche', 'introduction', 'fondamentaux', 'fondamentale', 'generalite', 'panorama', 'enjeux', 'secteur',
+  ],
+  offre: ['garantie', 'produit', 'offre', 'tarif', 'formule', 'gamme'],
+  prospection: ['prospection', 'appel', 'objection', 'argumentaire', 'decouverte', 'closing', 'negociation', 'vente'],
+  conformite: [
+    'legal', 'legaux', 'conformite', 'rgpd', 'demarchage', 'reglementation', 'reglementaire', 'deontolog',
+    'protection du client', 'devoir de conseil', 'consentement',
+  ],
+  suivi: ['suivi', 'kpi', 'optimisation', 'indicateur', 'amelioration continue', 'bilan', 'fidelisation', 'performance'],
+};
+
+const normalizeText = (t: string): string =>
+  t
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+export const inferPhaseFromTitle = (title: string): PlanPhase | null => {
+  const text = ` ${normalizeText(title)}`;
+  let best: { phase: PlanPhase; pos: number } | null = null;
+  for (const phase of PLAN_PHASE_ORDER) {
+    for (const kw of PHASE_KEYWORDS[phase]) {
+      const pos = text.indexOf(` ${kw}`);
+      if (pos >= 0 && (best === null || pos < best.pos)) best = { phase, pos };
+    }
+  }
+  return best ? best.phase : null;
+};
+
 const isPhaseLine = (line: string): boolean => {
   const m = line.match(PHASE_LINE_RE);
   return Boolean(m && normalizePhase(m[1]));
@@ -56,7 +95,10 @@ export const sortPlanMarkdownByPhase = (markdown: string, options?: { stripPhase
 
   const preamble = lines.slice(0, starts[0]);
   const blocks = starts.map((from, s) => lines.slice(from, s + 1 < starts.length ? starts[s + 1] : lines.length));
-  const phases = blocks.map((b) => parseModulePhase(b));
+  // Phase émise par le modèle, sinon déduite du titre ; à défaut le module garde sa place.
+  const phases = blocks.map(
+    (b) => parseModulePhase(b) ?? inferPhaseFromTitle(b[0].replace(MODULE_HEADING_RE, '').replace(/^\s*[:\-–—]\s*/, ''))
+  );
   if (phases.every((p) => p === null)) return raw;
 
   // Positions occupées par des modules sans phase : inchangées. Les autres reçoivent les modules phasés triés.

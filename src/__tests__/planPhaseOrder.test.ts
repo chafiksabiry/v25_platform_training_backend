@@ -1,23 +1,23 @@
-import { sortPlanMarkdownByPhase, parseModulePhase } from '../utils/planPhaseOrder';
+import { sortPlanMarkdownByPhase, parseModulePhase, inferPhaseFromTitle } from '../utils/planPhaseOrder';
 
 const mod = (n: number, title: string, phase?: string) =>
   [`## Module ${n} : ${title}`, ...(phase ? [`Phase : ${phase}`] : []), '### 🎯 Objectifs', '- Objectif A', '- Objectif B', '- Objectif C', '### 📌 Key Topics', '- Sujet 1', '- Sujet 2', '- Sujet 3', ''].join('\n');
 const titles = (md: string) => Array.from(md.matchAll(/^## Module (\d+) : (.+)$/gm)).map((m) => `${m[1]}:${m[2]}`);
 
 describe('ordre logique des modules par phase', () => {
-  it('place la conformité (sécurité sociale) après la prospection, pas au milieu', () => {
+  it('la sécurité sociale (contexte) vient en tête, avant l’offre et la prospection ; la conformité légale reste après la prospection', () => {
     const md = [
-      mod(1, 'Contexte du marché', 'contexte'),
-      mod(2, 'Sécurité sociale et cadre légal', 'conformite'),
-      mod(3, 'Offres et garanties', 'offre'),
-      mod(4, 'Prospection et objections', 'prospection'),
+      mod(1, 'Offres et garanties', 'offre'),
+      mod(2, 'Système de sécurité sociale', 'contexte'),
+      mod(3, 'Prospection et objections', 'prospection'),
+      mod(4, 'Règles légales de la vente', 'conformite'),
       mod(5, 'Suivi client', 'suivi'),
     ].join('\n');
     expect(titles(sortPlanMarkdownByPhase(md))).toEqual([
-      '1:Contexte du marché',
+      '1:Système de sécurité sociale',
       '2:Offres et garanties',
       '3:Prospection et objections',
-      '4:Sécurité sociale et cadre légal',
+      '4:Règles légales de la vente',
       '5:Suivi client',
     ]);
   });
@@ -66,3 +66,51 @@ describe('ordre logique des modules par phase', () => {
     expect(plan.map((m: any) => m.title)).toEqual(['Module 1 - Contexte', 'Module 2 - Offre santé', 'Module 3 - Cadre légal']);
   });
 });
+
+describe('repli : phase déduite du titre (sans ligne Phase)', () => {
+  it.each([
+    ['Système de sécurité sociale', 'contexte'],
+    ['Le système de santé en France', 'contexte'],
+    ['Introduction et marché', 'contexte'],
+    ['Garanties et produits', 'offre'],
+    ['Notre offre santé', 'offre'],
+    ['Techniques d’appel et objections', 'prospection'],
+    ['Prospection téléphonique', 'prospection'],
+    ['Cadre légal et RGPD', 'conformite'],
+    ['Démarchage : règles et consentement', 'conformite'],
+    ['Suivi client et KPI', 'suivi'],
+    ['Optimisation continue', 'suivi'],
+  ])('« %s » → %s', (title, phase) => {
+    expect(inferPhaseFromTitle(title)).toBe(phase);
+  });
+
+  it('titre sans mot-clé → pas de phase ; le mot-clé le plus tôt l’emporte', () => {
+    expect(inferPhaseFromTitle('Posture professionnelle')).toBeNull();
+    expect(inferPhaseFromTitle('Sécurité sociale et cadre légal')).toBe('contexte');
+  });
+
+  it('trie un plan SANS ligne Phase d’après les titres (sécurité sociale en tête)', () => {
+    const md = [
+      mod(1, 'Garanties et produits'),
+      mod(2, 'Techniques d’appel et objections'),
+      mod(3, 'Système de sécurité sociale'),
+      mod(4, 'Suivi client et KPI'),
+      mod(5, 'Cadre légal et RGPD'),
+    ].join('\n');
+    expect(titles(sortPlanMarkdownByPhase(md)).map((t) => t.split(':')[1])).toEqual([
+      'Système de sécurité sociale',
+      'Garanties et produits',
+      'Techniques d’appel et objections',
+      'Cadre légal et RGPD',
+      'Suivi client et KPI',
+    ]);
+  });
+
+  it('la phase émise par le modèle prime sur la déduction ; titre non reconnu garde sa place', () => {
+    const md = [mod(1, 'Posture professionnelle'), mod(2, 'Garanties', 'contexte'), mod(3, 'Suivi client')].join('\n');
+    expect(titles(sortPlanMarkdownByPhase(md)).map((t) => t.split(':')[1])).toEqual(['Posture professionnelle', 'Garanties', 'Suivi client']);
+    const md2 = [mod(1, 'Suivi client'), mod(2, 'Posture professionnelle'), mod(3, 'Garanties', 'contexte')].join('\n');
+    expect(titles(sortPlanMarkdownByPhase(md2)).map((t) => t.split(':')[1])).toEqual(['Garanties', 'Posture professionnelle', 'Suivi client']);
+  });
+});
+
