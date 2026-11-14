@@ -96,3 +96,34 @@ export const applyModuleReview = (
 
   return { httpStatus: 200, body: { success: true, modules: summarizeReview(journey) } };
 };
+
+/**
+ * Enregistre le contenu généré d'un module dans `journey.modules` (même champ pour « module seul » et pour
+ * chaque module d'un parcours complet) : description = markdown intégral, sections, quiz.
+ */
+export const upsertJourneyModuleContent = (
+  modules: any[],
+  moduleIdx: number,
+  content: { markdown: string; sections: any[]; quizzes: any[]; planTitles: string[] }
+): any[] => {
+  const next = [...modules];
+  while (next.length <= moduleIdx) {
+    next.push({
+      title: content.planTitles[next.length] || `Module ${next.length + 1}`,
+      sections: [],
+      quizzes: [],
+      order: next.length + 1,
+    });
+  }
+  const existing = plain(next[moduleIdx]) || {};
+  next[moduleIdx] = {
+    ...existing,
+    title: String(existing.title || '').trim() || content.planTitles[moduleIdx] || `Module ${moduleIdx + 1}`,
+    description: content.markdown.slice(0, 250000),
+    sections: content.sections,
+    quizzes:
+      content.quizzes.length > 0 ? content.quizzes : Array.isArray(existing.quizzes) ? existing.quizzes : [],
+    order: typeof existing.order === 'number' ? existing.order : moduleIdx + 1,
+  };
+  return next;
+};

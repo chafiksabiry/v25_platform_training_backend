@@ -1,4 +1,4 @@
-import { applyModuleReview, getStoredModuleMarkdown } from '../services/moduleReviewService';
+import { applyModuleReview, getStoredModuleMarkdown, upsertJourneyModuleContent } from '../services/moduleReviewService';
 import { generateRichModule, GenerateFn } from '../services/richModuleContent';
 
 // Module conforme produit par le pipeline riche avec un modèle simulé (aucune IA réelle).
@@ -89,5 +89,37 @@ describe('revue de module sur contenu stocké', () => {
     expect(applyModuleReview(journey, { index: 2, status: 'ok', companyId: 'c1' }).body.code).toBe('invalid_status');
     expect(applyModuleReview(null, { index: 0, status: 'validated', companyId: 'c1' }).httpStatus).toBe(404);
     expect(journey.modulePlan[2].isValid).toBe(false);
+  });
+});
+
+describe('parcours complet : chaque module persisté puis relisible', () => {
+  it('les 3 modules persistés au fil de la génération sont validables un par un', async () => {
+    let modules: any[] = [];
+    const planTitles = ['Module A', 'Module B', 'Module C'];
+    for (let i = 0; i < 3; i++) {
+      const markdown = await gen(planTitles[i]); // simule la sortie streamée du module i
+      modules = upsertJourneyModuleContent(modules, i, { markdown, sections: [{ title: 's', content: 'c' }], quizzes: [], planTitles });
+    }
+    expect(modules.map((m) => m.title)).toEqual(planTitles);
+    const journey: any = {
+      companyId: 'c1',
+      modulePlan: planTitles.map((title) => ({ title })),
+      modules,
+      markModified: jest.fn(),
+    };
+    for (const i of [2, 0, 1]) {
+      const r = applyModuleReview(journey, { index: i, status: 'validated', companyId: 'c1' });
+      expect(r.httpStatus).toBe(200);
+    }
+    expect(journey.modulePlan.every((m: any) => m.isValid === true)).toBe(true);
+  });
+
+  it('conserve les champs existants du module et son quiz quand aucun nouveau quiz', async () => {
+    const out = upsertJourneyModuleContent(
+      [{ title: 'Titre existant', order: 7, quizzes: [{ title: 'Q' }], imageUrl: 'x' }],
+      0,
+      { markdown: 'md', sections: [], quizzes: [], planTitles: ['Autre'] }
+    );
+    expect(out[0]).toMatchObject({ title: 'Titre existant', order: 7, imageUrl: 'x', description: 'md', quizzes: [{ title: 'Q' }] });
   });
 });

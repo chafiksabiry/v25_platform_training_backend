@@ -33,6 +33,7 @@ import {
   resolveUsageOrEstimate,
 } from '../utils/aiTokenBilling';
 import { KbDocInput, selectKbPassages } from '../services/knowledgePassages';
+import { upsertJourneyModuleContent } from '../services/moduleReviewService';
 import {
   PlanModuleInput,
   buildSingleCallStructureInstructions,
@@ -2887,6 +2888,14 @@ export const chat = async (
 
     const persistGeneratedModuleContent = async (assistantMessageText: string): Promise<void> => {
       if (requestedOutput !== 'module_content') return;
+      await persistModuleMarkdownAt(assistantMessageText, null);
+    };
+
+    /**
+     * Enregistre le contenu d'un module (session + parcours). `forcedModuleIdx` : index imposé (parcours
+     * complet, module par module) ; null → déduit de la référence demandée / du workflow (module seul).
+     */
+    const persistModuleMarkdownAt = async (assistantMessageText: string, forcedModuleIdx: number | null): Promise<void> => {
       const linkedJourneyId =
         toObjectIdOrUndefined(parsedContext?.trainingJourneyId) ||
         toObjectIdOrUndefined(req.body?.trainingJourneyId);
@@ -2895,7 +2904,11 @@ export const chat = async (
       const cleanMarkdown = stripStyleTagsForReadiness(String(assistantMessageText || '')).slice(0, 250000);
       if (!cleanMarkdown || cleanMarkdown.length < 80) return;
 
-      const sessionPlan = materializeModulePlanEntries(Array.isArray((activeSession as any).modulePlan) ? (activeSession as any).modulePlan : []);
+      let sessionPlan = materializeModulePlanEntries(Array.isArray((activeSession as any).modulePlan) ? (activeSession as any).modulePlan : []);
+      // Parcours complet : le plan peut ne venir que du parcours enregistré (pas encore copié sur la session).
+      if (sessionPlan.length === 0 && forcedModuleIdx !== null) {
+        sessionPlan = materializeModulePlanEntries(planModulesForContent);
+      }
       if (sessionPlan.length === 0) return;
 
       const moduleRef = String(parsedContext?.requestedModuleReference || '').trim();
@@ -2904,6 +2917,9 @@ export const chat = async (
       let moduleIdx = typeof wf.currentModuleIndex === 'number' && wf.currentModuleIndex >= 0 ? wf.currentModuleIndex : 0;
       if (refMatch) {
         moduleIdx = Math.max(0, Math.min(parseInt(refMatch[1], 10) - 1, sessionPlan.length - 1));
+      }
+      if (forcedModuleIdx !== null) {
+        moduleIdx = Math.max(0, Math.min(forcedModuleIdx, sessionPlan.length - 1));
       }
       const existingPlanEntry = sessionPlan[moduleIdx] || {};
       const { sections, quizzes: parsedQuizzes } = parseModuleSectionsFromMarkdown(cleanMarkdown);
@@ -2948,34 +2964,16 @@ export const chat = async (
 
       const journeyDoc = await TrainingJourney.findById(linkedJourneyId);
       if (!journeyDoc) return;
-      const modules = Array.isArray((journeyDoc as any).modules) ? [...((journeyDoc as any).modules as any[])] : [];
-      while (modules.length <= moduleIdx) {
-        const planTitle = String(sessionPlan[modules.length]?.title || '').trim() || `Module ${modules.length + 1}`;
-        modules.push({
-          title: planTitle,
-          sections: [],
-          quizzes: [],
-          order: modules.length + 1,
-        });
-      }
-      const existingModule = modules[moduleIdx] || {};
-      const safeJourneyQuizzes =
-        generatedQuizzes.length > 0
-          ? generatedQuizzes
-          : Array.isArray(existingModule?.quizzes)
-            ? existingModule.quizzes
-            : [];
-      modules[moduleIdx] = {
-        ...existingModule,
-        title:
-          String(existingModule?.title || '').trim() ||
-          String(sessionPlan[moduleIdx]?.title || '').trim() ||
-          `Module ${moduleIdx + 1}`,
-        description: cleanMarkdown.slice(0, 250000),
-        sections,
-        quizzes: safeJourneyQuizzes,
-        order: typeof existingModule?.order === 'number' ? existingModule.order : moduleIdx + 1,
-      };
+      const modules = upsertJourneyModuleContent(
+        Array.isArray((journeyDoc as any).modules) ? [...((journeyDoc as any).modules as any[])] : [],
+        moduleIdx,
+        {
+          markdown: cleanMarkdown,
+          sections,
+          quizzes: generatedQuizzes,
+          planTitles: sessionPlan.map((m: any) => String(m?.title || '').trim()),
+        }
+      );
       (journeyDoc as any).modules = modules;
       await journeyDoc.save();
     };
@@ -4013,6 +4011,13 @@ export const chat = async (
         }
 
         outputs.push(String(moduleText).trim());
+        // Chaque module du parcours est enregistré dès qu'il est généré (même champ que module_content),
+        // pour que la revue d'un parcours généré en une fois soit utilisable.
+        try {
+          await persistModuleMarkdownAt(String(moduleText).trim(), i);
+        } catch (persistErr) {
+          console.warn('[module-content] persist failed', { module: module.title, error: String((persistErr as any)?.message || persistErr) });
+        }
         if (onModule) onModule(`${outputs.length > 1 ? '\n\n---\n\n' : ''}${String(moduleText).trim()}`);
       }
 
