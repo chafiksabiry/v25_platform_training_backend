@@ -25,6 +25,11 @@ router.post(
 );
 
 router.post(
+  '/module-content/estimate',
+  aiController.estimateModuleContent
+);
+
+router.post(
   '/generate-podcast-script',
   aiController.generatePodcastScript
 );

@@ -193,7 +193,7 @@ class DocumentAnalysisService {
         Durée globale : ${meta.duration}
         
         Pour le module spécifique suivant, génère les sessions détaillées et les sections de contenu associées.
-        CRITIQUE: Pour éviter de dépasser la limite de tokens, tu DOIS te limiter à MAXIMUM 2 sections et 1 quiz de 3 questions maximum. Le contenu doit être concis (150 mots max par section).
+        Produis un contenu riche et approfondi : 4 à 6 sections développées (explications, exemples concrets) et 1 quiz de 5 questions à choix multiples avec explications. Aucune limite de longueur par section.
         
         Réponds en JSON valide uniquement, avec cette structure exacte (SANS commentaires), sans texte avant ou après :
         {
@@ -206,7 +206,7 @@ class DocumentAnalysisService {
             "sections": [
               {
                 "title": "Titre explicite",
-                "content": "Contenu pédagogique concis en Markdown (100-150 mots max)",
+                "content": "Contenu pédagogique développé en Markdown (explications, exemples concrets, cas pratiques)",
                 "type": "text",
                 "duration": 20,
                 "imageDescription": "Description visuelle détaillée pour génération d'image"

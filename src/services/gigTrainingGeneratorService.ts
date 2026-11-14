@@ -275,15 +275,15 @@ class GigTrainingGeneratorService {
         Pour le module décrit ci-dessous UNIQUEMENT, génère les sessions détaillées.
         TRÈS IMPORTANT : Inspire-toi DIRECTEMENT des détails techniques de la BASE DE CONNAISSANCES pour le contenu des sections.
 
-        CONTRAINTES (obligatoires pour tenir dans la limite de tokens) :
-        - Maximum 3 sections par module.
-        - Maximum 150 mots par section (Markdown concis).
-        - Un seul quiz avec exactement 3 questions à choix multiples.
+        EXIGENCES DE CONTENU :
+        - 4 à 6 sections par module, développées en profondeur (explications, exemples concrets, cas pratiques), sans limite de longueur.
+        - Chaque affirmation sur produits, prix, garanties ou règles provient de la BASE DE CONNAISSANCES ; n'invente rien.
+        - Un seul quiz avec exactement 5 questions à choix multiples (4 options chacune) avec explication de la bonne réponse.
 
         Réponds en JSON valide uniquement, sans markdown ni texte hors JSON. Racine : { "module": { ... } }.
         Le champ "module" doit inclure : id (nombre), title (string, le titre exact du module ci-dessous), duration (minutes, nombre),
         description, learningObjectives (tableau), sections (tableau d'objets avec title, content, type "text", duration, imageDescription),
-        quizzes (tableau d'un objet avec title et questions : question, options (3 choix), correctAnswer (index 0-based), explanation),
+        quizzes (tableau d'un objet avec title et questions : question, options (4 choix), correctAnswer (index 0-based), explanation),
         imageDescription (string).
 
         Module à détailler :
