@@ -1,5 +1,6 @@
 import axios from 'axios';
 import mongoose from 'mongoose';
+import jwt from 'jsonwebtoken';
 
 /** Marqueur interne pour identifier le module script (exigence certification / cockpit). */
 export const SCRIPT_REQUIREMENT_MARKER = '__harx_script_requirement__';
@@ -27,6 +28,16 @@ function knowledgeBaseApiRoot(): string | null {
   return base.endsWith('/api') ? base : `${base}/api`;
 }
 
+/**
+ * Jeton de service court (portée « kb-read »), signé avec le secret partagé JWT_SECRET : le service de
+ * connaissance exige un jeton sur toutes ses routes. Sans JWT_SECRET, aucun jeton (pas de secret de repli).
+ */
+export function knowledgeReadHeaders(): Record<string, string> {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) return {};
+  return { Authorization: `Bearer ${jwt.sign({ scope: 'kb-read' }, secret, { expiresIn: '2m' })}` };
+}
+
 async function fetchActiveScriptForGig(gigId: string): Promise<GigScript | null> {
   const api = knowledgeBaseApiRoot();
   if (!api) {
@@ -35,7 +46,10 @@ async function fetchActiveScriptForGig(gigId: string): Promise<GigScript | null>
   }
 
   try {
-    const res = await axios.get(`${api}/scripts/gig/${encodeURIComponent(gigId)}`, { timeout: 15000 });
+    const res = await axios.get(`${api}/scripts/gig/${encodeURIComponent(gigId)}`, {
+      timeout: 15000,
+      headers: knowledgeReadHeaders(),
+    });
     const scripts: GigScript[] = Array.isArray(res.data?.data) ? res.data.data : [];
     if (scripts.length === 0) return null;
     return scripts.find((s) => s.isActive !== false) || scripts[0];
